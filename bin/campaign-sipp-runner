@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Run one frozen campaign step using SIPp or sipsak."""
+
+import json
+import subprocess
+import sys
+
+
+def main() -> int:
+    envelope = json.loads(sys.stdin.readline())
+    step = envelope["step"]
+    credentials = envelope.get("credentials", {})
+    if credentials:
+        print(
+            "campaign-sipp-runner: authenticated SIP is unavailable without "
+            "placing a secret in SIPp argv",
+            file=sys.stderr,
+        )
+        return 2
+    destination = step["destination"]
+    address = destination["addresses"][0]
+    host = f"[{address}]" if ":" in address else address
+    port = destination["port"]
+    transport = destination["transport"]
+    timeout = f"{step['budget']['durationSeconds']}s"
+    if step["type"] == "options":
+        command = [
+            "sipsak",
+            "--transport",
+            transport,
+            "-s",
+            f"sip:{host}:{port}",
+        ]
+    else:
+        transport_flag = {"udp": "u1", "tcp": "t1", "tls": "l1"}[transport]
+        command = [
+            "sipp",
+            f"{host}:{port}",
+            "-sn",
+            "uac",
+            "-m",
+            "1",
+            "-timeout",
+            timeout,
+            "-nostdin",
+            "-t",
+            transport_flag,
+        ]
+    return subprocess.run(command, stdin=subprocess.DEVNULL, check=False).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

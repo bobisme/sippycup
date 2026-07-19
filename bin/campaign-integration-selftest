@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+base="${1:-/work/campaign-selftest}"
+root="${base}-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
+mkdir -m 0700 "${root}"
+
+campaign-loopback-uas 5099 >"${root}/uas.log" 2>&1 &
+uas_pid=$!
+trap 'kill "${uas_pid}" 2>/dev/null || true' EXIT
+
+sleep 0.2
+cat >"${root}/manifest.yaml" <<'YAML'
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata: {name: loopback-call}
+authorization:
+  networks: [127.0.0.0/8]
+  signalingPorts: [5099]
+  mediaPorts: {start: 10000, end: 10020}
+  transports: [udp]
+  credentialRefs: []
+  ceilings:
+    calls: 1
+    packets: 100
+    bytes: 100000
+    durationSeconds: 30
+    concurrentCalls: 1
+    packetsPerSecond: 20
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: loopback
+    address: 127.0.0.1
+    signaling: {transport: udp, port: 5099}
+cases:
+  - id: one-call
+    type: call
+    target: loopback
+    count: 1
+    budget:
+      packetsPerRun: 50
+      bytesPerRun: 50000
+      durationSecondsPerRun: 20
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+expectations:
+  allowedSipStatuses: [100, 180, 200]
+  requireBidirectionalRtp: false
+evidence:
+  capture: true
+  retainPayload: false
+  directory: evidence/loopback
+YAML
+
+campaign plan "${root}/manifest.yaml" --output "${root}/plan.json"
+run_dir="$(
+    campaign run "${root}/plan.json" \
+        --manifest "${root}/manifest.yaml" \
+        --run-root "${root}/runs" \
+        --interface lo
+)"
+
+jq -e '.state == "succeeded" and .completedSteps == 1' \
+    "${run_dir}/result.json" >/dev/null
+test -s "${run_dir}/capture.pcap"
+test -s "${run_dir}/report.txt"
+test -s "${run_dir}/events.jsonl"
+sip_packets="$(
+    tshark -r "${run_dir}/capture.pcap" -Y sip -T fields -e frame.number 2>/dev/null \
+        | wc -l
+)"
+if (( sip_packets < 6 )); then
+    printf 'expected at least 6 captured SIP packets, got %s\n' "${sip_packets}" >&2
+    exit 1
+fi
+printf 'campaign integration self-test passed: %s\n' "${run_dir}"

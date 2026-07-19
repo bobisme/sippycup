@@ -1,0 +1,33 @@
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata: {name: missing-ceiling}
+authorization:
+  networks: [10.0.0.0/8]
+  signalingPorts: [5060]
+  mediaPorts: {start: 10000, end: 10010}
+  transports: [udp]
+  ceilings:
+    calls: 1
+    packets: 10
+    bytes: 1000
+    durationSeconds: 10
+    concurrentCalls: 1
+    packetsPerSecond: 10
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 1
+targets:
+  - name: voice
+    address: 10.0.0.1
+    signaling: {transport: udp, port: 5060}
+cases:
+  - id: check
+    type: options
+    target: voice
+    count: 1
+    budget: {packetsPerRun: 2, bytesPerRun: 200, durationSecondsPerRun: 1}
+expectations:
+  allowedSipStatuses: [200]
+  requireBidirectionalRtp: false
+evidence: {capture: true, retainPayload: false, directory: evidence}

@@ -1,0 +1,7 @@
+[
+  ["campaign.started", "running"],
+  ["step.started", "running"],
+  ["step.output", "running"],
+  ["step.succeeded", "succeeded"],
+  ["campaign.succeeded", "succeeded"]
+]

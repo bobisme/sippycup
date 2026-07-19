@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/events-v1.schema.json",
+  "title": "Sippycup campaign event v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["apiVersion", "sequence", "timeUnixNs", "campaign", "event", "state"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/events/v1"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "timeUnixNs": {"type": "integer", "minimum": 0},
+    "campaign": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+    "event": {
+      "enum": [
+        "campaign.started", "campaign.stop_requested", "campaign.succeeded",
+        "campaign.failed", "campaign.timed_out", "campaign.cancelled",
+        "step.started", "step.output", "step.output_truncated",
+        "step.start_failed", "step.succeeded", "step.failed",
+        "step.timed_out", "step.cancelled"
+      ]
+    },
+    "state": {
+      "enum": ["running", "stopping", "succeeded", "failed", "timed_out", "cancelled"]
+    },
+    "step": {"type": "integer", "minimum": 1},
+    "completedSteps": {"type": "integer", "minimum": 0},
+    "stepCount": {"type": "integer", "minimum": 1},
+    "manifestSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "case": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+    "sequenceInCase": {"type": "integer", "minimum": 1},
+    "stream": {"enum": ["stdout", "stderr"]},
+    "text": {"type": "string"},
+    "retainedBytes": {"type": "integer", "minimum": 0},
+    "droppedBytes": {"type": "integer", "minimum": 1},
+    "exitCode": {"type": "integer"},
+    "error": {"type": "string", "minLength": 1},
+    "signal": {"enum": ["SIGINT", "SIGTERM"]},
+    "reason": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {"properties": {"event": {"const": "campaign.started"}, "state": {"const": "running"}}, "required": ["manifestSha256", "stepCount"]},
+        {"properties": {"event": {"const": "campaign.stop_requested"}, "state": {"const": "stopping"}}, "required": ["reason", "step"]},
+        {"properties": {"event": {"const": "campaign.succeeded"}, "state": {"const": "succeeded"}}, "required": ["completedSteps"]},
+        {"properties": {"event": {"const": "campaign.failed"}, "state": {"const": "failed"}}, "required": ["completedSteps"]},
+        {"properties": {"event": {"const": "campaign.timed_out"}, "state": {"const": "timed_out"}}, "required": ["completedSteps"]},
+        {"properties": {"event": {"const": "campaign.cancelled"}, "state": {"const": "cancelled"}}, "required": ["completedSteps", "signal"]},
+        {"properties": {"event": {"const": "step.started"}, "state": {"const": "running"}}, "required": ["step", "case", "sequenceInCase"]},
+        {"properties": {"event": {"const": "step.output"}, "state": {"const": "running"}}, "required": ["step", "stream", "text"]},
+        {"properties": {"event": {"const": "step.output_truncated"}, "state": {"const": "running"}}, "required": ["step", "retainedBytes", "droppedBytes"]},
+        {"properties": {"event": {"const": "step.start_failed"}, "state": {"const": "failed"}}, "required": ["step", "error"]},
+        {"properties": {"event": {"const": "step.succeeded"}, "state": {"const": "succeeded"}}, "required": ["step"]},
+        {"properties": {"event": {"const": "step.failed"}, "state": {"const": "failed"}}, "required": ["step", "exitCode"]},
+        {"properties": {"event": {"const": "step.timed_out"}, "state": {"const": "timed_out"}}, "required": ["step"]},
+        {"properties": {"event": {"const": "step.cancelled"}, "state": {"const": "cancelled"}}, "required": ["step"]}
+      ]
+    }
+  ]
+}

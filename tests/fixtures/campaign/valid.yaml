@@ -1,0 +1,57 @@
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata:
+  name: baseline-call
+authorization:
+  networks: [10.20.30.0/24]
+  signalingPorts: [5060]
+  mediaPorts: {start: 10000, end: 10020}
+  transports: [udp]
+  credentialRefs: [staging-user]
+  ceilings:
+    calls: 2
+    packets: 100
+    bytes: 100000
+    durationSeconds: 30
+    concurrentCalls: 1
+    packetsPerSecond: 20
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: voice
+    address: voice.test
+    signaling: {transport: udp, port: 5060}
+    credentialRef: staging-user
+cases:
+  - id: sip-options
+    type: options
+    target: voice
+    count: 1
+    budget:
+      packetsPerRun: 4
+      bytesPerRun: 4096
+      durationSecondsPerRun: 3
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+  - id: one-call
+    type: call
+    target: voice
+    count: 1
+    budget:
+      packetsPerRun: 50
+      bytesPerRun: 50000
+      durationSecondsPerRun: 20
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+expectations:
+  allowedSipStatuses: [100, 180, 200]
+  requireBidirectionalRtp: true
+evidence:
+  capture: true
+  retainPayload: false
+  directory: evidence/baseline-call

@@ -1,0 +1,443 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://sippycup.dev/schemas/campaign-v1.schema.yaml
+title: Sippycup campaign manifest v1
+type: object
+additionalProperties: false
+required: [apiVersion, kind, metadata, authorization, targets, cases, expectations, evidence]
+properties:
+  apiVersion:
+    const: sippycup.dev/v1
+  kind:
+    const: Campaign
+  metadata:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name:
+        type: string
+        pattern: '^[a-z][a-z0-9-]{0,62}$'
+  authorization:
+    type: object
+    additionalProperties: false
+    required:
+      - networks
+      - signalingPorts
+      - mediaPorts
+      - transports
+      - ceilings
+      - stopConditions
+    properties:
+      networks:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {type: string}
+      signalingPorts:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {type: integer, minimum: 1, maximum: 65535}
+      mediaPorts:
+        type: object
+        additionalProperties: false
+        required: [start, end]
+        properties:
+          start: {type: integer, minimum: 1, maximum: 65535}
+          end: {type: integer, minimum: 1, maximum: 65535}
+      transports:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {enum: [udp, tcp, tls]}
+      credentialRefs:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+      ceilings:
+        type: object
+        additionalProperties: false
+        required:
+          - calls
+          - packets
+          - bytes
+          - durationSeconds
+          - concurrentCalls
+          - packetsPerSecond
+          - callsPerSecond
+        properties:
+          calls: {$ref: '#/$defs/positiveU64'}
+          packets: {$ref: '#/$defs/positiveU64'}
+          bytes: {$ref: '#/$defs/positiveU64'}
+          durationSeconds: {$ref: '#/$defs/positiveU64'}
+          concurrentCalls: {$ref: '#/$defs/positiveU64'}
+          packetsPerSecond: {$ref: '#/$defs/positiveU64'}
+          callsPerSecond: {$ref: '#/$defs/positiveU64'}
+      stopConditions:
+        type: object
+        additionalProperties: false
+        required: [consecutiveFailures, unexpectedResponse, packetLossPercent]
+        properties:
+          consecutiveFailures: {$ref: '#/$defs/positiveU64'}
+          unexpectedResponse: {type: boolean}
+          packetLossPercent: {type: number, minimum: 0, maximum: 100}
+  targets:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, address, signaling]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+        address: {type: string, minLength: 1}
+        signaling:
+          type: object
+          additionalProperties: false
+          required: [transport, port]
+          properties:
+            transport: {enum: [udp, tcp, tls]}
+            port: {type: integer, minimum: 1, maximum: 65535}
+        credentialRef:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+  cases:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, type, target, count, budget]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+        type: {enum: [options, call]}
+        target:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+        count: {$ref: '#/$defs/positiveU64'}
+        budget:
+          type: object
+          additionalProperties: false
+          required: [packetsPerRun, bytesPerRun, durationSecondsPerRun]
+          properties:
+            packetsPerRun: {$ref: '#/$defs/positiveU64'}
+            bytesPerRun: {$ref: '#/$defs/positiveU64'}
+            durationSecondsPerRun: {$ref: '#/$defs/positiveU64'}
+        expectations:
+          type: object
+          additionalProperties: false
+          required: [apiVersion]
+          properties:
+            apiVersion: {const: sippycup.dev/case-expectations/v1}
+            finalStatus: {type: integer, minimum: 200, maximum: 699}
+            allowedProvisionalStatuses:
+              type: array
+              uniqueItems: true
+              items: {type: integer, minimum: 100, maximum: 199}
+            requireBidirectionalRtp: {type: boolean}
+            maxSetupSeconds: {$ref: '#/$defs/positiveU64'}
+        generated:
+          $ref: '#/$defs/generatedCase'
+  matrix:
+    $ref: '#/$defs/matrix'
+  expectations:
+    type: object
+    additionalProperties: false
+    required: [allowedSipStatuses, requireBidirectionalRtp]
+    properties:
+      allowedSipStatuses:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {type: integer, minimum: 100, maximum: 699}
+      requireBidirectionalRtp: {type: boolean}
+  evidence:
+    type: object
+    additionalProperties: false
+    required: [capture, retainPayload, directory]
+    properties:
+      capture: {type: boolean}
+      retainPayload: {type: boolean}
+      directory: {type: string, minLength: 1}
+$defs:
+  positiveU64:
+    type: integer
+    minimum: 1
+    maximum: 18446744073709551615
+  matrix:
+    type: object
+    additionalProperties: false
+    required: [factors, constraints, mandatoryCases, riskWeights]
+    properties:
+      factors:
+        type: object
+        additionalProperties: false
+        required:
+          - transport
+          - addressFamily
+          - codec
+          - ptime
+          - mediaProtection
+          - dtmf
+          - earlyMedia
+          - holdReinvite
+          - teardownInitiator
+          - duration
+          - nat
+          - impairment
+        properties:
+          transport: {$ref: '#/$defs/transportDomain'}
+          addressFamily: {$ref: '#/$defs/addressFamilyDomain'}
+          codec: {$ref: '#/$defs/codecDomain'}
+          ptime: {$ref: '#/$defs/ptimeDomain'}
+          mediaProtection: {$ref: '#/$defs/mediaProtectionDomain'}
+          dtmf: {$ref: '#/$defs/dtmfDomain'}
+          earlyMedia: {$ref: '#/$defs/earlyMediaDomain'}
+          holdReinvite: {$ref: '#/$defs/holdReinviteDomain'}
+          teardownInitiator: {$ref: '#/$defs/teardownInitiatorDomain'}
+          duration: {$ref: '#/$defs/durationDomain'}
+          nat: {$ref: '#/$defs/natDomain'}
+          impairment: {$ref: '#/$defs/impairmentDomain'}
+      constraints:
+        type: array
+        items: {$ref: '#/$defs/matrixConstraint'}
+      mandatoryCases:
+        type: array
+        items: {$ref: '#/$defs/mandatoryCase'}
+      interactionStrength:
+        type: integer
+        minimum: 1
+        maximum: 12
+      riskWeights:
+        type: array
+        items: {$ref: '#/$defs/riskWeight'}
+  finiteDomain:
+    type: array
+    minItems: 1
+    maxItems: 32
+    uniqueItems: true
+  transportDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [udp, tcp, tls]}
+  addressFamilyDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [ipv4, ipv6]}
+  codecDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [pcmu, pcma, g722, opus]}
+  ptimeDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [10, 20, 30, 40, 60]}
+  mediaProtectionDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [plain, sdes-srtp, dtls-srtp]}
+  dtmfDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [rfc4733, sip-info, inband, none]}
+  earlyMediaDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [disabled, 183-sdp, reliable]}
+  holdReinviteDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [disabled, sendonly, inactive]}
+  teardownInitiatorDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [caller, callee, timeout]}
+  durationDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {type: integer, minimum: 1, maximum: 3600}
+  natDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [none, endpoint-nat, symmetric-nat]}
+  impairmentDomain:
+    allOf:
+      - {$ref: '#/$defs/finiteDomain'}
+      - items: {enum: [none, loss, jitter, latency, reorder, duplicate]}
+  matrixPredicate:
+    type: object
+    minProperties: 1
+    additionalProperties: false
+    properties:
+      transport: {$ref: '#/$defs/transportSelection'}
+      addressFamily: {$ref: '#/$defs/addressFamilySelection'}
+      codec: {$ref: '#/$defs/codecSelection'}
+      ptime: {$ref: '#/$defs/ptimeSelection'}
+      mediaProtection: {$ref: '#/$defs/mediaProtectionSelection'}
+      dtmf: {$ref: '#/$defs/dtmfSelection'}
+      earlyMedia: {$ref: '#/$defs/earlyMediaSelection'}
+      holdReinvite: {$ref: '#/$defs/holdReinviteSelection'}
+      teardownInitiator: {$ref: '#/$defs/teardownInitiatorSelection'}
+      duration: {$ref: '#/$defs/durationSelection'}
+      nat: {$ref: '#/$defs/natSelection'}
+      impairment: {$ref: '#/$defs/impairmentSelection'}
+  transportSelection:
+    oneOf:
+      - {enum: [udp, tcp, tls]}
+      - {$ref: '#/$defs/transportDomain'}
+  addressFamilySelection:
+    oneOf:
+      - {enum: [ipv4, ipv6]}
+      - {$ref: '#/$defs/addressFamilyDomain'}
+  codecSelection:
+    oneOf:
+      - {enum: [pcmu, pcma, g722, opus]}
+      - {$ref: '#/$defs/codecDomain'}
+  ptimeSelection:
+    oneOf:
+      - {enum: [10, 20, 30, 40, 60]}
+      - {$ref: '#/$defs/ptimeDomain'}
+  mediaProtectionSelection:
+    oneOf:
+      - {enum: [plain, sdes-srtp, dtls-srtp]}
+      - {$ref: '#/$defs/mediaProtectionDomain'}
+  dtmfSelection:
+    oneOf:
+      - {enum: [rfc4733, sip-info, inband, none]}
+      - {$ref: '#/$defs/dtmfDomain'}
+  earlyMediaSelection:
+    oneOf:
+      - {enum: [disabled, 183-sdp, reliable]}
+      - {$ref: '#/$defs/earlyMediaDomain'}
+  holdReinviteSelection:
+    oneOf:
+      - {enum: [disabled, sendonly, inactive]}
+      - {$ref: '#/$defs/holdReinviteDomain'}
+  teardownInitiatorSelection:
+    oneOf:
+      - {enum: [caller, callee, timeout]}
+      - {$ref: '#/$defs/teardownInitiatorDomain'}
+  durationSelection:
+    oneOf:
+      - {type: integer, minimum: 1, maximum: 3600}
+      - {$ref: '#/$defs/durationDomain'}
+  natSelection:
+    oneOf:
+      - {enum: [none, endpoint-nat, symmetric-nat]}
+      - {$ref: '#/$defs/natDomain'}
+  impairmentSelection:
+    oneOf:
+      - {enum: [none, loss, jitter, latency, reorder, duplicate]}
+      - {$ref: '#/$defs/impairmentDomain'}
+  matrixConstraint:
+    type: object
+    additionalProperties: false
+    required: [id]
+    properties:
+      id:
+        type: string
+        pattern: '^[a-z][a-z0-9-]{0,62}$'
+      require: {$ref: '#/$defs/matrixPredicate'}
+      exclude: {$ref: '#/$defs/matrixPredicate'}
+      if: {$ref: '#/$defs/matrixPredicate'}
+      then: {$ref: '#/$defs/matrixPredicate'}
+      rationale: {type: string, minLength: 1}
+    oneOf:
+      - required: [require]
+      - required: [exclude]
+      - required: [if, then]
+  completeAssignment:
+    type: object
+    additionalProperties: false
+    required:
+      - transport
+      - addressFamily
+      - codec
+      - ptime
+      - mediaProtection
+      - dtmf
+      - earlyMedia
+      - holdReinvite
+      - teardownInitiator
+      - duration
+      - nat
+      - impairment
+    properties:
+      transport: {enum: [udp, tcp, tls]}
+      addressFamily: {enum: [ipv4, ipv6]}
+      codec: {enum: [pcmu, pcma, g722, opus]}
+      ptime: {enum: [10, 20, 30, 40, 60]}
+      mediaProtection: {enum: [plain, sdes-srtp, dtls-srtp]}
+      dtmf: {enum: [rfc4733, sip-info, inband, none]}
+      earlyMedia: {enum: [disabled, 183-sdp, reliable]}
+      holdReinvite: {enum: [disabled, sendonly, inactive]}
+      teardownInitiator: {enum: [caller, callee, timeout]}
+      duration: {type: integer, minimum: 1, maximum: 3600}
+      nat: {enum: [none, endpoint-nat, symmetric-nat]}
+      impairment: {enum: [none, loss, jitter, latency, reorder, duplicate]}
+  mandatoryCase:
+    type: object
+    additionalProperties: false
+    required: [id, values]
+    properties:
+      id:
+        type: string
+        pattern: '^[a-z][a-z0-9-]{0,62}$'
+      values: {$ref: '#/$defs/completeAssignment'}
+      rationale: {type: string, minLength: 1}
+  riskWeight:
+    type: object
+    additionalProperties: false
+    required: [id, when, weight, rationale]
+    properties:
+      id:
+        type: string
+        pattern: '^[a-z][a-z0-9-]{0,62}$'
+      when: {$ref: '#/$defs/matrixPredicate'}
+      weight: {$ref: '#/$defs/positiveU64'}
+      rationale: {type: string, minLength: 1}
+      coveringFactors:
+        type: array
+        minItems: 1
+        maxItems: 12
+        uniqueItems: true
+        items:
+          enum:
+            - transport
+            - addressFamily
+            - codec
+            - ptime
+            - mediaProtection
+            - dtmf
+            - earlyMedia
+            - holdReinvite
+            - teardownInitiator
+            - duration
+            - nat
+            - impairment
+      interactionStrength:
+        type: integer
+        minimum: 2
+        maximum: 12
+    dependentRequired:
+      coveringFactors: [interactionStrength]
+      interactionStrength: [coveringFactors]
+  generatedCase:
+    type: object
+    additionalProperties: false
+    required: [row, sequence, factors, actions]
+    properties:
+      row: {$ref: '#/$defs/positiveU64'}
+      sequence: {$ref: '#/$defs/positiveU64'}
+      factors: {$ref: '#/$defs/completeAssignment'}
+      actions:
+        type: array
+        minItems: 1
+        items:
+          enum: [dtmf, hold, resume, reinvite, failure, recover, hangup]
