@@ -1,0 +1,24 @@
+{
+  "apiVersion": "sippycup.dev/envelope-policy/v1",
+  "ownerApprovalRequired": true,
+  "staleAfterMs": 1000,
+  "baselineSamples": 2,
+  "metrics": {
+    "call.setupP95Ms": {
+      "direction": "max",
+      "soft": 200,
+      "hard": 500,
+      "consecutive": 2,
+      "changeDelta": 100,
+      "required": true
+    },
+    "call.timeoutRatePercent": {
+      "direction": "max",
+      "soft": 1,
+      "hard": 5,
+      "consecutive": 2,
+      "changeDelta": 1,
+      "required": true
+    }
+  }
+}

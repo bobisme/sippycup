@@ -1,0 +1,23 @@
+apiVersion: sippycup.dev/envelope/v1
+kind: Envelope
+metadata:
+  name: ferivox-safe-ramp
+authorization:
+  hardMaxima:
+    callsPerSecond: 8
+    concurrentCalls: 40
+    mediaPacketsPerSecond: 2000
+    totalCalls: 1000
+    durationSeconds: 600
+    holdSeconds: 20
+    cooldownSeconds: 30
+    recoveryDeadlineSeconds: 120
+workload:
+  callsPerSecond: 1
+  concurrentCalls: 5
+  mediaPacketsPerSecond: 250
+  callDurationSeconds: 10
+ramp:
+  dimension: callsPerSecond
+  start: 1
+  step: 1

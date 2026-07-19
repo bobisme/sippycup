@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/envelope-v1.schema.json",
+  "title": "Sippycup immutable envelope authorization",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "authorization",
+    "workload",
+    "ramp"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/envelope/v1"},
+    "kind": {"const": "Envelope"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,62}$"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hardMaxima"],
+      "properties": {
+        "hardMaxima": {"$ref": "#/$defs/maxima"}
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callsPerSecond",
+        "concurrentCalls",
+        "mediaPacketsPerSecond",
+        "callDurationSeconds"
+      ],
+      "properties": {
+        "callsPerSecond": {"$ref": "#/$defs/positiveU64"},
+        "concurrentCalls": {"$ref": "#/$defs/positiveU64"},
+        "mediaPacketsPerSecond": {"$ref": "#/$defs/positiveU64"},
+        "callDurationSeconds": {"$ref": "#/$defs/positiveU64"}
+      }
+    },
+    "ramp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimension", "start", "step"],
+      "properties": {
+        "dimension": {
+          "enum": [
+            "callsPerSecond",
+            "concurrentCalls",
+            "mediaPacketsPerSecond"
+          ]
+        },
+        "start": {"$ref": "#/$defs/positiveU64"},
+        "step": {"$ref": "#/$defs/positiveU64"}
+      }
+    }
+  },
+  "$defs": {
+    "positiveU64": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "maxima": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callsPerSecond",
+        "concurrentCalls",
+        "mediaPacketsPerSecond",
+        "totalCalls",
+        "durationSeconds",
+        "holdSeconds",
+        "cooldownSeconds",
+        "recoveryDeadlineSeconds"
+      ],
+      "properties": {
+        "callsPerSecond": {"$ref": "#/$defs/positiveU64"},
+        "concurrentCalls": {"$ref": "#/$defs/positiveU64"},
+        "mediaPacketsPerSecond": {"$ref": "#/$defs/positiveU64"},
+        "totalCalls": {"$ref": "#/$defs/positiveU64"},
+        "durationSeconds": {"$ref": "#/$defs/positiveU64"},
+        "holdSeconds": {"$ref": "#/$defs/positiveU64"},
+        "cooldownSeconds": {"$ref": "#/$defs/positiveU64"},
+        "recoveryDeadlineSeconds": {"$ref": "#/$defs/positiveU64"}
+      }
+    }
+  }
+}
