@@ -91,6 +91,22 @@ def make_run(root: Path, *, sensitive: bool = False, complete: bool = True) -> N
 
 
 class EvidenceManifestTests(unittest.TestCase):
+    def test_assessment_journal_is_confidential_operator_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            make_run(root)
+            (root / "journal.jsonl").write_text(
+                '{"kind":"observation","summary":"private working note"}\n'
+            )
+            manifest = build_evidence_manifest(root)
+            journal = next(
+                item
+                for item in manifest["artifacts"]
+                if item["path"] == "journal.jsonl"
+            )
+            self.assertEqual(journal["provenance"], "operator-journal")
+            self.assertEqual(journal["sensitivity"], "confidential")
+
     def test_manifest_is_deterministic_and_never_modifies_sources(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

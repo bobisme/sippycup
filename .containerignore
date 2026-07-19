@@ -5,6 +5,8 @@
 work
 work/**
 config/target.env
+config/*.yaml
+config/*.yml
 **/__pycache__
 **/__pycache__/**
 **/*.pyc

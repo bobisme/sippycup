@@ -1,0 +1,27 @@
+schema_version: sippycup.dev/target-profile/v1
+name: ferivox-staging
+target:
+  host: staging.example.invalid
+  port: 5060
+  transport: udp
+  approved_addresses: []
+authorization:
+  status: pending
+  approved_by: Quad
+  approval_id: ''
+  valid_from: null
+  valid_until: null
+limits:
+  max_calls: 1
+  max_concurrency: 1
+  max_calls_per_second: 1
+  max_duration_seconds: 120
+capture:
+  interface: any
+  output: work/call.pcap
+features:
+  ice: false
+  turn: false
+  srtp: false
+  dtls_srtp: false
+  webrtc: false

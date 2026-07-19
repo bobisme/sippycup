@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/engagement-v1.schema.json",
+  "title": "Sippycup assessment engagement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "title",
+    "owner",
+    "createdAt",
+    "confidentiality",
+    "journal"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/engagement/v1"},
+    "kind": {"const": "AssessmentEngagement"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "owner": {"type": "string", "minLength": 1, "maxLength": 200},
+    "createdAt": {"type": "string", "minLength": 1, "maxLength": 64},
+    "confidentiality": {"const": "private"},
+    "journal": {"const": "journal.jsonl"}
+  }
+}

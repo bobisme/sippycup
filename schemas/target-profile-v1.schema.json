@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/target-profile-v1.schema.json",
+  "title": "Sippycup target profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "target",
+    "authorization",
+    "limits",
+    "capture",
+    "features"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sippycup.dev/target-profile/v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "transport", "approved_addresses"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1, "maxLength": 253},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "transport": {"enum": ["udp", "tcp", "tls"]},
+        "approved_addresses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "approved_by",
+        "approval_id",
+        "valid_from",
+        "valid_until"
+      ],
+      "properties": {
+        "status": {"enum": ["pending", "approved", "revoked", "expired"]},
+        "approved_by": {"type": "string"},
+        "approval_id": {"type": "string"},
+        "valid_from": {"type": ["string", "null"], "format": "date-time"},
+        "valid_until": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_calls",
+        "max_concurrency",
+        "max_calls_per_second",
+        "max_duration_seconds"
+      ],
+      "properties": {
+        "max_calls": {"type": "integer", "minimum": 1},
+        "max_concurrency": {"type": "integer", "minimum": 1},
+        "max_calls_per_second": {"type": "integer", "minimum": 1},
+        "max_duration_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interface", "output"],
+      "properties": {
+        "interface": {"type": "string", "minLength": 1},
+        "output": {"type": "string", "minLength": 1}
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ice", "turn", "srtp", "dtls_srtp", "webrtc"],
+      "properties": {
+        "ice": {"type": "boolean"},
+        "turn": {"type": "boolean"},
+        "srtp": {"type": "boolean"},
+        "dtls_srtp": {"type": "boolean"},
+        "webrtc": {"type": "boolean"}
+      }
+    }
+  }
+}

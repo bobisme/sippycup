@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/engagement-status-v1.schema.json",
+  "title": "Sippycup offline engagement status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "overall",
+    "networkActivity",
+    "facts",
+    "blockers",
+    "warnings",
+    "nextActions"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/engagement-status/v1"},
+    "overall": {
+      "enum": ["setup-required", "blocked", "ready-for-human-review"]
+    },
+    "networkActivity": {"const": false},
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engagement", "journal", "profile", "torture"],
+      "properties": {
+        "engagement": {"type": "object"},
+        "journal": {"type": "object"},
+        "profile": {"type": "object"},
+        "torture": {"type": "object"},
+        "runs": {"type": "object"}
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "nextActions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "reason", "networkActivity"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1},
+          "networkActivity": {"const": false},
+          "argv": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          },
+          "instruction": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

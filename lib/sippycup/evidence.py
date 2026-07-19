@@ -76,6 +76,8 @@ def _provenance(relative: str) -> str:
     name = Path(relative).name
     if name == "notes.jsonl":
         return "operator-note"
+    if name == "journal.jsonl":
+        return "operator-journal"
     if Path(relative).suffix.lower() in CAPTURE_SUFFIXES:
         return "network-capture"
     if name.startswith("report") or name.startswith("assert") or name.startswith("stats"):
@@ -97,7 +99,7 @@ def _sensitivity(relative: str, data: bytes, retain_payload: bool) -> str:
         return "restricted"
     if suffix in CAPTURE_SUFFIXES:
         return "restricted" if retain_payload else "confidential"
-    if name == "notes.jsonl" or AUTHORIZATION.search(data) or CALL_ID.search(data):
+    if name in {"notes.jsonl", "journal.jsonl"} or AUTHORIZATION.search(data) or CALL_ID.search(data):
         return "confidential"
     if name in {"report.txt", "report.stderr", "preflight.json"}:
         return "confidential"
