@@ -1,0 +1,14 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: constrained-uplink
+  description: Rate-limited caller uplink with a bounded TBF queue.
+seed: 1005
+durationSeconds: 90
+direction: egress
+directions:
+  egress:
+    rate:
+      kbit: 128
+      burstBytes: 1600
+      latencyMilliseconds: 100

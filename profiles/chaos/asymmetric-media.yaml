@@ -1,0 +1,33 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: asymmetric-media
+  description: Constrained noisy caller path and a cleaner return path.
+seed: 1009
+durationSeconds: 120
+direction: asymmetric
+directions:
+  egress:
+    delay:
+      milliseconds: 90
+      jitterMilliseconds: 25
+      correlationPercent: 30
+      distribution: normal
+    loss:
+      model: random
+      percent: 2
+      correlationPercent: 20
+    queuePackets: 256
+    rate:
+      kbit: 96
+      burstBytes: 1600
+      latencyMilliseconds: 120
+  ingress:
+    delay:
+      milliseconds: 35
+      jitterMilliseconds: 8
+      correlationPercent: 10
+      distribution: normal
+    loss:
+      model: random
+      percent: 0.2

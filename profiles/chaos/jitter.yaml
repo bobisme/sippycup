@@ -1,0 +1,21 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: jitter
+  description: Correlated normally distributed delay variation.
+seed: 1003
+durationSeconds: 60
+direction: bidirectional
+directions:
+  egress:
+    delay:
+      milliseconds: 60
+      jitterMilliseconds: 20
+      correlationPercent: 25
+      distribution: normal
+  ingress:
+    delay:
+      milliseconds: 60
+      jitterMilliseconds: 20
+      correlationPercent: 25
+      distribution: normal

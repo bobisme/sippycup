@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/chaos-profile-v1.schema.json",
+  "title": "Sippycup reviewed chaos profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "seed", "durationSeconds", "direction", "directions"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/chaos-profile/v1"},
+    "kind": {"const": "ChaosProfile"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$"},
+        "description": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    },
+    "seed": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+    "durationSeconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "direction": {"enum": ["egress", "ingress", "bidirectional", "asymmetric"]},
+    "directions": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "egress": {"$ref": "#/$defs/impairment"},
+        "ingress": {"$ref": "#/$defs/impairment"}
+      }
+    }
+  },
+  "$defs": {
+    "percentEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["percent"],
+      "properties": {
+        "percent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+        "correlationPercent": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    },
+    "impairment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "delay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["milliseconds"],
+          "properties": {
+            "milliseconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60000},
+            "jitterMilliseconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60000},
+            "correlationPercent": {"type": "number", "minimum": 0, "maximum": 100},
+            "distribution": {"enum": ["uniform", "normal", "pareto", "paretonormal"]}
+          }
+        },
+        "loss": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "percent"],
+              "properties": {
+                "model": {"const": "random"},
+                "percent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                "correlationPercent": {"type": "number", "minimum": 0, "maximum": 100}
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["model", "startPercent", "recoveryPercent", "badLossPercent", "goodLossPercent"],
+              "properties": {
+                "model": {"const": "gemodel"},
+                "startPercent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                "recoveryPercent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                "badLossPercent": {"type": "number", "minimum": 0, "maximum": 100},
+                "goodLossPercent": {"type": "number", "minimum": 0, "maximum": 100}
+              }
+            }
+          ]
+        },
+        "reorder": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["percent"],
+          "properties": {
+            "percent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+            "correlationPercent": {"type": "number", "minimum": 0, "maximum": 100},
+            "gap": {"type": "integer", "minimum": 1, "maximum": 1000000}
+          }
+        },
+        "duplicate": {"$ref": "#/$defs/percentEffect"},
+        "corrupt": {"$ref": "#/$defs/percentEffect"},
+        "queuePackets": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "rate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kbit", "burstBytes"],
+          "properties": {
+            "kbit": {"type": "integer", "minimum": 8, "maximum": 10000000},
+            "burstBytes": {"type": "integer", "minimum": 256, "maximum": 16777216},
+            "latencyMilliseconds": {"type": "integer", "minimum": 1, "maximum": 60000},
+            "limitBytes": {"type": "integer", "minimum": 256, "maximum": 1073741824}
+          },
+          "oneOf": [
+            {"required": ["latencyMilliseconds"], "not": {"required": ["limitBytes"]}},
+            {"required": ["limitBytes"], "not": {"required": ["latencyMilliseconds"]}}
+          ]
+        },
+        "mtu": {"type": "integer", "minimum": 1280, "maximum": 9000}
+      }
+    }
+  }
+}

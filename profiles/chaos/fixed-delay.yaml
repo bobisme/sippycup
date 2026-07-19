@@ -1,0 +1,15 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: fixed-delay
+  description: Symmetric fixed 80 ms one-way delay.
+seed: 1002
+durationSeconds: 60
+direction: bidirectional
+directions:
+  egress:
+    delay:
+      milliseconds: 80
+  ingress:
+    delay:
+      milliseconds: 80

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/chaos-run-report-v1.schema.json",
+  "title": "Sippycup owned chaos lifecycle report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "owner", "state", "exitCode", "error", "cleanup", "measurement", "events"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/chaos-run-report/v1"},
+    "kind": {"const": "ChaosRunReport"},
+    "owner": {"type": "string", "pattern": "^sippycup-[0-9a-f]{8}-[0-9a-f]{8}$"},
+    "state": {"enum": ["succeeded", "failed", "child_failed", "cancelled", "timed_out", "cleanup_failed"]},
+    "exitCode": {"type": "integer", "minimum": 0, "maximum": 255},
+    "error": {"type": ["string", "null"]},
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["restored", "snapshotSha256", "failures", "trafficStoppedBeforeTopologyTeardown"],
+      "properties": {
+        "restored": {"type": "boolean"},
+        "snapshotSha256": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
+        },
+        "failures": {"type": "array", "items": {"type": "string"}},
+        "trafficStoppedBeforeTopologyTeardown": {"type": "boolean"}
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "required": ["method", "directions", "allWithinTolerance"],
+      "properties": {
+        "method": {"type": "string"},
+        "directions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["direction", "status", "reason", "metrics"],
+            "properties": {
+              "direction": {"enum": ["egress", "ingress"]},
+              "status": {"enum": ["within_tolerance", "outside_tolerance", "insufficient_samples", "invalid_observation"]},
+              "reason": {"type": ["string", "null"]},
+              "metrics": {"type": ["object", "null"]}
+            }
+          }
+        },
+        "allWithinTolerance": {"type": "boolean"}
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sequence", "event"],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 1},
+          "event": {"type": "string"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: burst-loss
+  description: Gilbert-Elliott burst loss in both directions.
+seed: 1004
+durationSeconds: 90
+direction: bidirectional
+directions:
+  egress:
+    loss:
+      model: gemodel
+      startPercent: 2
+      recoveryPercent: 35
+      badLossPercent: 90
+      goodLossPercent: 0.1
+  ingress:
+    loss:
+      model: gemodel
+      startPercent: 2
+      recoveryPercent: 35
+      badLossPercent: 90
+      goodLossPercent: 0.1

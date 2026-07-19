@@ -1,0 +1,17 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: duplicate
+  description: Correlated duplicate packets.
+seed: 1007
+durationSeconds: 60
+direction: bidirectional
+directions:
+  egress:
+    duplicate:
+      percent: 2
+      correlationPercent: 10
+  ingress:
+    duplicate:
+      percent: 2
+      correlationPercent: 10

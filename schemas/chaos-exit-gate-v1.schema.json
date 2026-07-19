@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schema/chaos-exit-gate-v1.schema.json",
+  "title": "Sippycup real chaos exit-gate evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "capabilities",
+    "controllerSnapshotBefore",
+    "controllerSnapshotBeforeSha256",
+    "controllerSnapshotAfter",
+    "controllerSnapshotAfterSha256",
+    "controllerRestored",
+    "profiles",
+    "failures",
+    "passed"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/chaos-exit-gate/v1"},
+    "capabilities": {"type": "object"},
+    "controllerSnapshotBefore": {"type": "object"},
+    "controllerSnapshotBeforeSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "controllerSnapshotAfter": {"type": "object"},
+    "controllerSnapshotAfterSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "controllerRestored": {"type": "boolean"},
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "requested", "observed", "lifecycle", "passed", "failures"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "requested": {"type": "array"},
+          "observed": {"type": "object"},
+          "lifecycle": {"type": "object"},
+          "passed": {"type": "boolean"},
+          "failures": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "passed": {"type": "boolean"}
+    ,
+    "cancelledBy": {
+      "enum": ["SIGINT", "SIGTERM"]
+    }
+  }
+}

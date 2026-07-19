@@ -1,0 +1,11 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: clean
+  description: Control profile with no network impairment.
+seed: 1001
+durationSeconds: 60
+direction: bidirectional
+directions:
+  egress: {}
+  ingress: {}

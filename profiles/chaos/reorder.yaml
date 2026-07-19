@@ -1,0 +1,23 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: reorder
+  description: Delayed packets with correlated reordering.
+seed: 1006
+durationSeconds: 60
+direction: bidirectional
+directions:
+  egress:
+    delay:
+      milliseconds: 40
+    reorder:
+      percent: 4
+      correlationPercent: 20
+      gap: 5
+  ingress:
+    delay:
+      milliseconds: 40
+    reorder:
+      percent: 4
+      correlationPercent: 20
+      gap: 5

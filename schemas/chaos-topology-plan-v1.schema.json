@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/chaos-topology-plan-v1.schema.json",
+  "title": "Sippycup chaos topology no-change plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "noChange",
+    "dangerous",
+    "topology",
+    "direction",
+    "packetPath",
+    "namespaces",
+    "interfaces",
+    "attachments",
+    "ifbRequired",
+    "targetFilters",
+    "targetScopeSha256",
+    "capabilities",
+    "preMutationSnapshot",
+    "snapshotSha256",
+    "privilegeBoundary",
+    "mutationCommands",
+    "assumptions"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/chaos-topology-plan/v1"},
+    "kind": {"const": "ChaosTopologyPlan"},
+    "noChange": {"const": true},
+    "dangerous": {"type": "boolean"},
+    "topology": {
+      "enum": ["disposable-router", "dangerous-host-network"]
+    },
+    "direction": {
+      "enum": ["egress", "ingress", "bidirectional", "asymmetric"]
+    },
+    "packetPath": {"type": "object"},
+    "namespaces": {"type": "object"},
+    "interfaces": {"type": "object"},
+    "attachments": {"type": "object", "minProperties": 1},
+    "ifbRequired": {"type": "boolean"},
+    "targetFilters": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["direction", "family", "network", "tcProtocol", "match"],
+        "properties": {
+          "direction": {"enum": ["egress", "ingress"]},
+          "family": {"enum": ["ipv4", "ipv6"]},
+          "network": {"type": "string"},
+          "tcProtocol": {"enum": ["ip", "ipv6"]},
+          "match": {"type": "string"}
+        }
+      }
+    },
+    "targetScopeSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "capabilities": {"type": "object"},
+    "preMutationSnapshot": {"type": "object"},
+    "snapshotSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "privilegeBoundary": {"type": "string", "minLength": 1},
+    "mutationCommands": {"type": "array", "maxItems": 0},
+    "assumptions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

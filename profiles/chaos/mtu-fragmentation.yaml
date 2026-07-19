@@ -1,0 +1,13 @@
+apiVersion: sippycup.dev/chaos-profile/v1
+kind: ChaosProfile
+metadata:
+  name: mtu-fragmentation
+  description: Lower the dedicated run interfaces to the IPv6 minimum MTU.
+seed: 1008
+durationSeconds: 60
+direction: bidirectional
+directions:
+  egress:
+    mtu: 1280
+  ingress:
+    mtu: 1280

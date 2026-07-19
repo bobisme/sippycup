@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+readonly image="${SIPPYCUP_IMAGE:-localhost/sippycup:latest}"
+output="$(realpath -m -- "${1:-${project_dir}/work/chaos-exit-gate}")"
+readonly output
+
+if [[ -e "${output}" ]]; then
+    printf 'chaos exit gate: output already exists: %s\n' "${output}" >&2
+    exit 2
+fi
+mkdir -m 700 -- "${output}"
+
+ip -json route show table all | jq --sort-keys . > "${output}/host-routes-before-raw.json"
+jq 'walk(if type == "object" then del(.expires, .expires_ms, .used) else . end)' \
+    "${output}/host-routes-before-raw.json" > "${output}/host-routes-before.json"
+tc -json qdisc show | jq --sort-keys . > "${output}/host-qdiscs-before.json"
+ip -json link show | jq --sort-keys . > "${output}/host-links-before.json"
+
+heartbeat="${output}/host-loopback-heartbeat.txt"
+cidfile="${output}/container.cid"
+heartbeat_pid=""
+podman_pid=""
+
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    if [[ -n "${podman_pid}" ]]; then
+        if [[ -s "${cidfile}" ]]; then
+            podman stop --time 5 "$(cat -- "${cidfile}")" >/dev/null 2>&1 || true
+            podman rm --force "$(cat -- "${cidfile}")" >/dev/null 2>&1 || true
+        fi
+        kill -TERM "${podman_pid}" 2>/dev/null || true
+        wait "${podman_pid}" 2>/dev/null || true
+    fi
+    if [[ -n "${heartbeat_pid}" ]]; then
+        kill -INT "${heartbeat_pid}" 2>/dev/null || true
+        wait "${heartbeat_pid}" 2>/dev/null || true
+    fi
+    return "${status}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+ping -n -q -i 0.05 127.0.0.1 > "${heartbeat}" &
+heartbeat_pid=$!
+podman run --rm \
+    --cidfile="${cidfile}" \
+    --device=/dev/net/tun \
+    --cap-add=NET_RAW \
+    --cap-add=NET_BIND_SERVICE \
+    --cap-add=NET_ADMIN \
+    --cap-add=SYS_ADMIN \
+    --volume="${project_dir}:/repo:ro" \
+    --volume="${output}:/work" \
+    "${image}" \
+    python3 /repo/tools/chaos_exit_gate.py /work/evidence &
+podman_pid=$!
+set +e
+wait "${podman_pid}"
+container_status=$?
+set -e
+podman_pid=""
+kill -INT "${heartbeat_pid}" 2>/dev/null || true
+wait "${heartbeat_pid}" 2>/dev/null || true
+heartbeat_pid=""
+
+ip -json route show table all | jq --sort-keys . > "${output}/host-routes-after-raw.json"
+jq 'walk(if type == "object" then del(.expires, .expires_ms, .used) else . end)' \
+    "${output}/host-routes-after-raw.json" > "${output}/host-routes-after.json"
+tc -json qdisc show | jq --sort-keys . > "${output}/host-qdiscs-after.json"
+ip -json link show | jq --sort-keys . > "${output}/host-links-after.json"
+
+gate_status="${container_status}"
+if ! cmp -s "${output}/host-routes-before.json" "${output}/host-routes-after.json"; then
+    printf 'FAIL host routes changed\n' >&2
+    gate_status=1
+fi
+if ! cmp -s "${output}/host-qdiscs-before.json" "${output}/host-qdiscs-after.json"; then
+    printf 'FAIL host qdiscs changed\n' >&2
+    gate_status=1
+fi
+if ! grep -Eq ' 0% packet loss' "${heartbeat}"; then
+    printf 'FAIL unrelated host loopback traffic was not clean\n' >&2
+    gate_status=1
+fi
+if (( gate_status == 0 )); then
+    printf 'PASS host routes/qdiscs byte-identical; host loopback clean\n'
+fi
+exit "${gate_status}"
