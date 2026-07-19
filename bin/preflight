@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+
+exec "${project_dir}/bin/sippycup" -- sippycup-preflight "$@"

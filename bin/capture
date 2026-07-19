@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./bin/capture --target HOST [--target HOST ...] [options]
+  ./bin/capture --network CIDR [--network CIDR ...] [options]
+
+Capture only traffic involving explicitly supplied staging hosts or networks.
+All UDP to those scopes is included so negotiated RTP ports are not missed.
+SIP over TCP on ports 5060 and 5061 is also included.
+
+Options:
+  --target HOST     Add an authorized hostname, IPv4 address, or IPv6 address.
+  --network CIDR    Add an authorized IPv4 or IPv6 network.
+  --interface DEV   Capture interface (default: any).
+  --output FILE     Output PCAP path (default: work/call-UTC_TIMESTAMP.pcap).
+  --dry-run         Print the tcpdump command without executing it.
+  -h, --help        Show this help.
+
+Example:
+  ./bin/capture --target staging.example.test --dry-run
+EOF
+}
+
+targets=()
+networks=()
+interface=any
+output=""
+dry_run=0
+
+while (($# > 0)); do
+    case "$1" in
+        --target)
+            [[ $# -ge 2 ]] || { printf 'Missing value for --target\n' >&2; exit 2; }
+            targets+=("$2")
+            shift 2
+            ;;
+        --network)
+            [[ $# -ge 2 ]] || { printf 'Missing value for --network\n' >&2; exit 2; }
+            networks+=("$2")
+            shift 2
+            ;;
+        --interface)
+            [[ $# -ge 2 ]] || { printf 'Missing value for --interface\n' >&2; exit 2; }
+            interface="$2"
+            shift 2
+            ;;
+        --output)
+            [[ $# -ge 2 ]] || { printf 'Missing value for --output\n' >&2; exit 2; }
+            output="$2"
+            shift 2
+            ;;
+        --dry-run)
+            dry_run=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            printf 'Unknown argument: %s\n\n' "$1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if ((${#targets[@]} == 0 && ${#networks[@]} == 0)); then
+    printf 'At least one --target or --network is required.\n\n' >&2
+    usage >&2
+    exit 2
+fi
+
+for target in "${targets[@]}"; do
+    if [[ ! "${target}" =~ ^[A-Za-z0-9._:-]+$ || "${target}" == -* ]]; then
+        printf 'Invalid target: %s\n' "${target}" >&2
+        exit 2
+    fi
+done
+
+for network in "${networks[@]}"; do
+    if [[ ! "${network}" =~ ^[A-Fa-f0-9:./]+$ || "${network}" == -* ]]; then
+        printf 'Invalid network: %s\n' "${network}" >&2
+        exit 2
+    fi
+done
+
+if [[ ! "${interface}" =~ ^[A-Za-z0-9_.:-]+$ || "${interface}" == -* ]]; then
+    printf 'Invalid interface: %s\n' "${interface}" >&2
+    exit 2
+fi
+
+if [[ -z "${output}" ]]; then
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    output="${project_dir}/work/call-${timestamp}.pcap"
+fi
+
+scope_parts=()
+for target in "${targets[@]}"; do
+    scope_parts+=("host ${target}")
+done
+for network in "${networks[@]}"; do
+    scope_parts+=("net ${network}")
+done
+
+scope_filter=""
+for part in "${scope_parts[@]}"; do
+    if [[ -n "${scope_filter}" ]]; then
+        scope_filter+=" or "
+    fi
+    scope_filter+="${part}"
+done
+
+capture_filter="(${scope_filter}) and (udp or tcp port 5060 or tcp port 5061)"
+command=(tcpdump -ni "${interface}" -s 0 -U -w "${output}" "${capture_filter}")
+
+printf 'Capture scope: %s\n' "${capture_filter}"
+printf 'Output:        %s\n' "${output}"
+printf 'Command:       '
+printf '%q ' "${command[@]}"
+printf '\n'
+
+if ((dry_run != 0)); then
+    exit 0
+fi
+
+output_dir="$(dirname -- "${output}")"
+if [[ ! -d "${output_dir}" ]]; then
+    printf 'Output directory does not exist: %s\n' "${output_dir}" >&2
+    exit 2
+fi
+
+metadata="${output}.meta.txt"
+{
+    printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'interface=%s\n' "${interface}"
+    printf 'capture_filter=%s\n' "${capture_filter}"
+    printf 'output=%s\n' "${output}"
+} >"${metadata}"
+
+printf '\nPress Ctrl-C after the test call ends.\n'
+set +e
+sudo "${command[@]}"
+status=$?
+set -e
+
+printf 'ended_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"${metadata}"
+exit "${status}"

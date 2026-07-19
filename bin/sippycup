@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+readonly image="${SIPPYCUP_IMAGE:-localhost/sippycup:latest}"
+
+if [[ "${1:-}" == "assert" ]]; then
+    shift
+    exec "${project_dir}/bin/sippycup-assert" "$@"
+fi
+
+if [[ "${1:-}" == "media" ]]; then
+    shift
+    exec "${project_dir}/bin/sippycup-media" "$@"
+fi
+
+if [[ "${1:-}" == "envelope" ]]; then
+    shift
+    exec "${project_dir}/bin/sippycup-envelope" "$@"
+fi
+
+if [[ "${1:-}" == "resilience" ]]; then
+    shift
+    PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+        exec "${project_dir}/bin/sippycup-resilience" "$@"
+fi
+
+caps=(--cap-add=NET_RAW --cap-add=NET_BIND_SERVICE)
+devices=()
+network=(--network=host)
+admin=0
+isolated=0
+
+while [[ "${1:-}" == --* ]]; do
+    case "${1}" in
+        --admin)
+            admin=1
+            ;;
+        --isolated)
+            isolated=1
+            network=()
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            printf 'Unknown launcher option: %s\n' "${1}" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if (( admin != 0 )); then
+    caps+=(--cap-add=NET_ADMIN)
+fi
+
+if (( admin != 0 && isolated != 0 )); then
+    # Named child namespaces require mount operations. In rootless Podman this
+    # capability is bounded by the container's user and mount namespaces.
+    caps+=(--cap-add=SYS_ADMIN)
+    devices+=(--device=/dev/net/tun)
+fi
+
+if (( admin != 0 && isolated == 0 )); then
+    cat >&2 <<'EOF'
+WARNING: --admin grants NET_ADMIN while using the host network namespace.
+Any tc/nftables/iptables change can affect the host. Use this only on a
+dedicated test VM, and always remove qdiscs and firewall rules afterward.
+EOF
+fi
+
+terminal=()
+if [[ -t 0 && -t 1 ]]; then
+    terminal=(-it)
+fi
+
+exec podman run \
+    --rm \
+    "${terminal[@]}" \
+    "${network[@]}" \
+    "${caps[@]}" \
+    "${devices[@]}" \
+    --hostname=sippycup \
+    --volume="${project_dir}/work:/work:Z" \
+    "${image}" \
+    "$@"

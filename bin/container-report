@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: sippycup-report CAPTURE.pcap[ng]
+
+Generates a read-only, human-readable summary. The report does not extract
+audio or print SIP authorization headers.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [[ $# -ne 1 ]]; then
+    usage >&2
+    exit 2
+fi
+
+capture="$1"
+if [[ ! -r "${capture}" ]]; then
+    printf 'Capture is not readable: %s\n' "${capture}" >&2
+    exit 2
+fi
+
+section() {
+    printf '\n================================================================\n'
+    printf '%s\n' "$1"
+    printf '================================================================\n'
+}
+
+run_tshark() {
+    # Root is confined to the toolbox container. Remove only TShark's repeated
+    # root notice while preserving real diagnostic output on stderr.
+    tshark "$@" \
+        2> >(sed '/^Running as user "root" and group "root". This could be dangerous\.$/d' >&2)
+}
+
+printf 'Sippycup PCAP report\n'
+printf 'Capture: %s\n' "${capture}"
+printf 'Generated (UTC): %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+section "Capture metadata and hashes"
+capinfos -c -s -u -a -e -H "${capture}"
+
+section "Protocol hierarchy"
+run_tshark -r "${capture}" -q -z io,phs
+
+section "SIP statistics"
+run_tshark -r "${capture}" -q -z sip,stat
+
+section "SIP message timeline"
+run_tshark -r "${capture}" \
+    -Y sip \
+    -T fields \
+    -e frame.number \
+    -e frame.time_relative \
+    -e ip.src \
+    -e ipv6.src \
+    -e ip.dst \
+    -e ipv6.dst \
+    -e sip.Method \
+    -e sip.Status-Code \
+    -e sip.CSeq.method \
+    -e sip.Call-ID \
+    -E header=y \
+    -E separator=/t \
+    -E quote=d
+
+section "SDP media negotiation"
+run_tshark -r "${capture}" \
+    -Y sdp \
+    -T fields \
+    -e frame.number \
+    -e ip.src \
+    -e ipv6.src \
+    -e sdp.connection_info \
+    -e sdp.media \
+    -E header=y \
+    -E separator=/t \
+    -E quote=d
+
+section "RTP stream statistics"
+run_tshark -r "${capture}" -q -z rtp,streams
+
+section "UDP conversations"
+run_tshark -r "${capture}" -q -z conv,udp
+
+section "TCP conversations"
+run_tshark -r "${capture}" -q -z conv,tcp
+
+section "Warnings and errors identified by dissectors"
+run_tshark -r "${capture}" -q -z expert,warn

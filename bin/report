@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+readonly work_dir="${project_dir}/work"
+
+if [[ $# -ne 1 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'EOF'
+Usage: ./bin/report work/CAPTURE.pcap[ng]
+
+The capture must be inside ~/src/sippycup/work so it is available to the
+container as /work.
+EOF
+    [[ $# -eq 1 ]] && exit 0
+    exit 2
+fi
+
+capture="$(realpath -e -- "$1")"
+case "${capture}" in
+    "${work_dir}"/*)
+        relative="${capture#"${work_dir}/"}"
+        ;;
+    *)
+        printf 'Capture must be inside %s\n' "${work_dir}" >&2
+        exit 2
+        ;;
+esac
+
+exec "${project_dir}/bin/sippycup" -- \
+    sippycup-report "/work/${relative}"

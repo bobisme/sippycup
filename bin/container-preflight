@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: sippycup-preflight HOST [PORT] [udp|tcp|tls]
+
+Performs DNS resolution, a transport reachability check, and one SIP OPTIONS
+transaction. It does not enumerate users, attempt authentication, or generate
+load.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [[ $# -lt 1 || $# -gt 3 ]]; then
+    usage >&2
+    exit 2
+fi
+
+host="$1"
+port="${2:-5060}"
+transport="${3:-udp}"
+
+if [[ ! "${host}" =~ ^[A-Za-z0-9._:-]+$ || "${host}" == -* ]]; then
+    printf 'Invalid host: %s\n' "${host}" >&2
+    exit 2
+fi
+if [[ ! "${port}" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
+    printf 'Invalid port: %s\n' "${port}" >&2
+    exit 2
+fi
+if [[ "${transport}" != udp && "${transport}" != tcp && "${transport}" != tls ]]; then
+    printf 'Transport must be udp, tcp, or tls.\n' >&2
+    exit 2
+fi
+
+printf 'Ferivox network preflight\n'
+printf 'Target:    %s:%s\n' "${host}" "${port}"
+printf 'Transport: %s\n\n' "${transport}"
+
+printf '== DNS/address resolution ==\n'
+if ! getent ahosts "${host}" | sort -u; then
+    printf 'Resolution failed; stopping before network traffic is sent.\n' >&2
+    exit 1
+fi
+
+if [[ "${transport}" == tcp || "${transport}" == tls ]]; then
+    printf '\n== TCP reachability ==\n'
+    timeout 8 nc -vz "${host}" "${port}"
+    nc_status=$?
+    printf 'TCP check exit status: %s\n' "${nc_status}"
+fi
+
+if [[ "${transport}" == tls ]]; then
+    printf '\n== TLS handshake and certificate summary ==\n'
+    timeout 12 openssl s_client \
+        -connect "${host}:${port}" \
+        -servername "${host}" \
+        -brief </dev/null
+    tls_status=$?
+    printf 'TLS check exit status: %s\n' "${tls_status}"
+fi
+
+printf '\n== Single SIP OPTIONS transaction ==\n'
+sipsak_args=(
+    --sip-uri="sip:${host}:${port}"
+    --remote-port="${port}"
+    --transport="${transport}"
+    --verbose
+)
+if [[ "${transport}" == tls ]]; then
+    sipsak_args+=(--tls-ignore-cert-failure)
+fi
+
+timeout 15 sipsak "${sipsak_args[@]}"
+sip_status=$?
+printf 'SIP OPTIONS exit status: %s\n' "${sip_status}"
+
+if [[ "${transport}" == tcp || "${transport}" == tls ]]; then
+    exit "${nc_status:-0}"
+fi
+exit "${sip_status}"

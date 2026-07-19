@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+commands=(
+    age
+    age-keygen
+    baresip
+    boo
+    campaign
+    campaign-sipp-runner
+    campaign-loopback-uas
+    campaign-integration-selftest
+    capinfos
+    dumpcap
+    ffmpeg
+    gst-launch-1.0
+    hping3
+    iperf3
+    minisign
+    nc
+    ngrep
+    nmap
+    nsenter
+    openssl
+    pasta
+    scapy
+    setpriv
+    sipp
+    sipsak
+    sipvicious_svcrack
+    sipvicious_svmap
+    sipvicious_svreport
+    sipvicious_svwar
+    sippycup-preflight
+    sippycup-assert
+    sippycup-chaos
+    sippycup-diff
+    sippycup-evidence
+    sippycup-pack
+    sippycup-envelope
+    sippycup-media
+    sippycup-media-echo
+    sippycup-torture
+    sippycup-ui
+    sippycup-resilience
+    sippycup-report
+    sippycup-selftest
+    sngrep
+    socat
+    sox
+    sslscan
+    tc
+    tcpdump
+    tcpreplay
+    termshark
+    testssl
+    tshark
+)
+
+missing=0
+for tool in "${commands[@]}"; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+        printf 'MISSING  %s\n' "${tool}" >&2
+        missing=1
+    else
+        printf 'ok       %s\n' "${tool}"
+    fi
+done
+
+PYTHONPATH=/usr/local/lib python3 - <<'PY'
+import boofuzz
+import scapy.all
+import sipvicious
+import yaml
+import sippycup
+import sippycup_chaos
+import sippycup_learn
+import sippycup_media
+import sippycup_resilience
+import sippycup_oracle
+import sippycup_torture
+import sippycup_tui
+print("ok       Python modules: dependencies and all first-party packages")
+PY
+
+if (( missing != 0 )); then
+    exit 1
+fi
+
+first_party_help=(
+    campaign
+    sippycup-assert
+    sippycup-chaos
+    sippycup-diff
+    sippycup-envelope
+    sippycup-evidence
+    sippycup-media
+    sippycup-media-echo
+    sippycup-pack
+    sippycup-torture
+    sippycup-ui
+    sippycup-resilience
+)
+for tool in "${first_party_help[@]}"; do
+    "${tool}" --help >/dev/null
+    printf 'ok       %s --help\n' "${tool}"
+done
+
+printf '\nSIPp build:\n'
+set +e
+sipp_version="$(sipp -v 2>&1)"
+sipp_status=$?
+set -e
+
+if [[ "${sipp_status}" -ne 0 && "${sipp_status}" -ne 99 ]]; then
+    printf '%s\n' "${sipp_version}" >&2
+    exit "${sipp_status}"
+fi
+
+printf '%s\n' "${sipp_version}" | sed -n '1,8p'

@@ -1,0 +1,5 @@
+work/*
+!work/.gitkeep
+config/target.env
+__pycache__/
+*.py[cod]
