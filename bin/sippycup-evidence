@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Evidence manifest and privacy-lint entry point."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from sippycup.evidence import (
+    EvidenceError,
+    build_evidence_manifest,
+    lint_evidence,
+    write_evidence_manifest,
+)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="sippycup-evidence")
+    commands = parser.add_subparsers(dest="command", required=True)
+    manifest = commands.add_parser("manifest")
+    manifest.add_argument("run_dir", type=Path)
+    manifest.add_argument("--write", action="store_true")
+    manifest.add_argument("--max-capture-bytes", type=int, default=512 * 1024 * 1024)
+    manifest.add_argument("--allow-network", action="append", default=[])
+    lint = commands.add_parser("lint")
+    lint.add_argument("run_dir", type=Path)
+    lint.add_argument("--override", type=Path)
+    lint.add_argument("--max-capture-bytes", type=int, default=512 * 1024 * 1024)
+    lint.add_argument("--allow-network", action="append", default=[])
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "manifest":
+            function = write_evidence_manifest if args.write else build_evidence_manifest
+            result = function(
+                args.run_dir,
+                max_capture_bytes=args.max_capture_bytes,
+                expected_networks=args.allow_network,
+            )
+            status = 0
+        else:
+            result = lint_evidence(
+                args.run_dir,
+                override=args.override,
+                max_capture_bytes=args.max_capture_bytes,
+                expected_networks=args.allow_network,
+            )
+            status = 0 if result["passed"] else 1
+    except (EvidenceError, OSError) as error:
+        print(f"sippycup-evidence: error: {error}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

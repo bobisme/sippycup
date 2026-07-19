@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/evidence-manifest-v1.schema.json",
+  "title": "Sippycup evidence manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contentIdentity",
+    "runState",
+    "artifacts",
+    "missingExpected",
+    "privacy",
+    "creation"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/evidence-manifest/v1"},
+    "kind": {"const": "EvidenceManifest"},
+    "contentIdentity": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "runState": {"type": "string", "minLength": 1},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "mediaType",
+          "size",
+          "sha256",
+          "provenance",
+          "sensitivity"
+        ],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "mediaType": {"type": "string", "minLength": 1},
+          "size": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "provenance": {"type": "string", "minLength": 1},
+          "sensitivity": {
+            "enum": ["public", "internal", "confidential", "restricted"]
+          }
+        }
+      }
+    },
+    "missingExpected": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "findings", "maxCaptureBytes"],
+      "properties": {
+        "status": {"enum": ["pass", "blocked"]},
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "severity", "path", "detail"],
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "severity": {"const": "high"},
+              "path": {"type": "string", "minLength": 1},
+              "detail": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "maxCaptureBytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "creation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdAt", "contentIdentityIncludesCreation"],
+      "properties": {
+        "createdAt": {"type": "string", "minLength": 1},
+        "contentIdentityIncludesCreation": {"const": false}
+      }
+    }
+  }
+}
