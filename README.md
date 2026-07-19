@@ -1,5 +1,7 @@
 # sippycup
 
+![Sippycup voice-network assessment toolbox](assets/sippycup-readme-hero.png)
+
 A Podman toolbox for authorized, network-only assessment of SIP/RTP voice
 systems. It contains call generators, protocol viewers, packet capture and
 replay tools, network impairment tools, TLS scanners, softphone/media
