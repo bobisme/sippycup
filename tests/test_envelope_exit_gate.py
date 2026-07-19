@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]; sys.path.insert(0,str(ROOT/"lib"))
 from sippycup.envelope import compile_envelope_plan, simulate_envelope_plan
 from sippycup.envelope_analysis import analyze_degradation
 from sippycup.envelope_recovery import prove_recovery
-RAW=(ROOT/"examples/ferivox-envelope.yaml").read_bytes()
+RAW=(ROOT/"examples/capacity-envelope.yaml").read_bytes()
 PLAN=compile_envelope_plan(yaml.safe_load(RAW),hashlib.sha256(RAW).hexdigest())
 P=json.loads((ROOT/"config/envelope-policy.json").read_text()); POLICY={k:P[k] for k in ("staleAfterMs","baselineSamples","metrics")}
 EXPECT={"sip":200,"media":"bidirectional"}

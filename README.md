@@ -89,9 +89,9 @@ Start with the zero-network workbench:
 
 ```sh
 ./bin/sippycup doctor
-./bin/sippycup init config/ferivox-staging.yaml
-./bin/sippycup rehearse config/ferivox-staging.yaml
-./bin/sippycup one-call config/ferivox-staging.yaml
+./bin/sippycup init config/voice-staging.yaml
+./bin/sippycup rehearse config/voice-staging.yaml
+./bin/sippycup one-call config/voice-staging.yaml
 ./bin/sippycup triage work/selftest.pcap
 ```
 
@@ -101,19 +101,19 @@ host. Use `./bin/sippycup doctor --host` only when you explicitly want a
 host-side inventory.
 
 `init` deliberately creates a pending profile with no invented addresses or
-approval. `rehearse` remains blocked until the profile contains Quad's
-approval identifier, validity window, literal approved addresses, and finite
-limits. `one-call` only prints the reviewed sequence; it never executes its
-network-active steps. See `docs/WORKBENCH.md`.
+approval. `rehearse` remains blocked until the profile contains the authorized
+service owner's approval identifier, validity window, literal approved
+addresses, and finite limits. `one-call` only prints the reviewed sequence; it
+never executes its network-active steps. See `docs/WORKBENCH.md`.
 
 Create a private, hash-chained engagement journal before testing:
 
 ```sh
-./bin/sippycup journal init work/ferivox-assessment
-./bin/sippycup journal add work/ferivox-assessment \
+./bin/sippycup journal init work/voice-assessment
+./bin/sippycup journal add work/voice-assessment \
   --kind hypothesis --summary "Record a bounded, testable security hypothesis"
-./bin/sippycup journal verify work/ferivox-assessment
-./bin/sippycup status work/ferivox-assessment
+./bin/sippycup journal verify work/voice-assessment
+./bin/sippycup status work/voice-assessment
 ```
 
 Campaign run directories retain the machine record; the journal retains
@@ -180,9 +180,9 @@ make torture-exit-gate
 ```
 
 The technical exit gate produces a deterministic offline safety proof and a
-separate current-code digest for Quad's default-limit review. Neither artifact
-authorizes live traffic. See `docs/TORTURE-CORPUS.md` for the corpus, safety
-boundary, owner-review packet, and validation workflow.
+separate current-code digest for the service owner's default-limit review.
+Neither artifact authorizes live traffic. See `docs/TORTURE-CORPUS.md` for the
+corpus, safety boundary, owner-review packet, and validation workflow.
 
 Open the same capture in a terminal UI:
 
@@ -255,10 +255,10 @@ Compile a separately reviewed, one-dimensional CPS, concurrency, or media-PPS
 ramp without sending traffic:
 
 ```sh
-./bin/sippycup envelope plan examples/ferivox-envelope.yaml \
+./bin/sippycup envelope plan examples/capacity-envelope.yaml \
   --max-calls-per-second 4 --output work/envelope-plan.json
 ./bin/sippycup envelope run work/envelope-plan.json \
-  --manifest examples/ferivox-envelope.yaml
+  --manifest examples/capacity-envelope.yaml
 ```
 
 All intensity, total-call, duration, hold, cooldown, and recovery maxima are

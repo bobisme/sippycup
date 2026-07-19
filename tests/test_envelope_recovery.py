@@ -4,7 +4,7 @@ import yaml
 ROOT=Path(__file__).resolve().parents[1]; sys.path.insert(0,str(ROOT/"lib"))
 from sippycup.envelope import compile_envelope_plan, EnvelopeError
 from sippycup.envelope_recovery import prove_recovery
-RAW=(ROOT/"examples/ferivox-envelope.yaml").read_bytes()
+RAW=(ROOT/"examples/capacity-envelope.yaml").read_bytes()
 PLAN=compile_envelope_plan(yaml.safe_load(RAW),hashlib.sha256(RAW).hexdigest())
 EXPECT={"sip":200,"media":"bidirectional"}
 def analysis(outcome="degraded"):

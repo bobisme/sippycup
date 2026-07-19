@@ -1,5 +1,5 @@
 schema_version: sippycup.dev/target-profile/v1
-name: ferivox-staging
+name: voice-staging
 target:
   host: staging.example.invalid
   port: 5060
@@ -7,7 +7,7 @@ target:
   approved_addresses: []
 authorization:
   status: pending
-  approved_by: Quad
+  approved_by: authorized-service-owner
   approval_id: ''
   valid_from: null
   valid_until: null

@@ -21,7 +21,7 @@ from sippycup.envelope_analysis import (  # noqa: E402
     run_health_adapter,
 )
 
-EXAMPLE = ROOT / "examples" / "ferivox-envelope.yaml"
+EXAMPLE = ROOT / "examples" / "capacity-envelope.yaml"
 
 
 def plan():

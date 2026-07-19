@@ -6,12 +6,12 @@ side-effect-free: the run command is a deterministic controller simulator and
 sends no network traffic.
 
 ```sh
-./bin/sippycup envelope plan examples/ferivox-envelope.yaml \
+./bin/sippycup envelope plan examples/capacity-envelope.yaml \
   --max-calls-per-second 4 \
   --output work/envelope-plan.json
 
 ./bin/sippycup envelope run work/envelope-plan.json \
-  --manifest examples/ferivox-envelope.yaml \
+  --manifest examples/capacity-envelope.yaml \
   --output work/envelope-simulation.json
 ```
 

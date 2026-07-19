@@ -23,7 +23,7 @@ from sippycup.envelope import (  # noqa: E402
     validate_envelope_plan,
 )
 
-EXAMPLE = ROOT / "examples" / "ferivox-envelope.yaml"
+EXAMPLE = ROOT / "examples" / "capacity-envelope.yaml"
 CLI = ROOT / "bin" / "sippycup-envelope"
 
 

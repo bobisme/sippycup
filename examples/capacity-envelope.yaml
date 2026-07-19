@@ -1,7 +1,7 @@
 apiVersion: sippycup.dev/envelope/v1
 kind: Envelope
 metadata:
-  name: ferivox-safe-ramp
+  name: authorized-safe-ramp
 authorization:
   hardMaxima:
     callsPerSecond: 8
