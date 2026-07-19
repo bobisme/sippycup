@@ -1,0 +1,31 @@
+{
+  "actionCoverage": {
+    "complete": true,
+    "covered": 42,
+    "required": 42,
+    "uncovered": 0
+  },
+  "actionExclusions": 7,
+  "actionLedgerSha256": "7d4a07c0432676bdd823adcb08365be065acb3732f3d45a66deb68749dfff4a6",
+  "candidateCaseCount": 30,
+  "cartesianSize": 590490,
+  "caseMapSha256": "e672352fe4fe241ed503105a778a1af5ddcb84356371a797a43470782a51cb8b",
+  "executedSize": 30,
+  "factorCoverage": {
+    "complete": true,
+    "covered": 636,
+    "required": 636,
+    "uncovered": 0
+  },
+  "factorExclusions": 16,
+  "factorLedgerSha256": "e6496426daf213045d9b41f9d3b741f57adf0ca92473959d29865f9ebd957aae",
+  "generatedRowCount": 30,
+  "plannedTotals": {
+    "bytes": 122880,
+    "calls": 30,
+    "durationSeconds": 90,
+    "packets": 120
+  },
+  "seed": 20260718,
+  "sequenceSuiteSize": 11
+}
