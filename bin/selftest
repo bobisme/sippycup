@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'EOF'
+Usage: ./bin/sippycup selftest [OUTPUT]
+
+Run one closed-loop SIPp call inside the launcher's isolated container network.
+The default output is /work/selftest.pcap.
+EOF
+    exit 0
+fi
+
 output="${1:-/work/selftest.pcap}"
 cap_pid=""
 uas_pid=""

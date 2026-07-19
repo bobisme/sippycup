@@ -5,8 +5,8 @@ inventory can be rebuilt for a completed or interrupted run without contacting
 the target:
 
 ```sh
-sippycup-evidence manifest work/runs/RUN --write
-sippycup-evidence lint work/runs/RUN
+./bin/sippycup evidence manifest work/runs/RUN --write
+./bin/sippycup evidence lint work/runs/RUN
 ```
 
 The manifest uses `sippycup.dev/evidence-manifest/v1`; its normative schema is
@@ -55,7 +55,7 @@ An unparseable or only partially scanned capture fails closed as
 `capture-uninspected`. The default capture limit is 512 MiB.
 
 ```sh
-sippycup-evidence lint work/runs/RUN \
+./bin/sippycup evidence lint work/runs/RUN \
   --allow-network 10.40.0.0/16 \
   --max-capture-bytes 104857600
 ```
@@ -82,7 +82,7 @@ stricter, bound to the exact content identity, and justified:
 Use it explicitly:
 
 ```sh
-sippycup-evidence lint work/runs/RUN --override /secure/local-override.json
+./bin/sippycup evidence lint work/runs/RUN --override /secure/local-override.json
 ```
 
 The override is never copied into the run or included as an artifact. The lint

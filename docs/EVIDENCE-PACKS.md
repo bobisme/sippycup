@@ -1,15 +1,15 @@
 # Portable evidence packs
 
-`sippycup-pack` turns a completed or inspectable campaign run into a
+`./bin/sippycup pack` turns a completed or inspectable campaign run into a
 self-contained deterministic tar archive. The source directory must already
 contain `evidence-manifest.json`; pack creation re-hashes every declared
 artifact before writing anything.
 
 ```sh
-sippycup-pack create work/runs/RUN evidence.tar \
+./bin/sippycup pack create work/runs/RUN evidence.tar \
   --image-digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-sippycup-pack verify evidence.tar --format markdown
-sippycup-pack export-ci evidence.tar ci-results
+./bin/sippycup pack verify evidence.tar --format markdown
+./bin/sippycup pack export-ci evidence.tar ci-results
 ```
 
 The archive contains `pack-manifest.json`, the evidence manifest, and exactly
@@ -47,9 +47,9 @@ JSON, Markdown, and JUnit are renderings of the same
 `sippycup.dev/evidence-pack-verification/v1` result:
 
 ```sh
-sippycup-pack verify evidence.tar --format json
-sippycup-pack verify evidence.tar --format markdown
-sippycup-pack verify evidence.tar --format junit
+./bin/sippycup pack verify evidence.tar --format json
+./bin/sippycup pack verify evidence.tar --format markdown
+./bin/sippycup pack verify evidence.tar --format junit
 ```
 
 ## Optional minisign signatures
@@ -58,8 +58,8 @@ Sippycup invokes `minisign`; it never creates, imports, copies, stores, rotates,
 or deletes a key:
 
 ```sh
-sippycup-pack sign evidence.tar --secret-key /secure/minisign.key
-sippycup-pack verify evidence.tar \
+./bin/sippycup pack sign evidence.tar --secret-key /secure/minisign.key
+./bin/sippycup pack verify evidence.tar \
   --signature evidence.tar.minisig \
   --public-key /secure/minisign.pub
 ```
@@ -74,7 +74,7 @@ content.
 One or more age recipients can be supplied while creating a pack:
 
 ```sh
-sippycup-pack create work/runs/RUN evidence.tar.age \
+./bin/sippycup pack create work/runs/RUN evidence.tar.age \
   --image-digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --recipient age1example
 ```
@@ -98,7 +98,7 @@ If privacy lint is blocked, default export is blocked too. After local review,
 the operator can acknowledge those findings explicitly:
 
 ```sh
-sippycup-pack export-ci evidence.tar ci-results \
+./bin/sippycup pack export-ci evidence.tar ci-results \
   --allow-privacy-findings
 ```
 
@@ -108,7 +108,7 @@ source artifact.
 An artifact is copied only when its exact declared path is explicitly named:
 
 ```sh
-sippycup-pack export-ci evidence.tar ci-results \
+./bin/sippycup pack export-ci evidence.tar ci-results \
   --allow-privacy-findings \
   --include-artifact report.txt
 ```

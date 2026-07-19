@@ -8,8 +8,8 @@ network-traffic, or audio payload.
 Verify it without a source workspace:
 
 ```sh
-sippycup-pack verify examples/evidence-pack/sanitized-evidence.tar
-sippycup-pack export-ci examples/evidence-pack/sanitized-evidence.tar ci-output
+./bin/sippycup pack verify examples/evidence-pack/sanitized-evidence.tar
+./bin/sippycup pack export-ci examples/evidence-pack/sanitized-evidence.tar ci-output
 ```
 
 Reproduce or check the committed bytes:

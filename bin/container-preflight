@@ -8,6 +8,10 @@ Usage: sippycup-preflight HOST [PORT] [udp|tcp|tls]
 Performs DNS resolution, a transport reachability check, and one SIP OPTIONS
 transaction. It does not enumerate users, attempt authentication, or generate
 load.
+
+Options:
+  --dry-run  Validate and print the bounded plan without resolution or traffic.
+  -h, --help Show this help without network activity.
 EOF
 }
 
@@ -15,6 +19,17 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     usage
     exit 0
 fi
+
+dry_run=0
+arguments=()
+for argument in "$@"; do
+    if [[ "${argument}" == "--dry-run" ]]; then
+        dry_run=1
+    else
+        arguments+=("${argument}")
+    fi
+done
+set -- "${arguments[@]}"
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
     usage >&2
@@ -38,9 +53,22 @@ if [[ "${transport}" != udp && "${transport}" != tcp && "${transport}" != tls ]]
     exit 2
 fi
 
-printf 'Ferivox network preflight\n'
+printf 'Sippycup network preflight\n'
 printf 'Target:    %s:%s\n' "${host}" "${port}"
 printf 'Transport: %s\n\n' "${transport}"
+
+if (( dry_run != 0 )); then
+    printf 'Plan: resolve the exact target;'
+    if [[ "${transport}" == tcp || "${transport}" == tls ]]; then
+        printf ' perform one bounded TCP reachability check;'
+    fi
+    if [[ "${transport}" == tls ]]; then
+        printf ' perform one bounded TLS handshake;'
+    fi
+    printf ' send one SIP OPTIONS transaction.\n'
+    printf 'Network activity: none\n'
+    exit 0
+fi
 
 printf '== DNS/address resolution ==\n'
 if ! getent ahosts "${host}" | sort -u; then

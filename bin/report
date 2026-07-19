@@ -7,7 +7,7 @@ readonly work_dir="${project_dir}/work"
 
 if [[ $# -ne 1 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     cat <<'EOF'
-Usage: ./bin/report work/CAPTURE.pcap[ng]
+Usage: ./bin/sippycup report work/CAPTURE.pcap[ng]
 
 The capture must be inside ~/src/sippycup/work so it is available to the
 container as /work.

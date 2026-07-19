@@ -4,6 +4,19 @@ set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly project_dir
 readonly image="${SIPPYCUP_IMAGE:-localhost/sippycup:latest}"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'EOF'
+Usage: ./bin/sippycup chaos-exit-gate [OUTPUT_DIRECTORY]
+
+Run the real rootless host-isolation matrix and prove that host routes, qdiscs,
+and unrelated loopback traffic are restored. This is not a target test.
+EOF
+    exit 0
+fi
+
+runtime="$("${project_dir}/bin/container-runtime")"
+readonly runtime
 output="$(realpath -m -- "${1:-${project_dir}/work/chaos-exit-gate}")"
 readonly output
 
@@ -22,18 +35,18 @@ ip -json link show | jq --sort-keys . > "${output}/host-links-before.json"
 heartbeat="${output}/host-loopback-heartbeat.txt"
 cidfile="${output}/container.cid"
 heartbeat_pid=""
-podman_pid=""
+runtime_pid=""
 
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    if [[ -n "${podman_pid}" ]]; then
+    if [[ -n "${runtime_pid}" ]]; then
         if [[ -s "${cidfile}" ]]; then
-            podman stop --time 5 "$(cat -- "${cidfile}")" >/dev/null 2>&1 || true
-            podman rm --force "$(cat -- "${cidfile}")" >/dev/null 2>&1 || true
+            "${runtime}" stop --time 5 "$(cat -- "${cidfile}")" >/dev/null 2>&1 || true
+            "${runtime}" rm --force "$(cat -- "${cidfile}")" >/dev/null 2>&1 || true
         fi
-        kill -TERM "${podman_pid}" 2>/dev/null || true
-        wait "${podman_pid}" 2>/dev/null || true
+        kill -TERM "${runtime_pid}" 2>/dev/null || true
+        wait "${runtime_pid}" 2>/dev/null || true
     fi
     if [[ -n "${heartbeat_pid}" ]]; then
         kill -INT "${heartbeat_pid}" 2>/dev/null || true
@@ -47,7 +60,7 @@ trap 'exit 143' TERM
 
 ping -n -q -i 0.05 127.0.0.1 > "${heartbeat}" &
 heartbeat_pid=$!
-podman run --rm \
+"${runtime}" run --rm \
     --cidfile="${cidfile}" \
     --device=/dev/net/tun \
     --cap-add=NET_RAW \
@@ -58,12 +71,12 @@ podman run --rm \
     --volume="${output}:/work" \
     "${image}" \
     python3 /repo/tools/chaos_exit_gate.py /work/evidence &
-podman_pid=$!
+runtime_pid=$!
 set +e
-wait "${podman_pid}"
+wait "${runtime_pid}"
 container_status=$?
 set -e
-podman_pid=""
+runtime_pid=""
 kill -INT "${heartbeat_pid}" 2>/dev/null || true
 wait "${heartbeat_pid}" 2>/dev/null || true
 heartbeat_pid=""

@@ -1,0 +1,30 @@
+# name|mode|host_target|container_target|group|activity|summary
+help|builtin|help||Getting started|offline|Show global or command-specific help
+commands|builtin|commands||Getting started|offline|List the stable public command registry
+version|builtin|version||Getting started|offline|Show the stable Sippycup CLI version
+doctor|doctor|doctor|sippycup-workbench|Getting started|offline|Inspect the prepared image or explicitly inspect the host
+init|workbench|init|sippycup-workbench|Preparation|offline|Create a fail-closed pending target profile
+rehearse|workbench|rehearse|sippycup-workbench|Preparation|offline|Validate target scope and authorization without traffic
+one-call|workbench|one-call|sippycup-workbench|Preparation|offline|Render a bounded one-call plan without executing it
+status|workbench|status|sippycup-workbench|Preparation|offline|Recommend only safe offline engagement actions
+capture|host|capture||Execution|network|Capture only explicitly scoped host or network traffic
+preflight|container||sippycup-preflight|Execution|network|Send one bounded SIP OPTIONS preflight
+campaign|direct|campaign|campaign|Execution|network|Plan or execute a safety-gated call campaign
+media|direct|sippycup-media|sippycup-media|Execution|network|Plan analyze or send negotiated RTP media
+media-echo|direct|sippycup-media-echo|sippycup-media-echo|Execution|local-network|Run the bounded RTP echo fixture
+assert|direct|sippycup-assert|sippycup-assert|Analysis|offline|Evaluate a capture against call-path expectations
+triage|workbench|triage|sippycup-workbench|Analysis|offline|Summarize a capture without disclosing payload values
+report|host|report||Analysis|offline|Generate a read-only report for a work-directory capture
+diff|direct|sippycup-diff|sippycup-diff|Analysis|offline|Compare canonical baseline and candidate behavior
+ui|direct|sippycup-ui|sippycup-ui|Analysis|offline|Render structured mission events for terminal or automation
+explain|workbench|explain|sippycup-workbench|Analysis|offline|Explain a stable workbench result code
+journal|workbench|journal|sippycup-workbench|Evidence|offline|Maintain a private hash-chained assessment journal
+evidence|direct|sippycup-evidence|sippycup-evidence|Evidence|offline|Create or privacy-lint an evidence manifest
+pack|direct|sippycup-pack|sippycup-pack|Evidence|offline|Create verify sign or export portable evidence packs
+torture|direct|sippycup-torture|sippycup-torture|Robustness|offline|Inspect and exit-gate the bounded protocol corpus
+envelope|direct|sippycup-envelope|sippycup-envelope|Robustness|offline|Plan or simulate an immutable capacity envelope
+resilience|direct|sippycup-resilience|sippycup-resilience|Robustness|offline|Run bounded voice-edge resilience oracles
+chaos|direct|sippycup-chaos|sippycup-chaos|Robustness|network-admin|Plan or run scoped network impairment workflows
+selftest|container-isolated||sippycup-selftest|Verification|local-network|Run a closed-loop SIP call in an isolated container
+chaos-exit-gate|host|chaos-exit-gate||Verification|local-network-admin|Run the real host-isolation and cleanup gate
+shell|container||/bin/bash|Advanced|network|Open an interactive toolbox shell

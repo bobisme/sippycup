@@ -1,6 +1,6 @@
 # Owned chaos lifecycle and observed impairment
 
-`sippycup-chaos run` is the only component that executes a compiled chaos
+`./bin/sippycup chaos run` is the only component that executes a compiled chaos
 plan. It recompiles the impairment settings embedded in the plan and requires
 the complete document, structured command arrays, attachment points, target
 filters, topology digest, snapshot digest, and ownership tags to match. A
@@ -40,7 +40,7 @@ impairment namespace without changing the controller's mount or network
 namespace.
 
 ```sh
-./bin/sippycup-chaos run \
+./bin/sippycup chaos run \
   --report work/chaos-run.json \
   --observation egress=work/egress-before.pcap,work/egress-after.pcap \
   --observation ingress=work/ingress-before.pcap,work/ingress-after.pcap \

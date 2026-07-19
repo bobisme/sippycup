@@ -197,7 +197,7 @@ exact text.
 Place supervised runs below the engagement root:
 
 ```sh
-./bin/campaign execute work/ferivox-assessment/plan.json \
+./bin/sippycup campaign execute work/ferivox-assessment/plan.json \
   --manifest work/ferivox-assessment/campaign.yaml \
   --run-root work/ferivox-assessment/runs \
   --interface any
@@ -207,9 +207,9 @@ For each run, rebuild and lint its evidence inventory without contacting the
 target:
 
 ```sh
-./bin/sippycup-evidence manifest \
+./bin/sippycup evidence manifest \
   work/ferivox-assessment/runs/RUN_ID --write
-./bin/sippycup-evidence lint work/ferivox-assessment/runs/RUN_ID
+./bin/sippycup evidence lint work/ferivox-assessment/runs/RUN_ID
 ```
 
 Package, sign, or encrypt only after the privacy and disclosure decisions

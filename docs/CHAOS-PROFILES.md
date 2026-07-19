@@ -1,20 +1,20 @@
 # Seeded chaos impairment profiles
 
-`sippycup-chaos profile-plan` validates a reviewed YAML profile, binds it to
+`./bin/sippycup chaos profile-plan` validates a reviewed YAML profile, binds it to
 the literal target selectors and attachment points in a frozen topology plan,
 and prints a deterministic `sippycup.dev/chaos-impairment-plan/v1` document.
 Compilation is a dry run: `noChange` is true, `execution.performed` is false,
 and no subprocess or networking mutation is available in the compiler.
 
 ```sh
-./bin/sippycup-chaos topology-plan \
+./bin/sippycup chaos topology-plan \
   --capabilities work/chaos-capabilities.json \
   --target 10.20.30.40/32 \
   --direction asymmetric \
   --namespace-prefix voice-lab \
   --output work/topology.json
 
-./bin/sippycup-chaos profile-plan \
+./bin/sippycup chaos profile-plan \
   work/topology.json profiles/chaos/asymmetric-media.yaml \
   --output work/impairment.json
 

@@ -34,7 +34,7 @@ The planner additionally enforces relationships JSON Schema cannot express:
 Planning is side-effect-free with respect to SIP/RTP traffic and target state.
 
 ```sh
-./bin/campaign plan tests/fixtures/campaign/valid.yaml \
+./bin/sippycup campaign plan tests/fixtures/campaign/valid.yaml \
   --resolve voice.test=10.20.30.40 \
   --output plan.json
 ```
@@ -204,7 +204,7 @@ for its seed.
 plan`, and writes three review artifacts atomically:
 
 ```sh
-./bin/campaign matrix examples/ferivox-campaign.yaml \
+./bin/sippycup campaign matrix examples/ferivox-campaign.yaml \
   --seed 20260718 \
   --manifest-output generated-campaign.json \
   --report-output matrix-report.json \
@@ -283,7 +283,7 @@ riskier secure-media/NAT interactions. It uses a private lab literal, so
 planning it performs no DNS lookup and sends no probe:
 
 ```sh
-./bin/campaign plan examples/ferivox-campaign.yaml --output ferivox-plan.json
+./bin/sippycup campaign plan examples/ferivox-campaign.yaml --output ferivox-plan.json
 ```
 
 Review the model and replace its lab scope before use. Planning only validates
@@ -302,10 +302,10 @@ use `--output` for an executable frozen plan.
 manifest is mandatory:
 
 ```sh
-./bin/campaign plan campaign.yaml \
+./bin/sippycup campaign plan campaign.yaml \
   --resolve voice.test=10.20.30.40 \
   --output plan.json
-./bin/campaign run plan.json \
+./bin/sippycup campaign run plan.json \
   --manifest campaign.yaml \
   --run-root work/runs
 ```
@@ -355,7 +355,7 @@ generic step runner.
 `campaign execute` wraps the supervisor in a complete evidence lifecycle:
 
 ```sh
-./bin/campaign execute plan.json \
+./bin/sippycup campaign execute plan.json \
   --manifest campaign.yaml \
   --run-root work/runs \
   --interface any
@@ -383,13 +383,13 @@ Credential references can be supplied without putting values in command-line
 arguments:
 
 ```sh
-SIP_TEST_PASSWORD='...' ./bin/campaign execute plan.json \
+SIP_TEST_PASSWORD='...' ./bin/sippycup campaign execute plan.json \
   --manifest campaign.yaml \
   --secret-env staging-user=SIP_TEST_PASSWORD
 
-./bin/campaign execute plan.json --manifest campaign.yaml \
+./bin/sippycup campaign execute plan.json --manifest campaign.yaml \
   --secret-fd staging-user=3 3<secret-file
-./bin/campaign execute plan.json --manifest campaign.yaml \
+./bin/sippycup campaign execute plan.json --manifest campaign.yaml \
   --secret-provider /path/to/provider
 ```
 
@@ -429,8 +429,8 @@ Human-readable errors are the default. Automation can request a stable,
 versioned JSON error on stderr:
 
 ```sh
-./bin/campaign plan campaign.yaml --error-format json
-./bin/campaign execute plan.json --manifest campaign.yaml --error-format json
+./bin/sippycup campaign plan campaign.yaml --error-format json
+./bin/sippycup campaign execute plan.json --manifest campaign.yaml --error-format json
 ```
 
 For an emergency stop, press Ctrl-C once. SIGINT stops admission of new

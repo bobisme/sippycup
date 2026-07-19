@@ -1,6 +1,6 @@
 # Disposable chaos topology
 
-`sippycup-chaos topology-plan` is a read-only boundary. It detects the
+`./bin/sippycup chaos topology-plan` is a read-only boundary. It detects the
 environment, freezes literal target CIDRs, snapshots routes and qdiscs, and
 prints `sippycup.dev/chaos-topology-plan/v1`. It never creates a namespace,
 link, route, filter, qdisc, or kernel module. The plan deliberately contains an
@@ -67,10 +67,10 @@ Generate a capability record in the exact impairment environment, then use it
 for a host-side no-change plan:
 
 ```sh
-./bin/sippycup --isolated --admin -- \
-  sippycup-chaos capabilities --output /work/chaos-capabilities.json
+./bin/sippycup --isolated --admin chaos capabilities \
+  --output /work/chaos-capabilities.json
 
-./bin/sippycup-chaos topology-plan \
+./bin/sippycup chaos topology-plan \
   --capabilities work/chaos-capabilities.json \
   --target 10.20.30.40/32 \
   --direction asymmetric \
@@ -95,7 +95,7 @@ the default. It is accepted only for rootful execution with effective
 `NET_ADMIN` and an explicit confirmation naming the dedicated VM:
 
 ```sh
-./bin/sippycup-chaos topology-plan \
+./bin/sippycup chaos topology-plan \
   --topology dangerous-host-network \
   --dangerous-confirmation dedicated-test-vm:voice-lab-01 \
   --host-interface eth0 \

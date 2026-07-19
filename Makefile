@@ -1,23 +1,23 @@
 IMAGE ?= localhost/sippycup:latest
 CAPTURE ?= work/selftest.pcap
 
-.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test workbench-test
+.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test workbench-test
 
 build:
 	"$$(./bin/container-runtime)" build --tag "$(IMAGE)" --file Containerfile .
 
 shell:
-	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup
+	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup shell
 
 smoke:
 	"$$(./bin/container-runtime)" run --rm "$(IMAGE)" sippycup-smoke
+	./bin/sippycup commands --format json | jq -e '.networkActivity == false' >/dev/null
 
 report:
-	./bin/report "$(CAPTURE)"
+	./bin/sippycup report "$(CAPTURE)"
 
 selftest:
-	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated \
-		sippycup-selftest /work/selftest.pcap
+	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup selftest /work/selftest.pcap
 
 campaign-selftest:
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated \
@@ -37,7 +37,7 @@ chaos-lifecycle-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_chaos_lifecycle
 
 chaos-exit-gate:
-	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/chaos-exit-gate
+	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup chaos-exit-gate
 
 envelope-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_envelope -v
@@ -55,6 +55,7 @@ capacity-gate: envelope-test envelope-analysis-test envelope-recovery-test envel
 
 campaign-gate:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+	$(MAKE) cli-test
 	$(MAKE) oracle-test
 	$(MAKE) torture-test
 	$(MAKE) torture-exit-gate
@@ -94,7 +95,7 @@ torture-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/torture -v
 
 torture-exit-gate:
-	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 ./bin/sippycup-torture exit-gate
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 ./bin/sippycup torture exit-gate
 
 tui-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tui -v
@@ -107,3 +108,6 @@ resilience-test:
 
 workbench-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_workbench tests.test_journal tests.test_advisor -v
+
+cli-test:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_cli_entrypoint -v

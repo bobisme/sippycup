@@ -64,5 +64,5 @@ Use a separate capture for each case.
 Generate the standard report with:
 
 ```sh
-./bin/report work/CAPTURE.pcap
+./bin/sippycup report work/CAPTURE.pcap
 ```

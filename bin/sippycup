@@ -3,113 +3,405 @@ set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly project_dir
+readonly registry="${SIPPYCUP_COMMAND_REGISTRY:-${project_dir}/config/commands.tsv}"
 readonly image="${SIPPYCUP_IMAGE:-localhost/sippycup:latest}"
+readonly cli_version="1.0.0"
 
-case "${1:-}" in
-    doctor)
-        shift
-        if [[ "${1:-}" == "--host" ]]; then
-            shift
-            exec "${project_dir}/bin/sippycup-workbench" doctor "$@"
-        fi
-        set -- sippycup-workbench doctor "$@"
-        ;;
-    init|rehearse|one-call|triage|explain|journal|status)
-        exec "${project_dir}/bin/sippycup-workbench" "$@"
-        ;;
-esac
+declare -a command_order=()
+declare -A command_mode=()
+declare -A command_host_target=()
+declare -A command_container_target=()
+declare -A command_group=()
+declare -A command_activity=()
+declare -A command_summary=()
 
-if [[ "${1:-}" == "assert" ]]; then
-    shift
-    exec "${project_dir}/bin/sippycup-assert" "$@"
-fi
-
-if [[ "${1:-}" == "media" ]]; then
-    shift
-    exec "${project_dir}/bin/sippycup-media" "$@"
-fi
-
-if [[ "${1:-}" == "envelope" ]]; then
-    shift
-    exec "${project_dir}/bin/sippycup-envelope" "$@"
-fi
-
-if [[ "${1:-}" == "resilience" ]]; then
-    shift
-    PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
-        exec "${project_dir}/bin/sippycup-resilience" "$@"
-fi
-
-runtime="$("${project_dir}/bin/container-runtime")"
-readonly runtime
-readonly runtime_name="$(basename -- "${runtime}")"
-
-caps=(--cap-add=NET_RAW --cap-add=NET_BIND_SERVICE)
-devices=()
-network=(--network=host)
-admin=0
-isolated=0
-
-while [[ "${1:-}" == --* ]]; do
-    case "${1}" in
-        --admin)
-            admin=1
-            ;;
-        --isolated)
-            isolated=1
-            network=()
-            ;;
-        --)
-            shift
-            break
-            ;;
-        *)
-            printf 'Unknown launcher option: %s\n' "${1}" >&2
+load_registry() {
+    local name mode host_target container_target group activity summary extra
+    local line_number=0
+    if [[ ! -f "${registry}" || -L "${registry}" ]]; then
+        printf 'Command registry must be a regular non-symlink file: %s\n' \
+            "${registry}" >&2
+        exit 2
+    fi
+    while IFS='|' read -r \
+        name mode host_target container_target group activity summary extra
+    do
+        line_number=$((line_number + 1))
+        [[ -z "${name}" || "${name}" == \#* ]] && continue
+        if [[ -n "${extra:-}" || -z "${summary}" ]]; then
+            printf 'Invalid command registry row %s\n' "${line_number}" >&2
             exit 2
-            ;;
-    esac
+        fi
+        if [[ ! "${name}" =~ ^[a-z][a-z0-9-]*$ ]]; then
+            printf 'Invalid command name on registry row %s\n' "${line_number}" >&2
+            exit 2
+        fi
+        if [[ -n "${host_target}" && ! "${host_target}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+            printf 'Invalid host target for %s\n' "${name}" >&2
+            exit 2
+        fi
+        if [[ -n "${container_target}" \
+            && ! "${container_target}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ \
+            && "${container_target}" != /bin/bash ]]
+        then
+            printf 'Invalid container target for %s\n' "${name}" >&2
+            exit 2
+        fi
+        if [[ -n "${command_mode[${name}]+present}" ]]; then
+            printf 'Duplicate command in registry: %s\n' "${name}" >&2
+            exit 2
+        fi
+        case "${mode}" in
+            builtin|doctor|workbench|direct|host|container|container-isolated) ;;
+            *)
+                printf 'Invalid mode for %s: %s\n' "${name}" "${mode}" >&2
+                exit 2
+                ;;
+        esac
+        case "${activity}" in
+            offline|local-network|local-network-admin|network|network-admin) ;;
+            *)
+                printf 'Invalid activity class for %s: %s\n' \
+                    "${name}" "${activity}" >&2
+                exit 2
+                ;;
+        esac
+        command_order+=("${name}")
+        command_mode["${name}"]="${mode}"
+        command_host_target["${name}"]="${host_target}"
+        command_container_target["${name}"]="${container_target}"
+        command_group["${name}"]="${group}"
+        command_activity["${name}"]="${activity}"
+        command_summary["${name}"]="${summary}"
+    done <"${registry}"
+}
+
+json_string() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\t'/\\t}"
+    printf '"%s"' "${value}"
+}
+
+render_commands_json() {
+    local separator=""
+    local name
+    printf '{"apiVersion":"sippycup.dev/commands/v1","commands":['
+    for name in "${command_order[@]}"; do
+        printf '%s{' "${separator}"
+        printf '"name":'; json_string "${name}"; printf ','
+        printf '"group":'; json_string "${command_group[${name}]}"; printf ','
+        printf '"activity":'; json_string "${command_activity[${name}]}"; printf ','
+        printf '"execution":'; json_string "${command_mode[${name}]}"; printf ','
+        printf '"summary":'; json_string "${command_summary[${name}]}"
+        printf '}'
+        separator=","
+    done
+    printf '],"networkActivity":false}\n'
+}
+
+render_commands_human() {
+    local current_group=""
+    local name
+    for name in "${command_order[@]}"; do
+        if [[ "${command_group[${name}]}" != "${current_group}" ]]; then
+            current_group="${command_group[${name}]}"
+            printf '\n%s:\n' "${current_group}"
+        fi
+        printf '  %-18s %-19s %s\n' \
+            "${name}" "[${command_activity[${name}]}]" "${command_summary[${name}]}"
+    done
+}
+
+render_global_help() {
+    cat <<'EOF'
+Usage:
+  ./bin/sippycup [GLOBAL OPTIONS] COMMAND [ARGUMENTS...]
+  ./bin/sippycup [GLOBAL OPTIONS] -- COMMAND [ARGUMENTS...]
+  ./bin/sippycup
+
+One entrypoint for Sippycup preparation, execution, analysis, evidence, and
+robustness workflows. No arguments preserves the legacy toolbox-shell behavior.
+
+Global options:
+  --isolated       Use the container's private network namespace.
+  --admin          Add NET_ADMIN. Combine with --isolated whenever possible.
+  -h, --help       Show this network-free command index.
+  --version        Show the Sippycup CLI version.
+
+Discovery:
+  help [COMMAND]   Show global help or an offline command summary.
+  commands         List the public command registry.
+  commands --format json
+
+The activity label is a warning about what a command can do, not authorization
+to do it. Planning and help remain network-free. Use `-- COMMAND` only as the
+advanced escape hatch for arbitrary in-image tools.
+EOF
+    render_commands_human
+    printf '\nNetwork activity: none\n'
+}
+
+render_command_help() {
+    local name="$1"
+    if [[ -z "${command_mode[${name}]+present}" ]]; then
+        unknown_command "${name}"
+    fi
+    cat <<EOF
+Usage: ./bin/sippycup ${name} [ARGUMENTS...]
+
+${command_summary[${name}]}.
+
+Group:              ${command_group[${name}]}
+Activity class:     ${command_activity[${name}]}
+Execution strategy: ${command_mode[${name}]}
+
+This summary is generated offline. Run \`./bin/sippycup ${name} --help\` for
+the backing command's detailed arguments. Reachability never grants target
+authorization.
+
+Network activity: none
+EOF
+}
+
+suggest_command() {
+    local unknown="$1"
     shift
-done
+    command -v python3 >/dev/null 2>&1 || return 0
+    python3 - "${unknown}" "$@" <<'PY'
+import difflib
+import sys
 
-if (( admin != 0 )); then
-    caps+=(--cap-add=NET_ADMIN)
-fi
+match = difflib.get_close_matches(sys.argv[1], sys.argv[2:], n=1, cutoff=0.55)
+if match:
+    print(match[0])
+PY
+}
 
-if (( admin != 0 && isolated != 0 )); then
-    # Named child namespaces require mount operations. In rootless Podman this
-    # capability is bounded by the container's user and mount namespaces.
-    caps+=(--cap-add=SYS_ADMIN)
-    devices+=(--device=/dev/net/tun)
-fi
+unknown_command() {
+    local name="$1"
+    local suggestion
+    suggestion="$(suggest_command "${name}" "${command_order[@]}")"
+    printf 'Unknown Sippycup command: %s\n' "${name}" >&2
+    if [[ -n "${suggestion}" ]]; then
+        printf 'Did you mean: %s?\n' "${suggestion}" >&2
+    fi
+    printf 'Run ./bin/sippycup --help for the command index.\n' >&2
+    exit 2
+}
 
-if (( admin != 0 && isolated == 0 )); then
-    cat >&2 <<'EOF'
+resolve_runtime() {
+    "${project_dir}/bin/container-runtime"
+}
+
+run_container() {
+    local target="$1"
+    shift
+    local runtime runtime_name
+    runtime="$(resolve_runtime)"
+    runtime_name="$(basename -- "${runtime}")"
+
+    local -a caps=(--cap-add=NET_RAW --cap-add=NET_BIND_SERVICE)
+    local -a devices=()
+    local -a network=(--network=host)
+
+    if (( isolated != 0 )); then
+        network=()
+    fi
+    if (( admin != 0 )); then
+        caps+=(--cap-add=NET_ADMIN)
+    fi
+    if (( admin != 0 && isolated != 0 )); then
+        caps+=(--cap-add=SYS_ADMIN)
+        devices+=(--device=/dev/net/tun)
+    fi
+    if (( admin != 0 && isolated == 0 )); then
+        cat >&2 <<'EOF'
 WARNING: --admin grants NET_ADMIN while using the host network namespace.
 Any tc/nftables/iptables change can affect the host. Use this only on a
 dedicated test VM, and always remove qdiscs and firewall rules afterward.
 EOF
-fi
-
-if [[ "${runtime_name}" == docker && "$(uname -s)" != Linux && ${#network[@]} -gt 0 ]]; then
-    cat >&2 <<'EOF'
+    fi
+    if [[ "${runtime_name}" == docker && "$(uname -s)" != Linux && ${#network[@]} -gt 0 ]]; then
+        cat >&2 <<'EOF'
 WARNING: Docker Desktop host networking is version- and configuration-dependent.
 If the target or capture path is unreachable, enable host networking in Docker
 Desktop or use a Linux Podman/Docker host. Sippycup will not rewrite the target.
 EOF
+    fi
+
+    local -a terminal=()
+    if [[ -t 0 && -t 1 ]]; then
+        terminal=(-it)
+    fi
+    local -a command=()
+    if [[ -n "${target}" ]]; then
+        command=("${target}" "$@")
+    else
+        command=("$@")
+    fi
+    exec "${runtime}" run \
+        --rm \
+        "${terminal[@]}" \
+        "${network[@]}" \
+        "${caps[@]}" \
+        "${devices[@]}" \
+        --hostname=sippycup \
+        --volume="${project_dir}/work:/work:Z" \
+        "${image}" \
+        "${command[@]}"
+}
+
+load_registry
+
+isolated=0
+admin=0
+advanced=0
+while (($# > 0)); do
+    case "$1" in
+        --isolated)
+            isolated=1
+            shift
+            ;;
+        --admin)
+            admin=1
+            shift
+            ;;
+        --)
+            advanced=1
+            shift
+            break
+            ;;
+        -h|--help)
+            render_global_help
+            exit 0
+            ;;
+        --version)
+            printf 'sippycup %s\n' "${cli_version}"
+            exit 0
+            ;;
+        -*)
+            printf 'Unknown global option: %s\n' "$1" >&2
+            printf 'Run ./bin/sippycup --help for usage.\n' >&2
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if (( advanced != 0 )); then
+    run_container "" "$@"
 fi
 
-terminal=()
-if [[ -t 0 && -t 1 ]]; then
-    terminal=(-it)
+if (($# == 0)); then
+    run_container "/bin/bash"
 fi
 
-exec "${runtime}" run \
-    --rm \
-    "${terminal[@]}" \
-    "${network[@]}" \
-    "${caps[@]}" \
-    "${devices[@]}" \
-    --hostname=sippycup \
-    --volume="${project_dir}/work:/work:Z" \
-    "${image}" \
-    "$@"
+command_name="$1"
+shift
+if [[ -z "${command_mode[${command_name}]+present}" ]]; then
+    unknown_command "${command_name}"
+fi
+
+mode="${command_mode[${command_name}]}"
+host_target="${command_host_target[${command_name}]}"
+container_target="${command_container_target[${command_name}]}"
+
+if [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
+    case "${mode}" in
+        doctor|container|container-isolated)
+            render_command_help "${command_name}"
+            exit 0
+            ;;
+    esac
+fi
+
+case "${mode}" in
+    builtin)
+        case "${command_name}" in
+            help)
+                if (($# == 0)) || [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
+                    render_global_help
+                elif (($# == 1)); then
+                    render_command_help "$1"
+                else
+                    printf 'Usage: ./bin/sippycup help [COMMAND]\n' >&2
+                    exit 2
+                fi
+                ;;
+            commands)
+                if (($# == 0)); then
+                    render_commands_human
+                    printf '\nNetwork activity: none\n'
+                elif [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
+                    cat <<'EOF'
+Usage: ./bin/sippycup commands [--format json]
+
+List the stable public command registry without network activity.
+EOF
+                elif [[ $# == 2 && "$1" == "--format" && "$2" == "json" ]]; then
+                    render_commands_json
+                else
+                    printf 'Usage: ./bin/sippycup commands [--format json]\n' >&2
+                    exit 2
+                fi
+                ;;
+            version)
+                if (($# == 0)); then
+                    printf 'sippycup %s\n' "${cli_version}"
+                elif [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
+                    cat <<'EOF'
+Usage: ./bin/sippycup version
+
+Show the stable Sippycup CLI version without network activity.
+EOF
+                else
+                    printf 'Usage: ./bin/sippycup version\n' >&2
+                    exit 2
+                fi
+                ;;
+        esac
+        ;;
+    doctor)
+        if [[ "${1:-}" == "--host" ]]; then
+            if (( isolated != 0 || admin != 0 )); then
+                printf 'doctor --host cannot be combined with container options.\n' >&2
+                exit 2
+            fi
+            shift
+            exec "${project_dir}/bin/sippycup-workbench" doctor "$@"
+        fi
+        run_container "${container_target}" doctor "$@"
+        ;;
+    workbench)
+        if (( isolated != 0 || admin != 0 )); then
+            run_container "${container_target}" "${host_target}" "$@"
+        fi
+        exec "${project_dir}/bin/sippycup-workbench" "${host_target}" "$@"
+        ;;
+    direct)
+        if (( isolated != 0 || admin != 0 )); then
+            run_container "${container_target}" "$@"
+        fi
+        exec "${project_dir}/bin/${host_target}" "$@"
+        ;;
+    host)
+        if (( isolated != 0 || admin != 0 )); then
+            printf '%s is host-side and cannot use container options.\n' "${command_name}" >&2
+            exit 2
+        fi
+        exec "${project_dir}/bin/${host_target}" "$@"
+        ;;
+    container)
+        run_container "${container_target}" "$@"
+        ;;
+    container-isolated)
+        isolated=1
+        run_container "${container_target}" "$@"
+        ;;
+esac

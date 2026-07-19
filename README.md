@@ -20,15 +20,22 @@ make build
 make smoke
 make selftest
 make report
-./bin/sippycup
+./bin/sippycup shell
 ```
+
+`./bin/sippycup` is the single public entrypoint. Run
+`./bin/sippycup --help` for the network-free command index or
+`./bin/sippycup commands --format json` for the versioned machine-readable
+registry. Running it without a command still opens the shell for compatibility.
+See `docs/CLI.md` for execution boundaries, compatibility, and the advanced
+third-party-tool escape hatch.
 
 The launcher and Makefile choose `podman`, then `nerdctl`, then `docker`.
 Override the choice with the path or name of one compatible executable:
 
 ```sh
 SIPPYCUP_RUNTIME=docker make build
-SIPPYCUP_RUNTIME=docker ./bin/sippycup
+SIPPYCUP_RUNTIME=docker ./bin/sippycup shell
 ```
 
 Arguments cannot be embedded in `SIPPYCUP_RUNTIME`. Docker Desktop host
@@ -53,9 +60,9 @@ Linux does not permit rootless Podman to capture host interfaces merely by
 adding the container's namespaced `NET_RAW` capability. There are three
 capture options:
 
-- Run `./bin/sippycup --isolated` to capture the container's private network
-  namespace. This works rootlessly, but NAT may make advertised SIP/SDP
-  addresses unsuitable for inbound media.
+- Run `./bin/sippycup --isolated shell` to capture the container's private
+  network namespace. This works rootlessly, but NAT may make advertised
+  SIP/SDP addresses unsuitable for inbound media.
 - Capture on the host with its normal `tcpdump` or Wireshark permissions
   while running the toolbox rootlessly with host networking.
 - Run the image through the host's approved rootful Podman setup when both
@@ -132,7 +139,7 @@ configuration.
 Preview a narrowly scoped host capture:
 
 ```sh
-./bin/capture --target staging.example.invalid --dry-run
+./bin/sippycup capture --target staging.example.invalid --dry-run
 ```
 
 Remove `--dry-run` only after replacing the placeholder with an authorized
@@ -143,17 +150,17 @@ metadata alongside the PCAP.
 Run the low-impact network preflight:
 
 ```sh
-./bin/preflight staging.example.invalid 5060 udp
+./bin/sippycup preflight staging.example.invalid 5060 udp --dry-run
 ```
 
-Preflight resolves the address, checks the selected transport, and sends one
-SIP OPTIONS transaction. It does not enumerate users, try credentials, or
-generate load.
+Remove `--dry-run` only after reviewing the target. Live preflight resolves the
+address, checks the selected transport, and sends one SIP OPTIONS transaction.
+It does not enumerate users, try credentials, or generate load.
 
 Generate an offline report:
 
 ```sh
-./bin/report work/selftest.pcap
+./bin/sippycup report work/selftest.pcap
 # Equivalently:
 make report CAPTURE=work/selftest.pcap
 ```
@@ -238,9 +245,9 @@ The versioned campaign workflow turns written scope into a frozen,
 independently revalidated plan and a complete capture-to-report run directory:
 
 ```sh
-./bin/campaign plan campaign.yaml --resolve voice.test=10.20.30.40 \
+./bin/sippycup campaign plan campaign.yaml --resolve voice.test=10.20.30.40 \
   --output plan.json
-./bin/campaign execute plan.json --manifest campaign.yaml \
+./bin/sippycup campaign execute plan.json --manifest campaign.yaml \
   --run-root work/runs --interface any
 ```
 
@@ -270,7 +277,7 @@ Campaign runs also receive a deterministic sensitivity-labeled evidence
 manifest. Before sharing any run, use:
 
 ```sh
-sippycup-evidence lint work/runs/RUN
+./bin/sippycup evidence lint work/runs/RUN
 ```
 
 The lint blocks Authorization material, subscriber identifiers, unexpected
@@ -283,7 +290,7 @@ being distracted by regenerated SIP/RTP identifiers, ephemeral ports, frame
 numbers, or capture clock origin:
 
 ```sh
-sippycup-diff evidence/baseline evidence/candidate --format human
+./bin/sippycup diff evidence/baseline evidence/candidate --format human
 ```
 
 Codec, endpoint topology, one-way media, response/setup timing, assertion,
@@ -296,9 +303,9 @@ external minisign signing, age recipient encryption, and privacy-safe CI
 reports:
 
 ```sh
-sippycup-pack create work/runs/RUN evidence.tar --image-digest sha256:...
-sippycup-pack verify evidence.tar --format json
-sippycup-pack export-ci evidence.tar ci-results
+./bin/sippycup pack create work/runs/RUN evidence.tar --image-digest sha256:...
+./bin/sippycup pack verify evidence.tar --format json
+./bin/sippycup pack export-ci evidence.tar ci-results
 ```
 
 Signing and encryption remain optional; Sippycup never manages keys, and CI
@@ -320,15 +327,15 @@ command.
 Check SIP responsiveness and advertised methods:
 
 ```sh
-sipsak -vv -s "sip:${TARGET}"
-nmap -sU -p 5060 --script sip-methods "${TARGET}"
-sipvicious_svmap "${TARGET}"
+./bin/sippycup -- sipsak -vv -s "sip:${TARGET}"
+./bin/sippycup -- nmap -sU -p 5060 --script sip-methods "${TARGET}"
+./bin/sippycup -- sipvicious_svmap "${TARGET}"
 ```
 
 Capture signaling and common RTP ranges:
 
 ```sh
-tshark -i any \
+./bin/sippycup -- tshark -i any \
   -f "port 5060 or port 5061 or udp portrange 10000-20000" \
   -w /work/session.pcapng
 ```
@@ -336,13 +343,13 @@ tshark -i any \
 View SIP call flows:
 
 ```sh
-sngrep -d any
+./bin/sippycup -- sngrep -d any
 ```
 
 Run exactly one built-in SIPp UAC call at a low rate:
 
 ```sh
-sipp "${TARGET}:5060" -sn uac -m 1 -r 1
+./bin/sippycup -- sipp "${TARGET}:5060" -sn uac -m 1 -r 1
 ```
 
 That built-in scenario will not match every system. Authentication, SIP-TLS,
@@ -352,12 +359,13 @@ project-specific SIPp XML scenario.
 Inspect a SIP-TLS listener:
 
 ```sh
-testssl "${TARGET}:5061"
-sslscan "${TARGET}:5061"
+./bin/sippycup -- testssl "${TARGET}:5061"
+./bin/sippycup -- sslscan "${TARGET}:5061"
 ```
 
-Run `sipp -h`, `sipsak --help`, `tshark --help`, or
-`sipvicious_svmap --help` for the complete interfaces.
+Use the advanced escape hatch—for example,
+`./bin/sippycup -- sipp -h`—for the complete interfaces of bundled
+third-party tools.
 
 ## Packet loss, jitter, and reordering
 
@@ -365,7 +373,7 @@ Run `sipp -h`, `sipsak --help`, `tshark --help`, or
 The safest way to grant it is in an isolated container network namespace:
 
 ```sh
-./bin/sippycup --isolated --admin
+./bin/sippycup --isolated --admin shell
 ```
 
 For this isolated administrative mode the launcher also grants `SYS_ADMIN`
@@ -384,8 +392,8 @@ original qdisc, target only the intended traffic, and remove every test
 qdisc when finished:
 
 ```sh
-tc qdisc show
-tc qdisc del dev DEVICE root
+./bin/sippycup --admin -- tc qdisc show
+./bin/sippycup --admin -- tc qdisc del dev DEVICE root
 ```
 
 For routine work, a separate disposable VM or network namespace acting as an
@@ -396,10 +404,10 @@ no-change artifact. Probe the exact isolated impairment environment, then
 freeze the packet path and authorized target filters:
 
 ```sh
-./bin/sippycup --isolated --admin -- \
-  sippycup-chaos capabilities --output /work/chaos-capabilities.json
+./bin/sippycup --isolated --admin chaos capabilities \
+  --output /work/chaos-capabilities.json
 
-./bin/sippycup-chaos topology-plan \
+./bin/sippycup chaos topology-plan \
   --capabilities work/chaos-capabilities.json \
   --target 10.20.30.40/32 \
   --direction asymmetric \
@@ -415,7 +423,7 @@ Compile one of the seeded, bounded impairment profiles against the reviewed
 topology without changing the network:
 
 ```sh
-./bin/sippycup-chaos profile-plan \
+./bin/sippycup chaos profile-plan \
   work/topology.json profiles/chaos/jitter.yaml \
   --output work/impairment.json
 ```
@@ -431,7 +439,7 @@ process group, qdiscs, cleanup, exact post-run snapshot comparison, and paired
 PCAP measurements:
 
 ```sh
-./bin/sippycup-chaos run \
+./bin/sippycup --isolated --admin chaos run \
   --report work/chaos-run.json \
   work/topology.json work/impairment.json \
   -- sipp 198.51.100.20:5060 -sn uac -m 1 -r 1

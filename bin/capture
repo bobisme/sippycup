@@ -7,8 +7,8 @@ readonly project_dir
 usage() {
     cat <<'EOF'
 Usage:
-  ./bin/capture --target HOST [--target HOST ...] [options]
-  ./bin/capture --network CIDR [--network CIDR ...] [options]
+  ./bin/sippycup capture --target HOST [--target HOST ...] [options]
+  ./bin/sippycup capture --network CIDR [--network CIDR ...] [options]
 
 Capture only traffic involving explicitly supplied staging hosts or networks.
 All UDP to those scopes is included so negotiated RTP ports are not missed.
@@ -23,7 +23,7 @@ Options:
   -h, --help        Show this help.
 
 Example:
-  ./bin/capture --target staging.example.test --dry-run
+  ./bin/sippycup capture --target staging.example.test --dry-run
 EOF
 }
 

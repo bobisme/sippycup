@@ -61,7 +61,8 @@ class FinalIntegrationContractTests(unittest.TestCase):
             "trap 'exit 130' INT",
             "trap 'exit 143' TERM",
             "--cidfile=",
-            "podman stop --time 5",
+            '"${project_dir}/bin/container-runtime"',
+            '"${runtime}" stop --time 5',
             'kill -INT "${heartbeat_pid}"',
         ):
             self.assertIn(contract, source)

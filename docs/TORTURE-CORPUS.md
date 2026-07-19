@@ -70,7 +70,7 @@ Technical success deliberately leaves `ownerReview.status` as `pending` and
 `authorizationGranted` as false. Generate a machine-bound review packet:
 
 ```sh
-./bin/sippycup-torture review-template \
+./bin/sippycup torture review-template \
   --reviewer Quad \
   --output work/ferivox-assessment/torture-defaults-review.json
 ```
@@ -93,7 +93,7 @@ Quad can change `reviewStatus` to `approved`, add a unique `reviewId` and UTC
 `reviewedAt`, and return the exact file. Validate it against the current code:
 
 ```sh
-./bin/sippycup-torture validate-review \
+./bin/sippycup torture validate-review \
   work/ferivox-assessment/torture-defaults-review.json
 ```
 

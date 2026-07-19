@@ -1,6 +1,6 @@
 # Golden call behavior comparison
 
-`sippycup-diff` compares a reviewed baseline behavior pack with a candidate
+`./bin/sippycup diff` compares a reviewed baseline behavior pack with a candidate
 pack entirely offline. Each pack is a directory containing:
 
 - `canonical-model.json`, using `sippycup.learned-dialog/v1`;
@@ -12,10 +12,10 @@ oracle result supplies endpoint topology, media directions and metrics,
 assertion verdicts, and source-frame evidence. Neither input is modified.
 
 ```sh
-sippycup-diff evidence/baseline evidence/candidate --format human
-sippycup-diff evidence/baseline evidence/candidate --format json \
+./bin/sippycup diff evidence/baseline evidence/candidate --format human
+./bin/sippycup diff evidence/baseline evidence/candidate --format json \
   > behavior-diff.json
-sippycup-diff evidence/baseline evidence/candidate --format junit \
+./bin/sippycup diff evidence/baseline evidence/candidate --format junit \
   > behavior-diff.xml
 ```
 

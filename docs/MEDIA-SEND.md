@@ -77,11 +77,11 @@ audio and telephone-event echo counts, maximum send lateness, measured
 round-trip latency, and revision transition delay. It never presents
 round-trip time as one-way latency.
 
-`sippycup-media-echo` is a deadline- and packet-count-bounded fixture for
+`./bin/sippycup media-echo` is a deadline- and packet-count-bounded fixture for
 isolated loopback tests. For example:
 
 ```sh
-sippycup-media-echo --bind 127.0.0.1 --port 21000 \
+./bin/sippycup media-echo --bind 127.0.0.1 --port 21000 \
   --max-packets 71 --deadline-ms 4000 --telephone-event-pt 101
 ```
 
