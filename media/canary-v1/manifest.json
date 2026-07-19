@@ -1,0 +1,507 @@
+{
+  "assets": [
+    {
+      "amplitude_steps": [
+        {
+          "duration_ms": 100,
+          "id": "step_minus_24_dbfs",
+          "level_dbfs": -24.0,
+          "level_pcm": 2068,
+          "start_ms": 560
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_18_dbfs",
+          "level_dbfs": -18.0,
+          "level_pcm": 4125,
+          "start_ms": 680
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_12_dbfs",
+          "level_dbfs": -12.0,
+          "level_pcm": 8231,
+          "start_ms": 800
+        }
+      ],
+      "codec": "PCMU",
+      "direction": "caller_to_callee",
+      "duration_ms": 1000,
+      "encoded_bytes": 8000,
+      "filename": "caller_to_callee.pcmu",
+      "markers": [
+        {
+          "duration_ms": 70,
+          "end_hz": 975,
+          "id": "c2s-1",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 618,
+          "start_ms": 100
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 1216,
+          "id": "c2s-2",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 812,
+          "start_ms": 220
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 1449,
+          "id": "c2s-3",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 998,
+          "start_ms": 340
+        }
+      ],
+      "media_sample_rate_hz": 8000,
+      "packet_payload_bytes": 160,
+      "packetization_ms": 20,
+      "rtp_clock_rate_hz": 8000,
+      "sha256": "7ffb9db5ee550f59cfcd763de2ed5c7efe7d9ad23301363570ab212ccffb7145",
+      "silence_windows": [
+        {
+          "duration_ms": 80,
+          "id": "leading",
+          "start_ms": 0
+        },
+        {
+          "duration_ms": 100,
+          "id": "calibrated",
+          "start_ms": 440
+        },
+        {
+          "duration_ms": 80,
+          "id": "trailing",
+          "start_ms": 920
+        }
+      ],
+      "static_payload_type": 0
+    },
+    {
+      "amplitude_steps": [
+        {
+          "duration_ms": 100,
+          "id": "step_minus_24_dbfs",
+          "level_dbfs": -24.0,
+          "level_pcm": 2068,
+          "start_ms": 560
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_18_dbfs",
+          "level_dbfs": -18.0,
+          "level_pcm": 4125,
+          "start_ms": 680
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_12_dbfs",
+          "level_dbfs": -12.0,
+          "level_pcm": 8231,
+          "start_ms": 800
+        }
+      ],
+      "codec": "PCMA",
+      "direction": "caller_to_callee",
+      "duration_ms": 1000,
+      "encoded_bytes": 8000,
+      "filename": "caller_to_callee.pcma",
+      "markers": [
+        {
+          "duration_ms": 70,
+          "end_hz": 975,
+          "id": "c2s-1",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 618,
+          "start_ms": 100
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 1216,
+          "id": "c2s-2",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 812,
+          "start_ms": 220
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 1449,
+          "id": "c2s-3",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 998,
+          "start_ms": 340
+        }
+      ],
+      "media_sample_rate_hz": 8000,
+      "packet_payload_bytes": 160,
+      "packetization_ms": 20,
+      "rtp_clock_rate_hz": 8000,
+      "sha256": "11ff3f162f5be11f362f2e1e5279bbe75d19b8fc4b6419d9b812e18a4306ae86",
+      "silence_windows": [
+        {
+          "duration_ms": 80,
+          "id": "leading",
+          "start_ms": 0
+        },
+        {
+          "duration_ms": 100,
+          "id": "calibrated",
+          "start_ms": 440
+        },
+        {
+          "duration_ms": 80,
+          "id": "trailing",
+          "start_ms": 920
+        }
+      ],
+      "static_payload_type": 8
+    },
+    {
+      "amplitude_steps": [
+        {
+          "duration_ms": 100,
+          "id": "step_minus_24_dbfs",
+          "level_dbfs": -24.0,
+          "level_pcm": 2068,
+          "start_ms": 560
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_18_dbfs",
+          "level_dbfs": -18.0,
+          "level_pcm": 4125,
+          "start_ms": 680
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_12_dbfs",
+          "level_dbfs": -12.0,
+          "level_pcm": 8231,
+          "start_ms": 800
+        }
+      ],
+      "codec": "G722",
+      "direction": "caller_to_callee",
+      "duration_ms": 1000,
+      "encoded_bytes": 8000,
+      "filename": "caller_to_callee.g722",
+      "markers": [
+        {
+          "duration_ms": 70,
+          "end_hz": 975,
+          "id": "c2s-1",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 618,
+          "start_ms": 100
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 1216,
+          "id": "c2s-2",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 812,
+          "start_ms": 220
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 1449,
+          "id": "c2s-3",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 998,
+          "start_ms": 340
+        }
+      ],
+      "media_sample_rate_hz": 16000,
+      "packet_payload_bytes": 160,
+      "packetization_ms": 20,
+      "rtp_clock_rate_hz": 8000,
+      "sha256": "671b1fa4a66c06bffcac99d83623291adf76a61146dd95823fec11053b52e3e6",
+      "silence_windows": [
+        {
+          "duration_ms": 80,
+          "id": "leading",
+          "start_ms": 0
+        },
+        {
+          "duration_ms": 100,
+          "id": "calibrated",
+          "start_ms": 440
+        },
+        {
+          "duration_ms": 80,
+          "id": "trailing",
+          "start_ms": 920
+        }
+      ],
+      "static_payload_type": 9
+    },
+    {
+      "amplitude_steps": [
+        {
+          "duration_ms": 100,
+          "id": "step_minus_24_dbfs",
+          "level_dbfs": -24.0,
+          "level_pcm": 2068,
+          "start_ms": 560
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_18_dbfs",
+          "level_dbfs": -18.0,
+          "level_pcm": 4125,
+          "start_ms": 680
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_12_dbfs",
+          "level_dbfs": -12.0,
+          "level_pcm": 8231,
+          "start_ms": 800
+        }
+      ],
+      "codec": "PCMU",
+      "direction": "callee_to_caller",
+      "duration_ms": 1000,
+      "encoded_bytes": 8000,
+      "filename": "callee_to_caller.pcmu",
+      "markers": [
+        {
+          "duration_ms": 70,
+          "end_hz": 638,
+          "id": "s2c-1",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 995,
+          "start_ms": 100
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 775,
+          "id": "s2c-2",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 1179,
+          "start_ms": 220
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 957,
+          "id": "s2c-3",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 1408,
+          "start_ms": 340
+        }
+      ],
+      "media_sample_rate_hz": 8000,
+      "packet_payload_bytes": 160,
+      "packetization_ms": 20,
+      "rtp_clock_rate_hz": 8000,
+      "sha256": "bc5bc5a66dcacc6e6d408b0f69c63e02e432d18af78c8bef82c9cbacdb3c420f",
+      "silence_windows": [
+        {
+          "duration_ms": 80,
+          "id": "leading",
+          "start_ms": 0
+        },
+        {
+          "duration_ms": 100,
+          "id": "calibrated",
+          "start_ms": 440
+        },
+        {
+          "duration_ms": 80,
+          "id": "trailing",
+          "start_ms": 920
+        }
+      ],
+      "static_payload_type": 0
+    },
+    {
+      "amplitude_steps": [
+        {
+          "duration_ms": 100,
+          "id": "step_minus_24_dbfs",
+          "level_dbfs": -24.0,
+          "level_pcm": 2068,
+          "start_ms": 560
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_18_dbfs",
+          "level_dbfs": -18.0,
+          "level_pcm": 4125,
+          "start_ms": 680
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_12_dbfs",
+          "level_dbfs": -12.0,
+          "level_pcm": 8231,
+          "start_ms": 800
+        }
+      ],
+      "codec": "PCMA",
+      "direction": "callee_to_caller",
+      "duration_ms": 1000,
+      "encoded_bytes": 8000,
+      "filename": "callee_to_caller.pcma",
+      "markers": [
+        {
+          "duration_ms": 70,
+          "end_hz": 638,
+          "id": "s2c-1",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 995,
+          "start_ms": 100
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 775,
+          "id": "s2c-2",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 1179,
+          "start_ms": 220
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 957,
+          "id": "s2c-3",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 1408,
+          "start_ms": 340
+        }
+      ],
+      "media_sample_rate_hz": 8000,
+      "packet_payload_bytes": 160,
+      "packetization_ms": 20,
+      "rtp_clock_rate_hz": 8000,
+      "sha256": "84fcbe73058ef1055ebd1d744515c47e6098c5d526c982051e97a183ea985ff6",
+      "silence_windows": [
+        {
+          "duration_ms": 80,
+          "id": "leading",
+          "start_ms": 0
+        },
+        {
+          "duration_ms": 100,
+          "id": "calibrated",
+          "start_ms": 440
+        },
+        {
+          "duration_ms": 80,
+          "id": "trailing",
+          "start_ms": 920
+        }
+      ],
+      "static_payload_type": 8
+    },
+    {
+      "amplitude_steps": [
+        {
+          "duration_ms": 100,
+          "id": "step_minus_24_dbfs",
+          "level_dbfs": -24.0,
+          "level_pcm": 2068,
+          "start_ms": 560
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_18_dbfs",
+          "level_dbfs": -18.0,
+          "level_pcm": 4125,
+          "start_ms": 680
+        },
+        {
+          "duration_ms": 100,
+          "id": "step_minus_12_dbfs",
+          "level_dbfs": -12.0,
+          "level_pcm": 8231,
+          "start_ms": 800
+        }
+      ],
+      "codec": "G722",
+      "direction": "callee_to_caller",
+      "duration_ms": 1000,
+      "encoded_bytes": 8000,
+      "filename": "callee_to_caller.g722",
+      "markers": [
+        {
+          "duration_ms": 70,
+          "end_hz": 638,
+          "id": "s2c-1",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 995,
+          "start_ms": 100
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 775,
+          "id": "s2c-2",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 1179,
+          "start_ms": 220
+        },
+        {
+          "duration_ms": 70,
+          "end_hz": 957,
+          "id": "s2c-3",
+          "level_dbfs": -9.0,
+          "level_pcm": 11600,
+          "start_hz": 1408,
+          "start_ms": 340
+        }
+      ],
+      "media_sample_rate_hz": 16000,
+      "packet_payload_bytes": 160,
+      "packetization_ms": 20,
+      "rtp_clock_rate_hz": 8000,
+      "sha256": "8c8e8f159a7143ecf13d8376e0435084195fd8289307cc1e47f55012b81403f8",
+      "silence_windows": [
+        {
+          "duration_ms": 80,
+          "id": "leading",
+          "start_ms": 0
+        },
+        {
+          "duration_ms": 100,
+          "id": "calibrated",
+          "start_ms": 440
+        },
+        {
+          "duration_ms": 80,
+          "id": "trailing",
+          "start_ms": 920
+        }
+      ],
+      "static_payload_type": 9
+    }
+  ],
+  "license": "CC0-1.0",
+  "schema": "sippycup-audio-canary-v1",
+  "seed": "0x5a17c0de",
+  "source_authority": "lib/sippycup_media/canary.py",
+  "synthetic_speech": false,
+  "thresholds": {
+    "clipping_abs_pcm": 32760,
+    "marker_min_correlation": 0.8,
+    "marker_position_tolerance_ms": 20,
+    "silence_max_abs_pcm": 104
+  }
+}

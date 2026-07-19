@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schemas/media-analysis-result-v1.schema.json",
+  "title": "Sippycup calibrated media analysis result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "measurementStatus",
+    "reason",
+    "codec",
+    "direction",
+    "packetizationToleranceMs",
+    "uncertainty",
+    "claims",
+    "metrics",
+    "markers",
+    "regions",
+    "assertionFacts"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "sippycup.media-analysis-result/v1"
+    },
+    "measurementStatus": {
+      "enum": [
+        "measured",
+        "not_measurable"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "codec": {
+      "type": "string"
+    },
+    "direction": {
+      "enum": [
+        "caller_to_callee",
+        "callee_to_caller"
+      ]
+    },
+    "packetizationToleranceMs": {
+      "const": 20
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "markerPositionMs",
+        "roundTripMs"
+      ],
+      "properties": {
+        "markerPositionMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "roundTripMs": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mos",
+        "oneWayLatency",
+        "roundTripLatency"
+      ],
+      "properties": {
+        "mos": {
+          "const": false
+        },
+        "oneWayLatency": {
+          "const": false
+        },
+        "roundTripLatency": {
+          "type": "boolean"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acquisitionTimeMs",
+        "roundTripLatencyMs",
+        "dropouts",
+        "clippingSamples",
+        "grossGainChangeDb",
+        "durationDriftMs",
+        "directionSwap",
+        "unexpectedEnergyWindows",
+        "missingRegions"
+      ],
+      "properties": {
+        "acquisitionTimeMs": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "roundTripLatencyMs": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "dropouts": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "clippingSamples": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "grossGainChangeDb": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "durationDriftMs": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "directionSwap": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "unexpectedEnergyWindows": {
+          "$ref": "#/$defs/typed_value"
+        },
+        "missingRegions": {
+          "$ref": "#/$defs/typed_value"
+        }
+      }
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "assertionFacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assertion_result"
+      }
+    }
+  },
+  "$defs": {
+    "typed_value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "value"
+          ],
+          "properties": {
+            "state": {
+              "const": "known"
+            },
+            "value": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "reason",
+            "detail"
+          ],
+          "properties": {
+            "state": {
+              "const": "unknown"
+            },
+            "reason": {
+              "enum": [
+                "missing_field",
+                "unsupported_encryption",
+                "unsupported_protocol"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "assertion_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "verdict",
+        "applicability",
+        "message",
+        "evidence",
+        "observed"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ]
+        },
+        "applicability": {
+          "enum": [
+            "applicable",
+            "unknown"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "observed": {
+          "$ref": "#/$defs/typed_value"
+        }
+      }
+    }
+  }
+}

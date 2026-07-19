@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Sippycup negotiated media sender entry point."""
+
+from pathlib import Path
+import sys
+
+source_lib = Path(__file__).resolve().parents[1] / "lib"
+if not (source_lib / "sippycup_media").is_dir():
+    source_lib = Path("/usr/local/lib")
+sys.path.insert(0, str(source_lib))
+
+from sippycup_media.cli import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
