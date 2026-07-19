@@ -1,0 +1,7 @@
+{
+  "profile": "srtp",
+  "requireMutualTls": false,
+  "minimumTlsVersion": "TLS1.2",
+  "allowRtpFallback": false,
+  "requireReplayProtection": true
+}

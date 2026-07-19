@@ -1,0 +1,10 @@
+{
+  "certificateValid": true,
+  "hostnameValid": true,
+  "mutualTls": false,
+  "tlsVersion": "TLS1.3",
+  "mediaProfile": "SRTP",
+  "authenticationValid": true,
+  "replayAccepted": false,
+  "keyMaterialExposed": false
+}

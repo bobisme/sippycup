@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Bounded voice-edge resilience oracles."""
+
+from __future__ import annotations
+
+import sys
+
+sys.path.insert(0, "/usr/local/lib")
+
+from sippycup_resilience.cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

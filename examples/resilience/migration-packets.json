@@ -1,0 +1,12 @@
+[
+  {
+    "source": {
+      "address": "192.0.2.10",
+      "port": 20000
+    },
+    "ssrc": 1372326417,
+    "authenticated": true,
+    "consentFresh": true,
+    "afterTeardown": false
+  }
+]

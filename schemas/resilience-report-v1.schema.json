@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/resilience-report-v1.schema.json",
+  "title": "Sippycup resilience oracle report",
+  "oneOf": [
+    {"$ref": "#/$defs/isolation"},
+    {"$ref": "#/$defs/lifecycle"},
+    {"$ref": "#/$defs/overload"},
+    {"$ref": "#/$defs/secureMedia"},
+    {"$ref": "#/$defs/migration"}
+  ],
+  "$defs": {
+    "status": {"enum": ["pass", "fail"]},
+    "findings": {
+      "type": "array",
+      "maxItems": 1000000,
+      "items": {
+        "type": "object",
+        "required": ["severity", "code"],
+        "properties": {
+          "severity": {"const": "fail"},
+          "code": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": true
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "required": ["apiVersion", "status", "plannedCalls", "observedCalls", "observations", "findings", "capacityClaim"],
+      "properties": {
+        "apiVersion": {"const": "sippycup.dev/isolation-report/v1"},
+        "status": {"$ref": "#/$defs/status"},
+        "plannedCalls": {"type": "integer", "minimum": 2, "maximum": 4096},
+        "observedCalls": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "observations": {"type": "integer", "minimum": 0, "maximum": 262144},
+        "findings": {"$ref": "#/$defs/findings"},
+        "capacityClaim": {"type": "null"}
+      },
+      "additionalProperties": false
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": ["apiVersion", "status", "cycles", "scenariosObserved", "baseline", "maxSettled", "memorySlopeBytesPerCycle", "findings", "scaleClaim"],
+      "properties": {
+        "apiVersion": {"const": "sippycup.dev/lifecycle-report/v1"},
+        "status": {"$ref": "#/$defs/status"},
+        "cycles": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "scenariosObserved": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "baseline": {"$ref": "#/$defs/resources"},
+        "maxSettled": {"$ref": "#/$defs/resources"},
+        "memorySlopeBytesPerCycle": {"type": "number"},
+        "findings": {"$ref": "#/$defs/findings"},
+        "scaleClaim": {"type": "null"}
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "required": ["sessions", "sockets", "tasks", "memoryBytes"],
+      "properties": {
+        "sessions": {"type": "integer", "minimum": 0},
+        "sockets": {"type": "integer", "minimum": 0},
+        "tasks": {"type": "integer", "minimum": 0},
+        "memoryBytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "overload": {
+      "type": "object",
+      "required": ["apiVersion", "status", "transactions", "logicalRequests", "maximumAttempts", "clientSuccessPercent", "findings", "capacityClaim"],
+      "properties": {
+        "apiVersion": {"const": "sippycup.dev/overload-report/v1"},
+        "status": {"$ref": "#/$defs/status"},
+        "transactions": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "logicalRequests": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "maximumAttempts": {"type": "integer", "minimum": 1, "maximum": 32},
+        "clientSuccessPercent": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 100}
+        },
+        "findings": {"$ref": "#/$defs/findings"},
+        "capacityClaim": {"type": "null"}
+      },
+      "additionalProperties": false
+    },
+    "secureMedia": {
+      "type": "object",
+      "required": ["apiVersion", "status", "profile", "findings", "cryptographicStrengthClaim"],
+      "properties": {
+        "apiVersion": {"const": "sippycup.dev/secure-media-report/v1"},
+        "status": {"$ref": "#/$defs/status"},
+        "profile": {"enum": ["sip-tls", "srtp", "dtls-srtp"]},
+        "findings": {"$ref": "#/$defs/findings"},
+        "cryptographicStrengthClaim": {"type": "null"}
+      },
+      "additionalProperties": false
+    },
+    "migration": {
+      "type": "object",
+      "required": ["apiVersion", "status", "acceptedPackets", "rejectedPackets", "migrations", "activeTuple", "findings", "redirectClaim"],
+      "properties": {
+        "apiVersion": {"const": "sippycup.dev/migration-report/v1"},
+        "status": {"$ref": "#/$defs/status"},
+        "acceptedPackets": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "rejectedPackets": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "migrations": {"type": "array", "maxItems": 1000000},
+        "activeTuple": {"$ref": "#/$defs/tuple"},
+        "findings": {"$ref": "#/$defs/findings"},
+        "redirectClaim": {"type": "null"}
+      },
+      "additionalProperties": false
+    },
+    "tuple": {
+      "type": "object",
+      "required": ["address", "port"],
+      "properties": {
+        "address": {"type": "string", "minLength": 1, "maxLength": 64},
+        "port": {"type": "integer", "minimum": 1024, "maximum": 65535}
+      },
+      "additionalProperties": false
+    }
+  }
+}
