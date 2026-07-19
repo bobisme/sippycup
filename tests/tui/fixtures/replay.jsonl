@@ -1,0 +1,7 @@
+{"schema":"sippycup.ui-event/v1","sequence":1,"source":"campaign","kind":"plan.started","payload":{"campaign":"fixture"}}
+{"schema":"sippycup.ui-event/v1","sequence":2,"source":"campaign","kind":"plan.ready","payload":{"cases":2}}
+{"schema":"sippycup.ui-event/v1","sequence":3,"source":"campaign","kind":"run.started","payload":{}}
+{"schema":"sippycup.ui-event/v1","sequence":4,"source":"campaign","kind":"run.warning","payload":{"message":"jitter budget near limit"}}
+{"schema":"sippycup.ui-event/v1","sequence":5,"source":"campaign","kind":"stop.requested","payload":{"reason":"operator"}}
+{"schema":"sippycup.ui-event/v1","sequence":6,"source":"campaign","kind":"recovery.started","payload":{}}
+{"schema":"sippycup.ui-event/v1","sequence":7,"source":"campaign","kind":"run.completed","payload":{"result":"recovered"}}
