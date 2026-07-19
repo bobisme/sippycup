@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Canonical golden behavior comparison."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from sippycup_learn import (
+    CanonicalizationError,
+    compare_behavior_packs,
+    render_diff_human,
+    render_diff_json,
+    render_diff_junit,
+)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="sippycup-diff")
+    parser.add_argument("baseline", type=Path)
+    parser.add_argument("candidate", type=Path)
+    parser.add_argument("--timing-tolerance-ms", type=int, default=20)
+    parser.add_argument("--format", choices=("human", "json", "junit"), default="human")
+    arguments = parser.parse_args(argv)
+    try:
+        result = compare_behavior_packs(
+            arguments.baseline,
+            arguments.candidate,
+            timing_tolerance_ms=arguments.timing_tolerance_ms,
+        )
+    except (CanonicalizationError, OSError) as error:
+        print(f"sippycup-diff: error: {error}", file=sys.stderr)
+        return 2
+    renderer = {
+        "human": render_diff_human,
+        "json": render_diff_json,
+        "junit": render_diff_junit,
+    }[arguments.format]
+    sys.stdout.write(renderer(result))
+    return 0 if result["verdict"] == "equal" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

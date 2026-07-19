@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/golden-behavior-diff-v1.schema.json",
+  "title": "Sippycup golden behavior diff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "normalizationVersion",
+    "verdict",
+    "summary",
+    "timingToleranceMs",
+    "changes"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/golden-behavior-diff/v1"},
+    "kind": {"const": "GoldenBehaviorDiff"},
+    "normalizationVersion": {
+      "const": "sippycup.dev/golden-behavior-normalization/v1"
+    },
+    "verdict": {"enum": ["equal", "different"]},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeCount", "categories"],
+      "properties": {
+        "changeCount": {"type": "integer", "minimum": 0},
+        "categories": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "timingToleranceMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "path",
+          "baseline",
+          "candidate",
+          "evidence"
+        ],
+        "properties": {
+          "category": {
+            "enum": [
+              "assertion",
+              "codec",
+              "dialog",
+              "endpoint-topology",
+              "media",
+              "post-bye",
+              "response-timing",
+              "sdp"
+            ]
+          },
+          "path": {"type": "string", "minLength": 1},
+          "baseline": true,
+          "candidate": true,
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["baseline", "candidate"],
+            "properties": {
+              "baseline": {"type": "array"},
+              "candidate": {"type": "array"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
