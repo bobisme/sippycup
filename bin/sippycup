@@ -5,6 +5,20 @@ project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly project_dir
 readonly image="${SIPPYCUP_IMAGE:-localhost/sippycup:latest}"
 
+case "${1:-}" in
+    doctor)
+        shift
+        if [[ "${1:-}" == "--host" ]]; then
+            shift
+            exec "${project_dir}/bin/sippycup-workbench" doctor "$@"
+        fi
+        set -- sippycup-workbench doctor "$@"
+        ;;
+    init|rehearse|one-call|triage|explain|journal|status)
+        exec "${project_dir}/bin/sippycup-workbench" "$@"
+        ;;
+esac
+
 if [[ "${1:-}" == "assert" ]]; then
     shift
     exec "${project_dir}/bin/sippycup-assert" "$@"
@@ -25,6 +39,10 @@ if [[ "${1:-}" == "resilience" ]]; then
     PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
         exec "${project_dir}/bin/sippycup-resilience" "$@"
 fi
+
+runtime="$("${project_dir}/bin/container-runtime")"
+readonly runtime
+readonly runtime_name="$(basename -- "${runtime}")"
 
 caps=(--cap-add=NET_RAW --cap-add=NET_BIND_SERVICE)
 devices=()
@@ -72,12 +90,20 @@ dedicated test VM, and always remove qdiscs and firewall rules afterward.
 EOF
 fi
 
+if [[ "${runtime_name}" == docker && "$(uname -s)" != Linux && ${#network[@]} -gt 0 ]]; then
+    cat >&2 <<'EOF'
+WARNING: Docker Desktop host networking is version- and configuration-dependent.
+If the target or capture path is unreachable, enable host networking in Docker
+Desktop or use a Linux Podman/Docker host. Sippycup will not rewrite the target.
+EOF
+fi
+
 terminal=()
 if [[ -t 0 && -t 1 ]]; then
     terminal=(-it)
 fi
 
-exec podman run \
+exec "${runtime}" run \
     --rm \
     "${terminal[@]}" \
     "${network[@]}" \

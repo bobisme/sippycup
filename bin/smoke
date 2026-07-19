@@ -12,17 +12,20 @@ commands=(
     campaign-integration-selftest
     capinfos
     dumpcap
+    editcap
     ffmpeg
     gst-launch-1.0
     hping3
     iperf3
     minisign
+    mergecap
     nc
     ngrep
     nmap
     nsenter
     openssl
     pasta
+    pjsua
     scapy
     setpriv
     sipp
@@ -43,6 +46,7 @@ commands=(
     sippycup-torture
     sippycup-ui
     sippycup-resilience
+    sippycup-workbench
     sippycup-report
     sippycup-selftest
     sngrep
@@ -54,7 +58,12 @@ commands=(
     tcpreplay
     termshark
     testssl
+    text2pcap
     tshark
+    turnutils_peer
+    turnutils_stunclient
+    turnutils_uclient
+    reordercap
 )
 
 missing=0
@@ -80,6 +89,7 @@ import sippycup_resilience
 import sippycup_oracle
 import sippycup_torture
 import sippycup_tui
+import sippycup_workbench
 print("ok       Python modules: dependencies and all first-party packages")
 PY
 
@@ -100,11 +110,33 @@ first_party_help=(
     sippycup-torture
     sippycup-ui
     sippycup-resilience
+    sippycup-workbench
 )
 for tool in "${first_party_help[@]}"; do
     "${tool}" --help >/dev/null
     printf 'ok       %s --help\n' "${tool}"
 done
+
+journal_parent="$(mktemp -d)"
+sippycup-workbench journal init "${journal_parent}/assessment" >/dev/null
+sippycup-workbench journal add "${journal_parent}/assessment" \
+    --kind note --summary "container smoke journal entry" >/dev/null
+sippycup-workbench journal verify "${journal_parent}/assessment" >/dev/null
+printf 'ok       workbench journal lifecycle\n'
+
+sippycup-torture exit-gate >/dev/null
+printf 'ok       torture technical exit gate\n'
+
+set +e
+status_json="$(
+    sippycup-workbench status "${journal_parent}/assessment" --format json
+)"
+status_code=$?
+set -e
+test "${status_code}" -eq 1
+printf '%s' "${status_json}" \
+    | jq -e '.networkActivity == false and .overall == "blocked"' >/dev/null
+printf 'ok       offline engagement advisor\n'
 
 printf '\nSIPp build:\n'
 set +e
@@ -118,3 +150,19 @@ if [[ "${sipp_status}" -ne 0 && "${sipp_status}" -ne 99 ]]; then
 fi
 
 printf '%s\n' "${sipp_version}" | sed -n '1,8p'
+
+printf '\nPJSUA build:\n'
+pjsua_version="$(pjsua --version 2>&1)"
+printf '%s\n' "${pjsua_version}" | sed -n '1,12p'
+if ! printf '%s\n' "${pjsua_version}" | grep -q 'PJ_VERSION[[:space:]]*: 2.17'; then
+    printf 'PJSUA did not report the pinned 2.17 version.\n' >&2
+    exit 1
+fi
+if ! printf '%s\n' "${pjsua_version}" | grep -q 'PJ_HAS_IPV6[[:space:]]*: 1'; then
+    printf 'PJSUA was built without required IPv6 support.\n' >&2
+    exit 1
+fi
+if ! printf '%s\n' "${pjsua_version}" | grep -q 'PJ_HAS_SSL_SOCK[[:space:]]*: 1'; then
+    printf 'PJSUA was built without required TLS support.\n' >&2
+    exit 1
+fi

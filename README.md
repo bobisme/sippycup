@@ -2,10 +2,11 @@
 
 ![Sippycup voice-network assessment toolbox](assets/sippycup-readme-hero.png)
 
-A Podman toolbox for authorized, network-only assessment of SIP/RTP voice
-systems. It contains call generators, protocol viewers, packet capture and
-replay tools, network impairment tools, TLS scanners, softphone/media
-utilities, and programmable packet mutation libraries.
+A containerized toolbox for authorized, network-only assessment of SIP/RTP
+voice systems. It contains call generators, protocol viewers, packet capture
+and replay tools, network impairment tools, TLS scanners, softphone/media
+utilities, and programmable packet mutation libraries. Podman is preferred;
+nerdctl and Docker are supported fallbacks.
 
 Use it only against the exact staging addresses and credentials covered by
 your test authorization. Keep carrier trunks and unrelated networks out of
@@ -22,6 +23,18 @@ make report
 ./bin/sippycup
 ```
 
+The launcher and Makefile choose `podman`, then `nerdctl`, then `docker`.
+Override the choice with the path or name of one compatible executable:
+
+```sh
+SIPPYCUP_RUNTIME=docker make build
+SIPPYCUP_RUNTIME=docker ./bin/sippycup
+```
+
+Arguments cannot be embedded in `SIPPYCUP_RUNTIME`. Docker Desktop host
+networking is version- and configuration-dependent; the launcher warns on
+non-Linux Docker hosts rather than silently rewriting destinations.
+
 For a release candidate on a disposable Linux runner, `make full-gate` adds
 the real nine-profile rootless chaos/host-isolation matrix to the ordinary
 campaign, oracle, media, UI, learned-pack, torture, smoke, and loopback gates.
@@ -30,7 +43,7 @@ tracker data, VCS data, and host bytecode via `.containerignore`.
 
 `make selftest` completes a closed-loop SIPp call on loopback and writes
 `work/selftest.pcap`. It uses the isolated mode so signaling and packet
-capture work under rootless Podman.
+capture work under a rootless runtime.
 
 The launcher uses the host network so SIP and SDP advertise reachable
 addresses. Files written under `/work` appear in `~/src/sippycup/work`.
@@ -54,9 +67,10 @@ Do not casually add `--privileged`.
 
 | Purpose | Tools |
 |---|---|
-| SIP calls and diagnostics | SIPp 3.7.7 with PCAP, TLS, and SCTP; sipsak; baresip |
+| SIP calls and diagnostics | SIPp 3.7.7 with PCAP, TLS, and SCTP; checksum-pinned PJSUA 2.17; sipsak; baresip |
+| NAT traversal diagnostics | coturn STUN/TURN clients and RFC 5769 checker; PJSUA ICE/TURN |
 | SIP security checks | SIPVicious; Nmap SIP NSE scripts |
-| Capture and inspection | Wireshark CLI (`tshark`, `dumpcap`); tcpdump; sngrep; ngrep |
+| Capture and inspection | Wireshark CLI (`tshark`, `dumpcap`, `capinfos`, `editcap`, `mergecap`, `reordercap`, `text2pcap`); tcpdump; sngrep; ngrep |
 | Terminal packet UI | Termshark |
 | RTP/media production | SIPp PCAP playback; GStreamer; FFmpeg; SoX; baresip |
 | Packet construction and fuzzing | Scapy; boofuzz; hping3; socat; netcat (`nc`) |
@@ -70,6 +84,45 @@ accounts and attempt limits before using it; do not point credential testing
 at real customer accounts.
 
 ## Prepared workflows
+
+Start with the zero-network workbench:
+
+```sh
+./bin/sippycup doctor
+./bin/sippycup init config/ferivox-staging.yaml
+./bin/sippycup rehearse config/ferivox-staging.yaml
+./bin/sippycup one-call config/ferivox-staging.yaml
+./bin/sippycup triage work/selftest.pcap
+```
+
+`doctor` runs inside the prepared image so its answer describes the toolbox
+you will actually use, not whichever utilities happen to be installed on the
+host. Use `./bin/sippycup doctor --host` only when you explicitly want a
+host-side inventory.
+
+`init` deliberately creates a pending profile with no invented addresses or
+approval. `rehearse` remains blocked until the profile contains Quad's
+approval identifier, validity window, literal approved addresses, and finite
+limits. `one-call` only prints the reviewed sequence; it never executes its
+network-active steps. See `docs/WORKBENCH.md`.
+
+Create a private, hash-chained engagement journal before testing:
+
+```sh
+./bin/sippycup journal init work/ferivox-assessment
+./bin/sippycup journal add work/ferivox-assessment \
+  --kind hypothesis --summary "Record a bounded, testable security hypothesis"
+./bin/sippycup journal verify work/ferivox-assessment
+./bin/sippycup status work/ferivox-assessment
+```
+
+Campaign run directories retain the machine record; the journal retains
+authorization changes, hypotheses, observations, findings, decisions, and
+evidence links. It can render a confidential internal assessment draft or a
+publication outline that deliberately contains none of the private journal
+text. `status` verifies these records and recommends only network-free next
+steps; it never executes target traffic. See `docs/ASSESSMENT-WORKFLOW.md` for
+the end-to-end execution and recordkeeping framework.
 
 Copy `config/target.env.example` to the ignored `config/target.env` when the
 staging details arrive. It is a worksheet only; scripts require targets on
@@ -123,9 +176,13 @@ RFC 4733, and RTCP cases for later use by the guarded state-aware runner:
 
 ```sh
 make torture-test
+make torture-exit-gate
 ```
 
-See `docs/TORTURE-CORPUS.md` for its safety boundary and case metadata.
+The technical exit gate produces a deterministic offline safety proof and a
+separate current-code digest for Quad's default-limit review. Neither artifact
+authorizes live traffic. See `docs/TORTURE-CORPUS.md` for the corpus, safety
+boundary, owner-review packet, and validation workflow.
 
 Open the same capture in a terminal UI:
 
@@ -135,6 +192,10 @@ Open the same capture in a terminal UI:
 
 See `docs/CALL-CHECKLIST.md` for the details to request and a repeatable
 manual-call procedure.
+
+Heavyweight ViSQOL, Zeek, HOMER/HEP, and Pion WebRTC integrations are kept
+outside the core image. Their scope and admission criteria are documented in
+`docs/OPTIONAL-PROFILES.md`.
 
 The repository also includes deterministic one-second PCMU, PCMA, and G.722
 audio canaries for both call directions. Their source generator, packetization,
@@ -381,10 +442,8 @@ paired observation syntax, sample minimums, and kernel tolerances.
 
 ## Suggested evidence to save
 
-- The exact command and UTC start/end time.
-- Source and destination addresses and ports.
-- SIPp CSV/log output.
-- A bounded PCAP covering the failure.
-- Server CPU, memory, socket and active-session metrics.
-- Whether the service recovered without a restart.
-- The agreed packet rate, call rate, concurrency, and stop conditions.
+Use the campaign run directory for exact commands, UTC times, addresses,
+tool versions, SIPp output, bounded PCAPs, reports, results, and the structured
+event timeline. Use the assessment journal for authorization, hypotheses,
+observations, decisions, recovery notes, and links to server-side metrics.
+Do not rely on shell history or chat transcripts as the assessment record.

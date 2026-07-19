@@ -1,16 +1,16 @@
 IMAGE ?= localhost/sippycup:latest
 CAPTURE ?= work/selftest.pcap
 
-.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-test tui-test
+.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test workbench-test
 
 build:
-	podman build --tag "$(IMAGE)" --file Containerfile .
+	"$$(./bin/container-runtime)" build --tag "$(IMAGE)" --file Containerfile .
 
 shell:
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup
 
 smoke:
-	podman run --rm "$(IMAGE)" sippycup-smoke
+	"$$(./bin/container-runtime)" run --rm "$(IMAGE)" sippycup-smoke
 
 report:
 	./bin/report "$(CAPTURE)"
@@ -57,6 +57,7 @@ campaign-gate:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 	$(MAKE) oracle-test
 	$(MAKE) torture-test
+	$(MAKE) torture-exit-gate
 	$(MAKE) tui-test
 	$(MAKE) learn-test
 	$(MAKE) smoke
@@ -92,6 +93,9 @@ oracle-test:
 torture-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/torture -v
 
+torture-exit-gate:
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 ./bin/sippycup-torture exit-gate
+
 tui-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tui -v
 
@@ -100,3 +104,6 @@ learn-test:
 
 resilience-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/resilience -v
+
+workbench-test:
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_workbench tests.test_journal tests.test_advisor -v
