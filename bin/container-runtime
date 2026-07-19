@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${SIPPYCUP_RUNTIME:-}" ]]; then
+    if [[ "${SIPPYCUP_RUNTIME}" =~ [[:space:]] ]]; then
+        printf 'SIPPYCUP_RUNTIME must name one executable without arguments.\n' >&2
+        exit 2
+    fi
+    if ! command -v -- "${SIPPYCUP_RUNTIME}" >/dev/null 2>&1; then
+        printf 'Configured container runtime was not found: %s\n' "${SIPPYCUP_RUNTIME}" >&2
+        exit 2
+    fi
+    command -v -- "${SIPPYCUP_RUNTIME}"
+    exit 0
+fi
+
+for candidate in podman nerdctl docker; do
+    if command -v -- "${candidate}" >/dev/null 2>&1; then
+        command -v -- "${candidate}"
+        exit 0
+    fi
+done
+
+printf '%s\n' \
+    'No supported container runtime found.' \
+    'Install Podman (preferred), nerdctl with containerd, or Docker, or set' \
+    'SIPPYCUP_RUNTIME to a compatible executable.' >&2
+exit 1

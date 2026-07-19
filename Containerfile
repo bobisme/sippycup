@@ -39,9 +39,53 @@ RUN cmake \
         -DUSE_SSL=1 \
     && cmake --build /build/sipp --parallel
 
+FROM ${DEBIAN_IMAGE} AS pjsip-builder
+
+ARG PJSIP_VERSION=2.17
+ARG PJSIP_SHA256=065fe06c06788d97c35f563796d59f00ce52fe9558a52d7b490a042a966facce
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        libasound2-dev \
+        libopus-dev \
+        libsrtp2-dev \
+        libssl-dev \
+        libuuid1 \
+        pkg-config \
+        uuid-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --fail --location --show-error \
+        "https://github.com/pjsip/pjproject/archive/refs/tags/${PJSIP_VERSION}.tar.gz" \
+        --output /tmp/pjproject.tar.gz \
+    && echo "${PJSIP_SHA256}  /tmp/pjproject.tar.gz" | sha256sum --check - \
+    && mkdir -p /src/pjproject \
+    && tar --extract --gzip --file /tmp/pjproject.tar.gz \
+        --directory /src/pjproject --strip-components=1 \
+    && rm /tmp/pjproject.tar.gz
+
+RUN cd /src/pjproject \
+    && printf '%s\n' \
+        '#define PJ_HAS_IPV6 1' \
+        '#include <pj/config_site_sample.h>' \
+        > pjlib/include/pj/config_site.h \
+    && ./configure \
+        --disable-video \
+        --enable-epoll \
+        --with-external-srtp \
+    && make dep \
+    && make --jobs="$(nproc)" \
+    && find pjsip-apps/bin -maxdepth 1 -type f -name 'pjsua-*' \
+        -exec cp '{}' /build-pjsua ';' \
+    && test -x /build-pjsua
+
 FROM ${DEBIAN_IMAGE}
 
 ARG SIPP_VERSION=v3.7.7
+ARG PJSIP_VERSION=2.17
 ARG BOOFUZZ_VERSION=0.4.2
 ARG PYYAML_VERSION=6.0.3
 ARG SCAPY_VERSION=2.6.1
@@ -51,6 +95,7 @@ ARG URWID_VERSION=4.0.4
 LABEL org.opencontainers.image.title="sippycup"
 LABEL org.opencontainers.image.description="Network-only SIP, RTP, RTCP, and VoIP assessment toolbox"
 LABEL org.opencontainers.image.version="${SIPP_VERSION}"
+LABEL dev.sippycup.pjsip.version="${PJSIP_VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/opt/voip-tools/bin:${PATH}"
@@ -69,6 +114,7 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
         bash-completion \
         ca-certificates \
         conntrack \
+        coturn \
         curl \
         dnsutils \
         ethtool \
@@ -83,9 +129,12 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
         jq \
         less \
         libncursesw6 \
+        libopus0 \
         libpcap0.8t64 \
         libsctp1 \
+        libsrtp2-1 \
         libssl3t64 \
+        libuuid1 \
         lsof \
         mtr-tiny \
         minisign \
@@ -126,6 +175,7 @@ RUN python3 -m venv /opt/voip-tools \
         "urwid==${URWID_VERSION}"
 
 COPY --from=sipp-builder /build/sipp/sipp /usr/local/bin/sipp
+COPY --from=pjsip-builder /build-pjsua /usr/local/bin/pjsua
 COPY bin/campaign /usr/local/bin/campaign
 COPY bin/campaign-sipp-runner /usr/local/bin/campaign-sipp-runner
 COPY bin/campaign-loopback-uas /usr/local/bin/campaign-loopback-uas
@@ -144,6 +194,7 @@ COPY bin/sippycup-media-echo /usr/local/bin/sippycup-media-echo
 COPY bin/sippycup-torture /usr/local/bin/sippycup-torture
 COPY bin/sippycup-ui /usr/local/bin/sippycup-ui
 COPY bin/sippycup-resilience /usr/local/bin/sippycup-resilience
+COPY bin/sippycup-workbench /usr/local/bin/sippycup-workbench
 COPY bin/smoke /usr/local/bin/sippycup-smoke
 COPY lib/sippycup /usr/local/lib/sippycup
 COPY lib/sippycup_oracle /usr/local/lib/sippycup_oracle
@@ -153,6 +204,7 @@ COPY lib/sippycup_tui /usr/local/lib/sippycup_tui
 COPY lib/sippycup_learn /usr/local/lib/sippycup_learn
 COPY lib/sippycup_media /usr/local/lib/sippycup_media
 COPY lib/sippycup_resilience /usr/local/lib/sippycup_resilience
+COPY lib/sippycup_workbench /usr/local/lib/sippycup_workbench
 COPY media /usr/local/share/sippycup/media
 COPY profiles/chaos /usr/local/share/sippycup/chaos-profiles
 COPY tools/generate_audio_canaries.py /usr/local/libexec/sippycup/generate_audio_canaries.py
@@ -178,6 +230,7 @@ RUN chmod 0755 \
         /usr/local/bin/sippycup-torture \
         /usr/local/bin/sippycup-ui \
         /usr/local/bin/sippycup-resilience \
+        /usr/local/bin/sippycup-workbench \
         /usr/local/bin/sippycup-smoke \
     && mkdir -p /work \
     && printf '%s\n' \
