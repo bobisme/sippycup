@@ -50,3 +50,53 @@ byte ceilings bound the complete retest campaign. A standalone bundle records
 the exact reproducer, source and result hashes, argv-style command,
 authorization, expected and actual outcomes, capture frames, stability, and
 the full reduction trace.
+
+## Technical exit gate and owner review
+
+Run the complete technical proof without target network activity:
+
+```sh
+make torture-exit-gate
+```
+
+The deterministic report exercises every case through an isolated local
+datagram endpoint and proves exact bytes and packet boundaries. It also proves
+that recovery failure stops admission, health failure sends no mutation, a
+seeded composite failure minimizes and replays, secret-bearing command
+arguments are redacted, and the corpus contains no credential, reflection, or
+load behavior.
+
+Technical success deliberately leaves `ownerReview.status` as `pending` and
+`authorizationGranted` as false. Generate a machine-bound review packet:
+
+```sh
+./bin/sippycup-torture review-template \
+  --reviewer Quad \
+  --output work/ferivox-assessment/torture-defaults-review.json
+```
+
+The packet binds Quad's review to the current corpus identity, technical-gate
+digest, and these defaults:
+
+| Ceiling | Default |
+|---|---:|
+| Cases | 1 |
+| Mutation packets | 6 |
+| Mutation bytes | 8192 |
+| Rate | 1 case/second |
+| Concurrency | 1 |
+| Duration | 30 seconds |
+| Failures | 1 |
+| Action timeout | 5 seconds |
+
+Quad can change `reviewStatus` to `approved`, add a unique `reviewId` and UTC
+`reviewedAt`, and return the exact file. Validate it against the current code:
+
+```sh
+./bin/sippycup-torture validate-review \
+  work/ferivox-assessment/torture-defaults-review.json
+```
+
+Any code, corpus, gate, or default-limit drift invalidates the review. A valid
+review acknowledges these tool defaults only. It does not authorize a target,
+address, account, test window, or live packet.

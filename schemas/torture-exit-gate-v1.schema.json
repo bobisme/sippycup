@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/torture-exit-gate-v1.schema.json",
+  "title": "Sippycup torture technical exit gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "status",
+    "networkActivity",
+    "corpusIdentity",
+    "checks",
+    "defaultLimits",
+    "ownerReview"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/torture-exit-gate/v1"},
+    "kind": {"const": "TortureTechnicalExitGate"},
+    "status": {"enum": ["pass", "fail"]},
+    "networkActivity": {"const": false},
+    "corpusIdentity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "checks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["id", "passed"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "defaultLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cases",
+        "packets",
+        "bytes",
+        "rateHz",
+        "concurrency",
+        "durationSeconds",
+        "failures",
+        "actionTimeoutSeconds"
+      ],
+      "properties": {
+        "cases": {"type": "integer", "minimum": 1},
+        "packets": {"type": "integer", "minimum": 1},
+        "bytes": {"type": "integer", "minimum": 1},
+        "rateHz": {"type": "number", "exclusiveMinimum": 0},
+        "concurrency": {"const": 1},
+        "durationSeconds": {"type": "number", "exclusiveMinimum": 0},
+        "failures": {"type": "integer", "minimum": 1},
+        "actionTimeoutSeconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "ownerReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "status",
+        "authorizationGranted",
+        "statement"
+      ],
+      "properties": {
+        "required": {"const": true},
+        "status": {"const": "pending"},
+        "authorizationGranted": {"const": false},
+        "statement": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -10,6 +10,14 @@ from .runner import (
     TortureRunner,
     exact_injector,
 )
+from .exit_gate import (
+    REPORT_VERSION,
+    REVIEW_VERSION,
+    default_review,
+    report_sha256,
+    run_exit_gate,
+    validate_review,
+)
 from .minimize import (
     Authorization,
     HierarchicalMinimizer,
@@ -32,8 +40,14 @@ __all__ = [
     "RunnerLimits",
     "TortureRunner",
     "TrialResult",
+    "REPORT_VERSION",
+    "REVIEW_VERSION",
     "build_corpus",
     "corpus_manifest",
+    "default_review",
     "exact_injector",
+    "report_sha256",
+    "run_exit_gate",
     "send_exact",
+    "validate_review",
 ]

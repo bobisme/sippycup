@@ -17,10 +17,28 @@ from sippycup_torture import (
     build_corpus,
     corpus_manifest,
     exact_injector,
+    run_exit_gate,
 )
 
 
 class TortureExitGate(unittest.TestCase):
+    def test_packaged_technical_gate_is_deterministic_and_network_free(self):
+        first = run_exit_gate()
+        second = run_exit_gate()
+        self.assertEqual(first, second)
+        self.assertEqual("pass", first["status"])
+        self.assertFalse(first["networkActivity"])
+        self.assertTrue(all(check["passed"] for check in first["checks"]))
+        self.assertTrue(first["ownerReview"]["required"])
+        self.assertFalse(first["ownerReview"]["authorizationGranted"])
+        root = Path(__file__).resolve().parents[2]
+        self.assertTrue(
+            (root / "schemas" / "torture-exit-gate-v1.schema.json").is_file()
+        )
+        self.assertTrue(
+            (root / "schemas" / "torture-defaults-review-v1.schema.json").is_file()
+        )
+
     def test_every_case_crosses_isolated_datagram_endpoint_bit_exactly(self):
         cases = build_corpus()
         expected_packets = []

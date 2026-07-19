@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/torture-defaults-review-v1.schema.json",
+  "title": "Sippycup torture default-limits owner review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "reviewStatus",
+    "reviewedBy",
+    "reviewId",
+    "reviewedAt",
+    "corpusIdentity",
+    "technicalGateSha256",
+    "acceptedDefaultLimits",
+    "comments"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/torture-defaults-review/v1"},
+    "reviewStatus": {"enum": ["pending", "approved", "revoked"]},
+    "reviewedBy": {"type": "string", "minLength": 1, "maxLength": 200},
+    "reviewId": {"type": "string", "maxLength": 200},
+    "reviewedAt": {"type": ["string", "null"], "format": "date-time"},
+    "corpusIdentity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "technicalGateSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "acceptedDefaultLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cases",
+        "packets",
+        "bytes",
+        "rateHz",
+        "concurrency",
+        "durationSeconds",
+        "failures",
+        "actionTimeoutSeconds"
+      ],
+      "properties": {
+        "cases": {"type": "integer", "minimum": 1},
+        "packets": {"type": "integer", "minimum": 1},
+        "bytes": {"type": "integer", "minimum": 1},
+        "rateHz": {"type": "number", "exclusiveMinimum": 0},
+        "concurrency": {"type": "integer", "const": 1},
+        "durationSeconds": {"type": "number", "exclusiveMinimum": 0},
+        "failures": {"type": "integer", "minimum": 1},
+        "actionTimeoutSeconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "comments": {"type": "string", "maxLength": 2000}
+  }
+}
