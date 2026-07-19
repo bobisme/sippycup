@@ -1,0 +1,53 @@
+{
+  "schema_version": "sippycup.results/v1",
+  "verdict": "pass",
+  "summary": {
+    "pass": 2,
+    "fail": 0,
+    "unknown": 0
+  },
+  "assertions": [
+    {
+      "id": "dialog[0].dialog.complete",
+      "verdict": "pass",
+      "applicability": "applicable",
+      "message": "dialog setup and teardown are complete",
+      "evidence": [
+        {
+          "frame_number": {"state": "known", "value": 1},
+          "timestamp_epoch": {"state": "known", "value": "1710000000.1"}
+        }
+      ],
+      "observed": {"state": "known", "value": true}
+    },
+    {
+      "id": "dialog[0].media.directionality",
+      "verdict": "pass",
+      "applicability": "applicable",
+      "message": "bidirectional media observed",
+      "evidence": [
+        {
+          "frame_number": {"state": "known", "value": 20},
+          "timestamp_epoch": {"state": "known", "value": "1710000000.3"}
+        }
+      ],
+      "observed": {
+        "state": "known",
+        "value": ["callee_to_caller", "caller_to_callee"]
+      }
+    }
+  ],
+  "dialogs": [
+    {
+      "id": "dialog[0]",
+      "call_id": "example@example.invalid",
+      "state": "terminated",
+      "complete": {"state": "known", "value": true},
+      "evidence": {
+        "frame_number": {"state": "known", "value": 1},
+        "timestamp_epoch": {"state": "known", "value": "1710000000.1"}
+      }
+    }
+  ],
+  "streams": []
+}

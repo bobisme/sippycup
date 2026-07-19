@@ -1,0 +1,17 @@
+[
+  {
+    "_source": {
+      "layers": {
+        "frame": {
+          "frame.number": "4",
+          "frame.time_epoch": "1710000004.25",
+          "frame.cap_len": "110",
+          "frame.len": "110",
+          "frame.protocols": "eth:ethertype:ip:udp:srtp:srtcp"
+        },
+        "ip": {"ip.src": "192.0.2.20", "ip.dst": "198.51.100.10"},
+        "udp": {"udp.srcport": "4000", "udp.dstport": "5000"}
+      }
+    }
+  }
+]

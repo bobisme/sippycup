@@ -1,0 +1,17 @@
+[
+  {
+    "_source": {
+      "layers": {
+        "frame": {
+          "frame.number": "1",
+          "frame.time_epoch": "1710000003",
+          "frame.cap_len": "74",
+          "frame.len": "74",
+          "frame.protocols": "eth:ethertype:ip:tcp"
+        },
+        "ip": {"ip.src": "192.0.2.2", "ip.dst": "198.51.100.2"},
+        "tcp": {"tcp.srcport": "443", "tcp.dstport": "54321"}
+      }
+    }
+  }
+]

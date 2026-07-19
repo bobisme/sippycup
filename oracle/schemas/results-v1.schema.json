@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schema/results-v1.schema.json",
+  "title": "Sippycup assertion results",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "verdict", "assertions", "summary", "dialogs", "streams"],
+  "properties": {
+    "schema_version": {"const": "sippycup.results/v1"},
+    "verdict": {"$ref": "#/$defs/verdict"},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "fail", "unknown"],
+      "properties": {
+        "pass": {"type": "integer", "minimum": 0},
+        "fail": {"type": "integer", "minimum": 0},
+        "unknown": {"type": "integer", "minimum": 0}
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/assertion_result"}
+    },
+    "dialogs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/dialog"}
+    },
+    "streams": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/stream"}
+    }
+  },
+  "$defs": {
+    "verdict": {"enum": ["pass", "fail", "unknown"]},
+    "typed_value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": {"const": "known"},
+            "value": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reason"],
+          "properties": {
+            "state": {"const": "unknown"},
+            "reason": {
+              "enum": [
+                "missing_field",
+                "malformed_field",
+                "truncated_capture",
+                "unsupported_encryption",
+                "unsupported_protocol",
+                "ambiguous"
+              ]
+            },
+            "detail": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame_number", "timestamp_epoch"],
+      "properties": {
+        "frame_number": {"$ref": "#/$defs/typed_value"},
+        "timestamp_epoch": {"$ref": "#/$defs/typed_value"},
+        "note": {"type": "string"}
+      }
+    },
+    "assertion_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "verdict", "applicability", "message", "evidence"],
+      "properties": {
+        "id": {"type": "string"},
+        "verdict": {"$ref": "#/$defs/verdict"},
+        "applicability": {
+          "enum": ["applicable", "not_applicable", "unknown"]
+        },
+        "message": {"type": "string"},
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidence"}
+        },
+        "observed": {"$ref": "#/$defs/typed_value"}
+      }
+    },
+    "dialog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "call_id", "state", "complete", "evidence"],
+      "properties": {
+        "id": {"type": "string"},
+        "call_id": {"type": "string"},
+        "state": {"type": "string"},
+        "complete": {"$ref": "#/$defs/typed_value"},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "dialog_id",
+        "direction",
+        "correlation",
+        "flow",
+        "encrypted",
+        "metrics",
+        "evidence"
+      ],
+      "properties": {
+        "id": {"type": "string"},
+        "dialog_id": {"type": "string"},
+        "direction": {"type": "string"},
+        "correlation": {"type": "string"},
+        "flow": {"type": "object"},
+        "encrypted": {"type": "boolean"},
+        "metrics": {"type": "object"},
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidence"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+schema_version: sippycup.expectations/v1
+capture:
+  # Optional exact Call-ID when a capture contains unrelated dialogs.
+  # dialog_selector: call-id@example.invalid
+  allowed_endpoints:
+    - 192.0.2.10
+    - 198.51.100.20
+expectations:
+  - id: authorized-call-path
+    type: call_path
+    on_unknown: inconclusive
+    parameters:
+      require_bidirectional: true
+      expected_codecs:
+        - PCMU
+      require_dtmf: false
+      allow_symmetric_rtp: true
+      max_setup_ms: 5000
+      max_loss_fraction: 0.01
+      max_duplicates: 0
+      max_reordered: 0
+      max_jitter_ms: 30
+      timestamp_jump_tolerance_ms: 200

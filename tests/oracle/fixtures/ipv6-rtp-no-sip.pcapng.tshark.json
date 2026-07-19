@@ -1,0 +1,25 @@
+[
+  {
+    "_source": {
+      "layers": {
+        "frame": {
+          "frame.number": "2",
+          "frame.time_epoch": "1710000001.000000001",
+          "frame.cap_len": "90",
+          "frame.len": "90",
+          "frame.protocols": "eth:ethertype:ipv6:udp:rtp"
+        },
+        "ipv6": {"ipv6.src": "2001:db8::20", "ipv6.dst": "2001:db8::10"},
+        "udp": {"udp.srcport": "4000", "udp.dstport": "5000"},
+        "rtp": {
+          "rtp.ssrc": "0x01020304",
+          "rtp.seq": "42",
+          "rtp.timestamp": "160",
+          "rtp.p_type": "0",
+          "rtp.marker": "1",
+          "rtp.payload": "payload-bytes-must-never-serialize"
+        }
+      }
+    }
+  }
+]

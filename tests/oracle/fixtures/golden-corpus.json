@@ -1,0 +1,18 @@
+{
+  "schema_version": "sippycup.golden-corpus/v1",
+  "cases": [
+    {"id":"udp-ipv4-pcap","coverage":["udp","ipv4","pcap"],"expected":"adapter-pass","runner":"tests.oracle.test_tshark_integration:RealTsharkIntegrationTests.test_generated_ipv4_pcap_round_trip_and_repeated_sdp_sections"},
+    {"id":"tcp-ipv4-pcap","coverage":["tcp","ipv4","pcap"],"expected":"adapter-pass","runner":"tests.oracle.test_tshark_integration:RealTsharkIntegrationTests.test_generated_tcp_signaling_round_trip"},
+    {"id":"udp-ipv6-pcapng","coverage":["udp","ipv6","pcapng"],"expected":"adapter-pass","runner":"tests.oracle.test_tshark_integration:RealTsharkIntegrationTests.test_generated_ipv6_pcapng_round_trip"},
+    {"id":"early-media","coverage":["early-media","sdp"],"expected":"timing-pass","runner":"tests.oracle.test_dialogs:DialogReconstructionTests.test_early_media_has_evidenced_answer_revision"},
+    {"id":"reinvite","coverage":["re-invite","payload-transition","rtp"],"expected":"transition-pass","runner":"tests.oracle.test_media:MediaInvariantTests.test_renegotiated_payload_change_is_not_an_unexpected_transition"},
+    {"id":"fork","coverage":["fork","to-tag","rtp"],"expected":"ambiguous-unknown","runner":"tests.oracle.test_media:MediaInvariantTests.test_fork_media_is_not_reused_across_dialog_legs"},
+    {"id":"packet-loss-reorder","coverage":["loss","reorder","duplicate","rtp"],"expected":"media.sequence:fail","runner":"tests.oracle.test_media:MediaInvariantTests.test_payload_mismatch_loss_duplicate_reorder_and_jump_fail"},
+    {"id":"dtmf","coverage":["rfc4733","dtmf","rtp"],"expected":"media.dtmf:pass","runner":"tests.oracle.test_media:MediaInvariantTests.test_good_bidirectional_media_codecs_dtmf_metrics_and_rtcp"},
+    {"id":"one-way","coverage":["one-way","rtp"],"expected":"media.directionality:fail","runner":"tests.oracle.test_media:MediaInvariantTests.test_one_way_media_fails_directionality"},
+    {"id":"unexpected-endpoint","coverage":["scope","third-party","rtp"],"expected":"media.endpoints:fail","runner":"tests.oracle.test_media:MediaInvariantTests.test_third_party_address_fails_endpoint_assertion"},
+    {"id":"teardown-leak","coverage":["bye","post-teardown","rtp"],"expected":"media.timing:fail","runner":"tests.oracle.test_media:MediaInvariantTests.test_media_before_answer_and_after_bye_request_fails_timing"},
+    {"id":"physical-truncation","coverage":["snaplen","truncation"],"expected":"dialog.complete:unknown","runner":"tests.oracle.test_tshark_integration:RealTsharkIntegrationTests.test_physical_snaplen_truncation_cannot_complete_dialog"},
+    {"id":"dissector-disagreement","coverage":["malformed","unknown"],"expected":"typed-unknown","runner":"tests.oracle.test_adapter:AdapterTests.test_malformed_dissection_does_not_invent_defaults"}
+  ]
+}

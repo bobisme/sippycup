@@ -1,0 +1,16 @@
+[
+  {
+    "_source": {
+      "layers": {
+        "frame": {
+          "frame.number": "not-a-number",
+          "frame.time_epoch": "not-a-time",
+          "frame.cap_len": "70",
+          "frame.len": "70",
+          "frame.protocols": "eth:ip:udp:sip"
+        },
+        "_ws.malformed": {"_ws.malformed.expert": "Malformed Packet"}
+      }
+    }
+  }
+]

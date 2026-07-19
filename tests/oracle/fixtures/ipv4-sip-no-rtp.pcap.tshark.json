@@ -1,0 +1,50 @@
+[
+  {
+    "_source": {
+      "layers": {
+        "frame": {
+          "frame.number": "1",
+          "frame.time_epoch": "1710000000.125000000",
+          "frame.cap_len": "420",
+          "frame.len": "420",
+          "frame.protocols": "eth:ethertype:ip:udp:sip:sdp"
+        },
+        "ip": {"ip.src": "192.0.2.20", "ip.dst": "198.51.100.10"},
+        "udp": {"udp.srcport": "5060", "udp.dstport": "5060"},
+        "sip": {
+          "sip.Method": "INVITE",
+          "sip.Call-ID": "safe-call-id@example.invalid",
+          "sip.from.tag": "from-1",
+          "sip.CSeq.seq": "1",
+          "sip.CSeq.method": "INVITE",
+          "sip.Via.branch": "z9hG4bK-safe",
+          "sip.Authorization": "Digest username=must-never-serialize"
+        },
+        "sdp": {
+          "sdp.session_name": "Sippycup fixture",
+          "sdp.connection_info.address": "192.0.2.20",
+          "sdp.media.media": "audio",
+          "sdp.media.port": "4000",
+          "sdp.media.proto": "RTP/AVP",
+          "sdp.media.format": "0 101",
+          "sdp.media_attribute.field": [
+            "sendrecv",
+            "rtpmap",
+            "rtpmap",
+            "fmtp",
+            "ptime",
+            "rtcp"
+          ],
+          "sdp.media_attribute.value": [
+            "",
+            "0 PCMU/8000",
+            "101 telephone-event/8000",
+            "101 0-16",
+            "20",
+            "4001 IN IP4 192.0.2.20"
+          ]
+        }
+      }
+    }
+  }
+]

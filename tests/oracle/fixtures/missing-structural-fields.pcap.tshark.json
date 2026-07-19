@@ -1,0 +1,28 @@
+[
+  {
+    "_source": {
+      "layers": {
+        "frame": {
+          "frame.number": "9",
+          "frame.time_epoch": "1710000009.5"
+        },
+        "ip": {"ip.src": "192.0.2.20", "ip.dst": "198.51.100.10"},
+        "udp": {"udp.srcport": "5060", "udp.dstport": "5060"},
+        "sip": {
+          "sip.Method": "INVITE",
+          "sip.Call-ID": "missing@example.invalid",
+          "sip.CSeq.seq": "1",
+          "sip.CSeq.method": "INVITE",
+          "sip.Via.branch": "z9hG4bK-missing"
+        },
+        "sdp": {
+          "sdp.session_name": "missing fields",
+          "sdp.connection_info.address": "192.0.2.20",
+          "sdp.media.media": "audio",
+          "sdp.media.port": "4000",
+          "sdp.media.proto": "RTP/AVP"
+        }
+      }
+    }
+  }
+]

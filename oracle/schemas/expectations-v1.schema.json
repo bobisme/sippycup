@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schema/expectations-v1.schema.json",
+  "title": "Sippycup capture expectations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "expectations"],
+  "properties": {
+    "schema_version": {
+      "const": "sippycup.expectations/v1"
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dialog_selector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "allowed_endpoints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "anyOf": [
+              {"format": "ipv4"},
+              {"format": "ipv6"}
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "expectations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/expectation"}
+    }
+  },
+  "$defs": {
+    "expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+        },
+        "type": {"const": "call_path"},
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "require_bidirectional": {"type": "boolean"},
+            "expected_codecs": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true
+            },
+            "require_dtmf": {"type": "boolean"},
+            "allow_symmetric_rtp": {"type": "boolean"},
+            "max_setup_ms": {"type": "number", "minimum": 0},
+            "max_loss_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_duplicates": {"type": "integer", "minimum": 0},
+            "max_reordered": {"type": "integer", "minimum": 0},
+            "max_jitter_ms": {"type": "number", "minimum": 0},
+            "timestamp_jump_tolerance_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "on_unknown": {
+          "enum": ["fail", "inconclusive"],
+          "default": "inconclusive"
+        }
+      }
+    }
+  }
+}

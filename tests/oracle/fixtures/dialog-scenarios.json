@@ -1,0 +1,103 @@
+{
+  "baseline": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a","sdp":"offer"},
+    {"kind":"resp","method":"INVITE","status":180,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"answer"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"},
+    {"kind":"req","method":"BYE","cseq":2,"branch":"bye1","from":"a","to":"b"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":2,"branch":"bye1","from":"a","to":"b"}
+  ],
+  "digest_challenge": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":401,"cseq":1,"branch":"i1","from":"a","to":"challenge"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"challenge"},
+    {"kind":"req","method":"INVITE","cseq":2,"branch":"i2","from":"a"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":2,"branch":"i2","from":"a","to":"b"},
+    {"kind":"req","method":"ACK","cseq":2,"branch":"a2","from":"a","to":"b"},
+    {"kind":"req","method":"BYE","cseq":3,"branch":"bye1","from":"a","to":"b"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":3,"branch":"bye1","from":"a","to":"b"}
+  ],
+  "retransmission": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":180,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"resp","method":"INVITE","status":180,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"resp","method":"INVITE","status":486,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"}
+  ],
+  "cancel": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":180,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"req","method":"CANCEL","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"CANCEL","status":200,"cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":487,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"}
+  ],
+  "remote_bye": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"},
+    {"kind":"req","method":"BYE","cseq":2,"branch":"bye1","from":"b","to":"a","reverse":true},
+    {"kind":"resp","method":"BYE","status":200,"cseq":2,"branch":"bye1","from":"b","to":"a","reverse":true}
+  ],
+  "early_media": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a","sdp":"offer"},
+    {"kind":"resp","method":"INVITE","status":183,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"answer"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"},
+    {"kind":"req","method":"BYE","cseq":2,"branch":"bye1","from":"a","to":"b"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":2,"branch":"bye1","from":"a","to":"b"}
+  ],
+  "fork": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":180,"cseq":1,"branch":"i1","from":"a","to":"b1"},
+    {"kind":"resp","method":"INVITE","status":180,"cseq":1,"branch":"i1","from":"a","to":"b2"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b1"},
+    {"kind":"resp","method":"INVITE","status":486,"cseq":1,"branch":"i1","from":"a","to":"b2"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b1"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a2","from":"a","to":"b2"},
+    {"kind":"req","method":"BYE","cseq":2,"branch":"bye1","from":"a","to":"b1"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":2,"branch":"bye1","from":"a","to":"b1"}
+  ],
+  "renegotiation": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a","sdp":"offer"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"answer"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"},
+    {"kind":"req","method":"INVITE","cseq":2,"branch":"i2","from":"a","to":"b","sdp":"offer2"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":2,"branch":"i2","from":"a","to":"b","sdp":"answer2"},
+    {"kind":"req","method":"ACK","cseq":2,"branch":"a2","from":"a","to":"b"},
+    {"kind":"req","method":"UPDATE","cseq":3,"branch":"u1","from":"a","to":"b","sdp":"offer"},
+    {"kind":"resp","method":"UPDATE","status":200,"cseq":3,"branch":"u1","from":"a","to":"b","sdp":"answer"},
+    {"kind":"req","method":"BYE","cseq":4,"branch":"bye1","from":"a","to":"b"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":4,"branch":"bye1","from":"a","to":"b"}
+  ],
+  "offerless_200": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"offer"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b","sdp":"answer"},
+    {"kind":"req","method":"BYE","cseq":2,"branch":"bye1","from":"a","to":"b"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":2,"branch":"bye1","from":"a","to":"b"}
+  ],
+  "reliable_provisional": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a"},
+    {"kind":"resp","method":"INVITE","status":183,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"offer","rseq":1},
+    {"kind":"req","method":"PRACK","cseq":2,"branch":"p1","from":"a","to":"b","sdp":"answer","rack_rseq":1,"rack_cseq":1,"rack_method":"INVITE"},
+    {"kind":"resp","method":"PRACK","status":200,"cseq":2,"branch":"p1","from":"a","to":"b"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"},
+    {"kind":"req","method":"BYE","cseq":3,"branch":"bye1","from":"a","to":"b"},
+    {"kind":"resp","method":"BYE","status":200,"cseq":3,"branch":"bye1","from":"a","to":"b"}
+  ],
+  "failed_reinvite": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a","sdp":"offer"},
+    {"kind":"resp","method":"INVITE","status":200,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"answer"},
+    {"kind":"req","method":"ACK","cseq":1,"branch":"a1","from":"a","to":"b"},
+    {"kind":"req","method":"INVITE","cseq":2,"branch":"i2","from":"a","to":"b","sdp":"offer2"},
+    {"kind":"resp","method":"INVITE","status":488,"cseq":2,"branch":"i2","from":"a","to":"b","sdp":"answer2"}
+  ],
+  "changed_reliable_provisional": [
+    {"kind":"req","method":"INVITE","cseq":1,"branch":"i1","from":"a","sdp":"offer"},
+    {"kind":"resp","method":"INVITE","status":183,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"answer","rseq":1},
+    {"kind":"resp","method":"INVITE","status":183,"cseq":1,"branch":"i1","from":"a","to":"b","sdp":"answer2","rseq":2}
+  ]
+}
