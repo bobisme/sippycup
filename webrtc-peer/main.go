@@ -56,6 +56,7 @@ var verifiedCapabilities = []string{
 	"wss-signaling",
 	"trickle-ice",
 	"ice-restart",
+	"turn-udp",
 	"dtls-srtp",
 	"rtcp",
 }
@@ -146,6 +147,7 @@ type endpoint struct {
 	connection *webrtc.PeerConnection
 	candidates chan webrtc.ICECandidateInit
 	gathered   atomic.Int64
+	relayed    atomic.Int64
 	completed  atomic.Int64
 	connected  chan struct{}
 	once       sync.Once
@@ -171,6 +173,8 @@ func main() {
 		err = runSelfTest(os.Args[2:])
 	case "signaling-self-test":
 		err = runSignalingSelfTest(os.Args[2:])
+	case "relay-self-test":
+		err = runRelaySelfTest(os.Args[2:])
 	case "version":
 		err = encode(os.Stdout, map[string]any{
 			"version":         buildVersion,
@@ -199,6 +203,8 @@ Commands:
   self-test     Run one bounded audio call over loopback only
   signaling-self-test
                 Run bounded browser-style WSS checks over loopback only
+  relay-self-test
+                Run one bounded audio call through loopback TURN only
   version       Print build provenance as JSON
 
 The peer is an optional low-level endpoint. Target execution is not exposed
@@ -290,16 +296,34 @@ func exerciseLoopback(
 	portMin uint16,
 	portMax uint16,
 ) ([]check, error) {
+	return exercisePeerCall(
+		ctx,
+		rec,
+		portMin,
+		portMax,
+		webrtc.Configuration{},
+		false,
+	)
+}
+
+func exercisePeerCall(
+	ctx context.Context,
+	rec *recorder,
+	portMin uint16,
+	portMax uint16,
+	configuration webrtc.Configuration,
+	requireRelay bool,
+) ([]check, error) {
 	api, err := loopbackAPI(portMin, portMax)
 	if err != nil {
 		return nil, err
 	}
-	left, err := newEndpoint(api, "left", rec)
+	left, err := newEndpoint(api, "left", rec, configuration)
 	if err != nil {
 		return nil, err
 	}
 	defer left.connection.Close()
-	right, err := newEndpoint(api, "right", rec)
+	right, err := newEndpoint(api, "right", rec, configuration)
 	if err != nil {
 		return nil, err
 	}
@@ -375,13 +399,24 @@ func exerciseLoopback(
 		return nil, err
 	}
 
+	candidateCheckID := "loopback-candidate-confinement"
+	candidatePassed := left.gathered.Load() > 0 && right.gathered.Load() > 0
+	candidateExpected := "at least one candidate from each peer"
+	if requireRelay {
+		candidateCheckID = "turn-relay-candidate-confinement"
+		candidatePassed = left.relayed.Load() > 0 && right.relayed.Load() > 0
+		candidateExpected = "at least one relay candidate from each peer"
+	}
 	checks := []check{
 		{
-			ID:       "loopback-candidate-confinement",
-			Passed:   left.gathered.Load() > 0 && right.gathered.Load() > 0,
-			Expected: "at least one candidate from each peer",
+			ID:       candidateCheckID,
+			Passed:   candidatePassed,
+			Expected: candidateExpected,
 			Observed: map[string]int64{
-				"left": left.gathered.Load(), "right": right.gathered.Load(),
+				"left":       left.gathered.Load(),
+				"right":      right.gathered.Load(),
+				"leftRelay":  left.relayed.Load(),
+				"rightRelay": right.relayed.Load(),
 			},
 		},
 		{
@@ -597,8 +632,9 @@ func newEndpoint(
 	api *webrtc.API,
 	name string,
 	rec *recorder,
+	configuration webrtc.Configuration,
 ) (*endpoint, error) {
-	connection, err := api.NewPeerConnection(webrtc.Configuration{})
+	connection, err := api.NewPeerConnection(configuration)
 	if err != nil {
 		return nil, fmt.Errorf("create %s peer: %w", name, err)
 	}
@@ -617,6 +653,9 @@ func newEndpoint(
 			return
 		}
 		item.gathered.Add(1)
+		if candidate.Typ == webrtc.ICECandidateTypeRelay {
+			item.relayed.Add(1)
+		}
 		rec.add(name, "ice.candidate", map[string]any{
 			"type":     candidate.Typ.String(),
 			"protocol": candidate.Protocol.String(),

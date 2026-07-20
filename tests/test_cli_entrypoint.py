@@ -221,7 +221,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_webrtc_selftest_uses_fixed_optional_sandbox(self) -> None:
-        for subcommand in ("self-test", "signaling-self-test"):
+        for subcommand in ("self-test", "signaling-self-test", "relay-self-test"):
             with self.subTest(subcommand=subcommand):
                 with tempfile.TemporaryDirectory() as root_name:
                     runtime = self.make_runtime(Path(root_name))

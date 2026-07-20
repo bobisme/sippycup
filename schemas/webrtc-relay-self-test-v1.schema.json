@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schemas/webrtc-relay-self-test-v1.schema.json",
+  "title": "Sippycup loopback TURN relay self-test report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "status",
+    "networkActivity",
+    "networkScope",
+    "durationMs",
+    "checks",
+    "events",
+    "limits"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/webrtc-relay-self-test/v1"},
+    "kind": {"const": "WebRTCRelaySelfTest"},
+    "status": {"enum": ["pass", "fail"]},
+    "networkActivity": {"const": true},
+    "networkScope": {"const": "loopback-turn"},
+    "durationMs": {"type": "integer", "minimum": 0, "maximum": 30000},
+    "checks": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed"],
+        "properties": {
+          "id": {
+            "enum": [
+              "turn-relay-candidate-confinement",
+              "offer-answer-connected",
+              "dtls-srtp-pcmu-audio",
+              "ice-restart",
+              "rtcp-reader-active",
+              "graceful-cleanup"
+            ]
+          },
+          "passed": {"type": "boolean"},
+          "expected": {},
+          "observed": {},
+          "detail": {"type": "string", "maxLength": 1024}
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "elapsedMs",
+          "source",
+          "kind",
+          "sensitivity",
+          "data"
+        ],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 0, "maximum": 255},
+          "elapsedMs": {"type": "integer", "minimum": 0, "maximum": 30000},
+          "source": {"enum": ["left", "right", "runner"]},
+          "kind": {"type": "string", "maxLength": 64},
+          "sensitivity": {"const": "internal"},
+          "data": {"type": "object", "maxProperties": 8}
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deadlineSeconds",
+        "packets",
+        "payloadBytes",
+        "portMin",
+        "portMax"
+      ],
+      "properties": {
+        "deadlineSeconds": {"type": "integer", "minimum": 1, "maximum": 30},
+        "packets": {"const": 50},
+        "payloadBytes": {"const": 160},
+        "portMin": {"type": "integer", "minimum": 1024, "maximum": 65534},
+        "portMax": {"type": "integer", "minimum": 1025, "maximum": 65535}
+      }
+    }
+  }
+}

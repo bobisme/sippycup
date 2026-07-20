@@ -64,7 +64,7 @@ func TestCapabilityContractIsNetworkFreeAndStable(t *testing.T) {
 		`"dtls-srtp"`,
 		`"ice-restart"`,
 		`"turn-tls"`,
-		`"verifiedCapabilities":["audio","wss-signaling","trickle-ice","ice-restart","dtls-srtp","rtcp"]`,
+		`"verifiedCapabilities":["audio","wss-signaling","trickle-ice","ice-restart","turn-udp","dtls-srtp","rtcp"]`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("capability report does not contain %s", required)

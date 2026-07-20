@@ -37,6 +37,7 @@ scenario requirement.
 ```sh
 ./bin/sippycup webrtc self-test
 ./bin/sippycup webrtc signaling-self-test
+./bin/sippycup webrtc relay-self-test
 ```
 
 Both commands run in the optional image with no external container network,
@@ -44,7 +45,8 @@ all capabilities dropped, a read-only root filesystem, and a deadline. The
 audio check places one Pion-to-Pion DTLS-SRTP call on loopback. The signaling
 check starts one fixed loopback WSS fixture and covers TLS, Origin,
 authentication, expiry, replay, authorization, size/rate, state, and
-reconnection behavior.
+reconnection behavior. The relay check forces the same media path through a
+disposable authenticated loopback TURN/UDP server.
 
 ## 4. Evaluate evidence offline
 

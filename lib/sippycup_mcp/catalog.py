@@ -44,6 +44,7 @@ SCHEMAS = {
     "webrtc-result-v1": "schemas/webrtc-result-v1.schema.json",
     "webrtc-adapter-capabilities-v1": "schemas/webrtc-adapter-capabilities-v1.schema.json",
     "webrtc-peer-self-test-v1": "schemas/webrtc-peer-self-test-v1.schema.json",
+    "webrtc-relay-self-test-v1": "schemas/webrtc-relay-self-test-v1.schema.json",
     "webrtc-call-policy-v1": "schemas/webrtc-call-policy-v1.schema.json",
     "webrtc-call-evidence-v1": "schemas/webrtc-call-evidence-v1.schema.json",
     "webrtc-call-report-v1": "schemas/webrtc-call-report-v1.schema.json",

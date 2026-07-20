@@ -56,6 +56,14 @@ class WebRTCContractTests(unittest.TestCase):
         self.assertFalse(
             signaling_schema["properties"]["arbitraryMessagesEnabled"]["const"]
         )
+        relay_schema = json.loads(
+            (ROOT / "schemas" / "webrtc-relay-self-test-v1.schema.json").read_text()
+        )
+        self.assertFalse(relay_schema["additionalProperties"])
+        self.assertEqual(
+            "sippycup.dev/webrtc-relay-self-test/v1",
+            relay_schema["properties"]["apiVersion"]["const"],
+        )
 
     def test_offline_fixtures_validate_without_optional_runtime(self) -> None:
         self.assertIs(self.scenario, validate_scenario(self.scenario, self.capabilities))

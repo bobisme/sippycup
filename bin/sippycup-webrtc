@@ -20,6 +20,7 @@ Commands:
   self-test      Run one bounded Pion-to-Pion audio call on loopback
   signaling-self-test
                  Run bounded browser-style WSS checks on loopback
+  relay-self-test Run a bounded audio call through loopback TURN only
   ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
   sdp            Evaluate, generate, or minimize normalized SDP evidence
   media-security Evaluate normalized DTLS-SRTP evidence offline
@@ -98,6 +99,7 @@ case "${command_name}" in
                 webrtc-peer/go.mod \
                 webrtc-peer/go.sum \
                 webrtc-peer/main.go \
+                webrtc-peer/relay.go \
                 webrtc-peer/signaling.go \
                 | sha256sum | cut -d ' ' -f 1
         )"
@@ -148,6 +150,11 @@ case "${command_name}" in
         runtime="$(runtime_path)"
         require_image "${runtime}"
         run_confined "${runtime}" signaling-self-test "$@"
+        ;;
+    relay-self-test)
+        runtime="$(runtime_path)"
+        require_image "${runtime}"
+        run_confined "${runtime}" relay-self-test "$@"
         ;;
     ice-turn)
         PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \

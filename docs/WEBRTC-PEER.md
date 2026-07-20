@@ -18,6 +18,8 @@ The low-level binary currently exposes:
   loopback interface and a caller-selected UDP port range;
 - `signaling-self-test`: bounded browser-style TLS and RFC 6455 checks against
   a fixed loopback adapter;
+- `relay-self-test`: one bounded DTLS-SRTP audio call forced through a
+  disposable authenticated loopback TURN server;
 - `version`: machine-readable build provenance.
 
 Build and inspect it through the unified entrypoint:
@@ -28,6 +30,7 @@ Build and inspect it through the unified entrypoint:
 ./bin/sippycup webrtc capabilities
 ./bin/sippycup webrtc self-test
 ./bin/sippycup webrtc signaling-self-test
+./bin/sippycup webrtc relay-self-test
 ./bin/sippycup webrtc ice-turn POLICY.json OBSERVATION.json
 ./bin/sippycup webrtc sdp evaluate POLICY.json TRANSCRIPT.json
 ./bin/sippycup webrtc media-security POLICY.json OBSERVATION.json
@@ -48,10 +51,16 @@ cookie, or arbitrary message input. Its normalized report follows
 `schemas/wss-signaling-self-test-v1.schema.json` and retains neither secrets
 nor raw messages.
 
+The relay self-test starts TURN/UDP on loopback, uses a fixture-only
+long-term credential internally, forces both peers to `relay` transport
+policy, requires relay candidates from each endpoint, then repeats the audio,
+RTCP, ICE-restart, and cleanup checks. Credentials and socket addresses are
+not emitted.
+
 The capability document distinguishes the implementation's available
 `capabilities` from `verifiedCapabilities`. Audio, loopback WSS signaling,
-trickle ICE, ICE restart, DTLS-SRTP, and RTCP are verified by this profile.
-STUN and TURN UDP/TCP/TLS are available in the pinned implementation but
+trickle ICE, ICE restart, TURN/UDP, DTLS-SRTP, and RTCP are verified by this
+profile. STUN and TURN TCP/TLS are available in the pinned implementation but
 remain unverified here. A service-specific WSS adapter and authorization-bound
 target runner remain unavailable until the owner supplies the protocol and
 the dedicated exit gate passes.
