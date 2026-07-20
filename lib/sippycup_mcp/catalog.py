@@ -21,6 +21,7 @@ DOCUMENTS = {
     "mcp": "docs/MCP.md",
     "mcp-security": "docs/MCP-SECURITY.md",
     "webrtc-contracts": "docs/WEBRTC-CONTRACTS.md",
+    "webrtc-ice-turn": "docs/WEBRTC-ICE-TURN.md",
     "webrtc-peer": "docs/WEBRTC-PEER.md",
     "webrtc-threat-model": "docs/WEBRTC-THREAT-MODEL.md",
 }

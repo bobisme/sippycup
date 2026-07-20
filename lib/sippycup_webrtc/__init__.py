@@ -7,6 +7,12 @@ from .contracts import (
     validate_result,
     validate_scenario,
 )
+from .ice_turn import (
+    OBSERVATION_VERSION,
+    POLICY_VERSION,
+    REPORT_VERSION,
+    evaluate as evaluate_ice_turn,
+)
 
 __all__ = [
     "RESULT_VERSION",
@@ -14,4 +20,8 @@ __all__ = [
     "ContractError",
     "validate_result",
     "validate_scenario",
+    "OBSERVATION_VERSION",
+    "POLICY_VERSION",
+    "REPORT_VERSION",
+    "evaluate_ice_turn",
 ]

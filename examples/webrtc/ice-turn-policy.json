@@ -1,0 +1,44 @@
+{
+  "apiVersion": "sippycup.dev/ice-turn-policy/v1",
+  "candidatePolicy": {
+    "allowedTypes": ["host", "srflx", "relay"],
+    "allowAddressExposure": false,
+    "requireMdnsForPrivateHost": true
+  },
+  "approvedServers": [
+    {
+      "role": "stun",
+      "address": "127.0.0.1",
+      "port": 3478,
+      "transport": "udp"
+    },
+    {
+      "role": "turn",
+      "address": "127.0.0.1",
+      "port": 5349,
+      "transport": "tls"
+    }
+  ],
+  "approvedPeerNetworks": ["127.0.0.0/8", "::1/128"],
+  "ice": {
+    "requireNomination": true,
+    "requireConsentFreshness": true,
+    "maxConsentGapMs": 15000,
+    "requireRestartCredentialChange": true
+  },
+  "turn": {
+    "requireLongTermCredentials": true,
+    "maxCredentialLifetimeSeconds": 3600,
+    "maxAllocationLifetimeSeconds": 600,
+    "allowedTransports": ["udp", "tcp", "tls"],
+    "maxAmplificationRatio": 3.0,
+    "requirePermissionBeforeData": true,
+    "requireChannelBindingForChannelData": true
+  },
+  "limits": {
+    "maxEvents": 1000,
+    "maxPackets": 10000,
+    "maxBytes": 16777216,
+    "maxDurationMs": 60000
+  }
+}

@@ -25,6 +25,7 @@ Build and inspect it through the unified entrypoint:
 ./bin/sippycup webrtc build
 ./bin/sippycup webrtc capabilities
 ./bin/sippycup webrtc self-test
+./bin/sippycup webrtc ice-turn POLICY.json OBSERVATION.json
 ```
 
 The self-test registers only PCMU audio, requires DTLS-SRTP, exchanges ICE

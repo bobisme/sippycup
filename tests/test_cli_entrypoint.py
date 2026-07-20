@@ -251,6 +251,16 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         self.assertNotIn("--network=host", arguments)
         self.assertNotIn("--cap-add=NET_RAW", arguments)
 
+    def test_webrtc_ice_turn_help_needs_no_runtime(self) -> None:
+        result = run_cli(
+            "webrtc",
+            "ice-turn",
+            "--help",
+            env={"SIPPYCUP_RUNTIME": "/definitely/missing/runtime"},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Evaluate normalized ICE/STUN/TURN evidence offline", result.stdout)
+
     def test_container_routes_use_fixed_targets(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
             runtime = self.make_runtime(Path(root_name))

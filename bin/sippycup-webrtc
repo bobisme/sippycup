@@ -17,6 +17,7 @@ Commands:
   status         Report whether the optional image is installed
   capabilities   Print the peer's network-free capability contract
   self-test      Run one bounded Pion-to-Pion audio call on loopback
+  ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
   help           Show this help
 
 No command can contact an assessment target. The self-test uses only loopback,
@@ -131,6 +132,10 @@ case "${command_name}" in
         runtime="$(runtime_path)"
         require_image "${runtime}"
         run_confined "${runtime}" self-test "$@"
+        ;;
+    ice-turn)
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${project_dir}/bin/webrtc-ice-turn" "$@"
         ;;
     *)
         printf 'Unknown WebRTC profile command: %s\n' "${command_name}" >&2

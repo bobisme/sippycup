@@ -1,0 +1,101 @@
+{
+  "apiVersion": "sippycup.dev/ice-turn-observation/v1",
+  "networkActivity": false,
+  "events": [
+    {
+      "timeMs": 0,
+      "type": "candidate",
+      "data": {
+        "candidateType": "host",
+        "addressClass": "mdns",
+        "exposed": false,
+        "mdns": true
+      }
+    },
+    {
+      "timeMs": 1,
+      "type": "server_contact",
+      "data": {
+        "role": "turn",
+        "address": "127.0.0.1",
+        "port": 5349,
+        "transport": "tls"
+      }
+    },
+    {
+      "timeMs": 2,
+      "type": "turn_credential",
+      "data": {
+        "mechanism": "rest",
+        "lifetimeSeconds": 300
+      }
+    },
+    {
+      "timeMs": 3,
+      "type": "turn_allocation",
+      "data": {
+        "lifetimeSeconds": 300,
+        "transport": "tls"
+      }
+    },
+    {
+      "timeMs": 4,
+      "type": "turn_permission",
+      "data": {"peerAddress": "127.0.0.2"}
+    },
+    {
+      "timeMs": 5,
+      "type": "turn_channel_bind",
+      "data": {"peerAddress": "127.0.0.2"}
+    },
+    {
+      "timeMs": 6,
+      "type": "pair_selected",
+      "data": {
+        "nominated": true,
+        "localType": "relay",
+        "remoteType": "host"
+      }
+    },
+    {
+      "timeMs": 1000,
+      "type": "turn_data",
+      "data": {
+        "peerAddress": "127.0.0.2",
+        "mode": "channel",
+        "bytesIn": 8000,
+        "bytesOut": 8000,
+        "permissionPresent": true,
+        "channelBound": true
+      }
+    },
+    {
+      "timeMs": 1001,
+      "type": "traffic",
+      "data": {"packets": 100, "bytes": 16000}
+    },
+    {
+      "timeMs": 5000,
+      "type": "consent",
+      "data": {"success": true}
+    },
+    {
+      "timeMs": 10000,
+      "type": "consent",
+      "data": {"success": true}
+    },
+    {
+      "timeMs": 10001,
+      "type": "ice_restart",
+      "data": {
+        "oldUfragHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "newUfragHash": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "timeMs": 10002,
+      "type": "cleanup",
+      "data": {"allocations": 0, "sockets": 0}
+    }
+  ]
+}
