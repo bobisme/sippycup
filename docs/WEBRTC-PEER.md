@@ -16,6 +16,8 @@ The low-level binary currently exposes:
 - `capabilities`: a network-free, versioned adapter capability document;
 - `self-test`: one bounded audio-only Pion-to-Pion call confined to the
   loopback interface and a caller-selected UDP port range;
+- `signaling-self-test`: bounded browser-style TLS and RFC 6455 checks against
+  a fixed loopback adapter;
 - `version`: machine-readable build provenance.
 
 Build and inspect it through the unified entrypoint:
@@ -25,6 +27,7 @@ Build and inspect it through the unified entrypoint:
 ./bin/sippycup webrtc build
 ./bin/sippycup webrtc capabilities
 ./bin/sippycup webrtc self-test
+./bin/sippycup webrtc signaling-self-test
 ./bin/sippycup webrtc ice-turn POLICY.json OBSERVATION.json
 ./bin/sippycup webrtc sdp evaluate POLICY.json TRANSCRIPT.json
 ./bin/sippycup webrtc media-security POLICY.json OBSERVATION.json
@@ -37,13 +40,21 @@ deterministic 20 ms RTP packets, verifies the returned payload digest, has a
 the RTCP reader to stop, and emits normalized JSON events without SDP,
 candidate addresses, ICE credentials, keys, or media payloads.
 
+The signaling self-test checks certificate validation, allowed and foreign
+Origins, authentication, expiry, nonce replay, role-bound messages, size/rate
+limits, invalid state transitions, disconnect, and reconnect. The built-in
+adapter is `sippycup.loopback-wss/1.0.0`; it accepts no URL, path, header,
+cookie, or arbitrary message input. Its normalized report follows
+`schemas/wss-signaling-self-test-v1.schema.json` and retains neither secrets
+nor raw messages.
+
 The capability document distinguishes the implementation's available
-`capabilities` from `verifiedCapabilities`. Audio, trickle ICE, ICE restart,
-DTLS-SRTP, and RTCP are verified by this profile. STUN and TURN UDP/TCP/TLS are
-available in the pinned implementation but remain unverified here. They and
-service-specific WSS signaling remain unavailable as target actions until
-their dedicated oracles, signaling adapter, authorization-bound runner, and
-exit gate are complete.
+`capabilities` from `verifiedCapabilities`. Audio, loopback WSS signaling,
+trickle ICE, ICE restart, DTLS-SRTP, and RTCP are verified by this profile.
+STUN and TURN UDP/TCP/TLS are available in the pinned implementation but
+remain unverified here. A service-specific WSS adapter and authorization-bound
+target runner remain unavailable until the owner supplies the protocol and
+the dedicated exit gate passes.
 
 The profile must be launched through `bin/sippycup` before it is considered an
 operator feature. Running the low-level binary directly is for development and

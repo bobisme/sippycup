@@ -40,6 +40,7 @@ var (
 
 var capabilities = []string{
 	"audio",
+	"wss-signaling",
 	"trickle-ice",
 	"ice-restart",
 	"stun",
@@ -52,6 +53,7 @@ var capabilities = []string{
 
 var verifiedCapabilities = []string{
 	"audio",
+	"wss-signaling",
 	"trickle-ice",
 	"ice-restart",
 	"dtls-srtp",
@@ -167,6 +169,8 @@ func main() {
 		err = runCapabilities(os.Args[2:])
 	case "self-test":
 		err = runSelfTest(os.Args[2:])
+	case "signaling-self-test":
+		err = runSignalingSelfTest(os.Args[2:])
 	case "version":
 		err = encode(os.Stdout, map[string]any{
 			"version":         buildVersion,
@@ -193,6 +197,8 @@ func usage(output io.Writer) {
 Commands:
   capabilities  Print the versioned, network-free capability contract
   self-test     Run one bounded audio call over loopback only
+  signaling-self-test
+                Run bounded browser-style WSS checks over loopback only
   version       Print build provenance as JSON
 
 The peer is an optional low-level endpoint. Target execution is not exposed

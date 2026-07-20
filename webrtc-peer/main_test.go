@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"log"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/websocket"
 )
 
 func TestCanaryPayloadIsDeterministicAndDistinct(t *testing.T) {
@@ -58,11 +64,41 @@ func TestCapabilityContractIsNetworkFreeAndStable(t *testing.T) {
 		`"dtls-srtp"`,
 		`"ice-restart"`,
 		`"turn-tls"`,
-		`"verifiedCapabilities":["audio","trickle-ice","ice-restart","dtls-srtp","rtcp"]`,
+		`"verifiedCapabilities":["audio","wss-signaling","trickle-ice","ice-restart","dtls-srtp","rtcp"]`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("capability report does not contain %s", required)
 		}
+	}
+}
+
+func TestLoopbackSignalingSelfTestIsBoundedAndFixedVocabulary(t *testing.T) {
+	adapter := newLoopbackSignalingAdapter()
+	server := httptest.NewUnstartedServer(websocket.Server{
+		Handshake: adapter.handshake,
+		Handler:   adapter.serve,
+	})
+	server.Config.ErrorLog = log.New(io.Discard, "", 0)
+	server.StartTLS()
+	defer server.Close()
+	rootCAs := x509.NewCertPool()
+	rootCAs.AddCert(server.Certificate())
+	wssURL := "wss" + strings.TrimPrefix(server.URL, "https")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	checks := exerciseSignalingFixture(ctx, wssURL, rootCAs)
+	if len(checks) != 12 {
+		t.Fatalf("checks = %d, want 12", len(checks))
+	}
+	for _, item := range checks {
+		if !item.Passed {
+			t.Fatalf("check %s failed: observed=%v detail=%s", item.ID, item.Observed, item.Detail)
+		}
+	}
+	counters := adapter.snapshot()
+	if counters.Connections > 12 || counters.Messages > 24 {
+		t.Fatalf("fixture exceeded bounds: %+v", counters)
 	}
 }
 

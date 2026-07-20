@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schemas/wss-signaling-self-test-v1.schema.json",
+  "title": "Sippycup loopback WSS signaling self-test report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "status",
+    "networkActivity",
+    "networkScope",
+    "adapter",
+    "checks",
+    "counters",
+    "openConnections",
+    "secretsRetained",
+    "rawMessagesRetained",
+    "arbitraryMessagesEnabled"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/wss-signaling-self-test/v1"},
+    "status": {"enum": ["pass", "fail"]},
+    "networkActivity": {"const": true},
+    "networkScope": {"const": "loopback"},
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {"const": "sippycup.loopback-wss"},
+        "version": {"const": "1.0.0"}
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 13,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed"],
+        "properties": {
+          "id": {
+            "enum": [
+              "tls-validation",
+              "origin-enforcement",
+              "authentication-required",
+              "session-expiry",
+              "message-authorization",
+              "malformed-state-transition",
+              "replay-first-use",
+              "replay-rejection",
+              "size-limit",
+              "rate-limit",
+              "clean-reconnect-first",
+              "clean-reconnect-second",
+              "clean-disconnect"
+            ]
+          },
+          "passed": {"type": "boolean"},
+          "expected": {"type": "string", "maxLength": 64},
+          "observed": {"type": "string", "maxLength": 128},
+          "detail": {"type": "string", "maxLength": 1024}
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "messages", "authFailures"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 0, "maximum": 12},
+        "messages": {"type": "integer", "minimum": 0, "maximum": 24},
+        "authFailures": {"type": "integer", "minimum": 0, "maximum": 12}
+      }
+    },
+    "openConnections": {"const": 0},
+    "secretsRetained": {"const": false},
+    "rawMessagesRetained": {"const": false},
+    "arbitraryMessagesEnabled": {"const": false}
+  }
+}

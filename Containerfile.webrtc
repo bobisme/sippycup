@@ -9,7 +9,7 @@ ARG SIPPYCUP_WEBRTC_SOURCE_DIGEST=unknown
 WORKDIR /src
 COPY webrtc-peer/go.mod webrtc-peer/go.sum ./
 RUN go mod download
-COPY webrtc-peer/main.go ./
+COPY webrtc-peer/*.go ./
 RUN test "$(go list -m -f '{{.Version}}' github.com/pion/webrtc/v4)" = "${PION_WEBRTC_VERSION}" \
     && CGO_ENABLED=0 go build \
         -trimpath \

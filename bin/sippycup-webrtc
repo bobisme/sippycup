@@ -17,6 +17,8 @@ Commands:
   status         Report whether the optional image is installed
   capabilities   Print the peer's network-free capability contract
   self-test      Run one bounded Pion-to-Pion audio call on loopback
+  signaling-self-test
+                 Run bounded browser-style WSS checks on loopback
   ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
   sdp            Evaluate, generate, or minimize normalized SDP evidence
   media-security Evaluate normalized DTLS-SRTP evidence offline
@@ -95,6 +97,7 @@ case "${command_name}" in
                 webrtc-peer/go.mod \
                 webrtc-peer/go.sum \
                 webrtc-peer/main.go \
+                webrtc-peer/signaling.go \
                 | sha256sum | cut -d ' ' -f 1
         )"
         "${runtime}" build \
@@ -135,6 +138,11 @@ case "${command_name}" in
         runtime="$(runtime_path)"
         require_image "${runtime}"
         run_confined "${runtime}" self-test "$@"
+        ;;
+    signaling-self-test)
+        runtime="$(runtime_path)"
+        require_image "${runtime}"
+        run_confined "${runtime}" signaling-self-test "$@"
         ;;
     ice-turn)
         PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \

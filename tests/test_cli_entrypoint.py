@@ -221,37 +221,40 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_webrtc_selftest_uses_fixed_optional_sandbox(self) -> None:
-        with tempfile.TemporaryDirectory() as root_name:
-            runtime = self.make_runtime(Path(root_name))
-            result = run_cli(
-                "webrtc",
-                "self-test",
-                "--timeout",
-                "5s",
-                env={
-                    "SIPPYCUP_RUNTIME": str(runtime),
-                    "SIPPYCUP_WEBRTC_IMAGE": "example.invalid/sippycup-webrtc:test",
-                },
-            )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        arguments = result.stdout.splitlines()
-        for expected in (
-            "run",
-            "--rm",
-            "--network=none",
-            "--cap-drop=ALL",
-            "--read-only",
-            "--security-opt=no-new-privileges=true",
-            "--pids-limit=128",
-            "--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m",
-            "example.invalid/sippycup-webrtc:test",
-            "self-test",
-            "--timeout",
-            "5s",
-        ):
-            self.assertIn(expected, arguments)
-        self.assertNotIn("--network=host", arguments)
-        self.assertNotIn("--cap-add=NET_RAW", arguments)
+        for subcommand in ("self-test", "signaling-self-test"):
+            with self.subTest(subcommand=subcommand):
+                with tempfile.TemporaryDirectory() as root_name:
+                    runtime = self.make_runtime(Path(root_name))
+                    result = run_cli(
+                        "webrtc",
+                        subcommand,
+                        "--timeout",
+                        "5s",
+                        env={
+                            "SIPPYCUP_RUNTIME": str(runtime),
+                            "SIPPYCUP_WEBRTC_IMAGE":
+                                "example.invalid/sippycup-webrtc:test",
+                        },
+                    )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                arguments = result.stdout.splitlines()
+                for expected in (
+                    "run",
+                    "--rm",
+                    "--network=none",
+                    "--cap-drop=ALL",
+                    "--read-only",
+                    "--security-opt=no-new-privileges=true",
+                    "--pids-limit=128",
+                    "--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m",
+                    "example.invalid/sippycup-webrtc:test",
+                    subcommand,
+                    "--timeout",
+                    "5s",
+                ):
+                    self.assertIn(expected, arguments)
+                self.assertNotIn("--network=host", arguments)
+                self.assertNotIn("--cap-add=NET_RAW", arguments)
 
     def test_webrtc_ice_turn_help_needs_no_runtime(self) -> None:
         result = run_cli(

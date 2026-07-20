@@ -45,6 +45,17 @@ class WebRTCContractTests(unittest.TestCase):
             RESULT_VERSION,
             result_schema["properties"]["apiVersion"]["const"],
         )
+        signaling_schema = json.loads(
+            (ROOT / "schemas" / "wss-signaling-self-test-v1.schema.json").read_text()
+        )
+        self.assertFalse(signaling_schema["additionalProperties"])
+        self.assertEqual(
+            "sippycup.dev/wss-signaling-self-test/v1",
+            signaling_schema["properties"]["apiVersion"]["const"],
+        )
+        self.assertFalse(
+            signaling_schema["properties"]["arbitraryMessagesEnabled"]["const"]
+        )
 
     def test_offline_fixtures_validate_without_optional_runtime(self) -> None:
         self.assertIs(self.scenario, validate_scenario(self.scenario, self.capabilities))

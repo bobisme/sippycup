@@ -46,6 +46,7 @@ SCHEMAS = {
     "webrtc-call-policy-v1": "schemas/webrtc-call-policy-v1.schema.json",
     "webrtc-call-evidence-v1": "schemas/webrtc-call-evidence-v1.schema.json",
     "webrtc-call-report-v1": "schemas/webrtc-call-report-v1.schema.json",
+    "wss-signaling-self-test-v1": "schemas/wss-signaling-self-test-v1.schema.json",
 }
 
 
