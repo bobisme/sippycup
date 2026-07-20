@@ -18,6 +18,7 @@ Commands:
   capabilities   Print the peer's network-free capability contract
   self-test      Run one bounded Pion-to-Pion audio call on loopback
   ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
+  sdp            Evaluate, generate, or minimize normalized SDP evidence
   help           Show this help
 
 No command can contact an assessment target. The self-test uses only loopback,
@@ -136,6 +137,10 @@ case "${command_name}" in
     ice-turn)
         PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
             "${project_dir}/bin/webrtc-ice-turn" "$@"
+        ;;
+    sdp)
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${project_dir}/bin/webrtc-sdp" "$@"
         ;;
     *)
         printf 'Unknown WebRTC profile command: %s\n' "${command_name}" >&2

@@ -1,0 +1,58 @@
+{
+  "apiVersion": "sippycup.dev/sdp-policy/v1",
+  "media": {
+    "allowedKinds": [
+      "audio"
+    ],
+    "allowedProtocols": [
+      "UDP/TLS/RTP/SAVPF"
+    ],
+    "requireBundle": true,
+    "requireRtcpMux": true,
+    "allowedCodecs": {
+      "audio": [
+        "opus",
+        "PCMU"
+      ]
+    },
+    "requiredRtcpFeedback": [
+      "transport-cc"
+    ],
+    "allowedExtmapUris": [
+      "urn:ietf:params:rtp-hdrext:ssrc-audio-level",
+      "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+    ]
+  },
+  "ice": {
+    "requireTrickle": true,
+    "requireEndOfCandidates": true,
+    "requireCredentialChangeOnRestart": true
+  },
+  "dtls": {
+    "requireFingerprint": true,
+    "allowedHashAlgorithms": [
+      "sha-256"
+    ],
+    "allowedSetupPairs": [
+      {
+        "offer": "actpass",
+        "answer": "active"
+      },
+      {
+        "offer": "actpass",
+        "answer": "passive"
+      }
+    ]
+  },
+  "negotiation": {
+    "allowGlare": false,
+    "requireRollbackBeforeRetry": true,
+    "maxRevisions": 32
+  },
+  "limits": {
+    "maxMSections": 8,
+    "maxCodecsPerSection": 16,
+    "maxExtmapsPerSection": 16,
+    "maxGeneratedCases": 32
+  }
+}

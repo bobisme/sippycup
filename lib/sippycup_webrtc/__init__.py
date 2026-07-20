@@ -13,6 +13,14 @@ from .ice_turn import (
     REPORT_VERSION,
     evaluate as evaluate_ice_turn,
 )
+from .sdp_oracle import (
+    POLICY_VERSION as SDP_POLICY_VERSION,
+    REPORT_VERSION as SDP_REPORT_VERSION,
+    TRANSCRIPT_VERSION as SDP_TRANSCRIPT_VERSION,
+    SDPOracleError,
+    evaluate as evaluate_sdp,
+    normalize_sdp,
+)
 
 __all__ = [
     "RESULT_VERSION",
@@ -24,4 +32,10 @@ __all__ = [
     "POLICY_VERSION",
     "REPORT_VERSION",
     "evaluate_ice_turn",
+    "SDP_POLICY_VERSION",
+    "SDP_REPORT_VERSION",
+    "SDP_TRANSCRIPT_VERSION",
+    "SDPOracleError",
+    "evaluate_sdp",
+    "normalize_sdp",
 ]

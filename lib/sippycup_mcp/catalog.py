@@ -23,6 +23,7 @@ DOCUMENTS = {
     "webrtc-contracts": "docs/WEBRTC-CONTRACTS.md",
     "webrtc-ice-turn": "docs/WEBRTC-ICE-TURN.md",
     "webrtc-peer": "docs/WEBRTC-PEER.md",
+    "webrtc-sdp": "docs/WEBRTC-SDP.md",
     "webrtc-threat-model": "docs/WEBRTC-THREAT-MODEL.md",
 }
 SCHEMAS = {

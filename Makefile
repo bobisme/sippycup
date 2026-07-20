@@ -120,7 +120,7 @@ mcp-exit-gate: mcp-test
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup mcp --exit-gate
 
 webrtc-test:
-	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_webrtc_contracts tests.test_webrtc_ice_turn -v
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_webrtc_contracts tests.test_webrtc_ice_turn tests.test_webrtc_sdp -v
 	cd webrtc-peer && go test ./... && go vet ./...
 
 webrtc-build:

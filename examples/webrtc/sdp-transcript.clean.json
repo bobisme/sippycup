@@ -1,0 +1,104 @@
+{
+  "apiVersion": "sippycup.dev/sdp-transcript/v1",
+  "networkActivity": false,
+  "revisions": [
+    {
+      "sequence": 1,
+      "type": "offer",
+      "actor": "local",
+      "generation": 0,
+      "sdpHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "bundleMids": [
+        "audio-0"
+      ],
+      "media": [
+        {
+          "mid": "audio-0",
+          "kind": "audio",
+          "protocol": "UDP/TLS/RTP/SAVPF",
+          "port": 9,
+          "direction": "sendrecv",
+          "rtcpMux": true,
+          "iceUfragHash": "2222222222222222222222222222222222222222222222222222222222222222",
+          "icePwdHash": "3333333333333333333333333333333333333333333333333333333333333333",
+          "iceOptions": [
+            "trickle"
+          ],
+          "endOfCandidates": false,
+          "fingerprint": {
+            "algorithm": "sha-256",
+            "valueHash": "4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          "setup": "actpass",
+          "codecs": [
+            {
+              "payloadType": 111,
+              "name": "opus",
+              "clockRate": 48000,
+              "channels": 2,
+              "rtcpFeedback": [
+                "transport-cc"
+              ]
+            }
+          ],
+          "extmaps": [
+            {
+              "id": 1,
+              "uri": "urn:ietf:params:rtp-hdrext:ssrc-audio-level",
+              "direction": "sendrecv"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sequence": 2,
+      "type": "answer",
+      "actor": "remote",
+      "generation": 0,
+      "sdpHash": "5555555555555555555555555555555555555555555555555555555555555555",
+      "bundleMids": [
+        "audio-0"
+      ],
+      "media": [
+        {
+          "mid": "audio-0",
+          "kind": "audio",
+          "protocol": "UDP/TLS/RTP/SAVPF",
+          "port": 9,
+          "direction": "sendrecv",
+          "rtcpMux": true,
+          "iceUfragHash": "6666666666666666666666666666666666666666666666666666666666666666",
+          "icePwdHash": "7777777777777777777777777777777777777777777777777777777777777777",
+          "iceOptions": [
+            "trickle"
+          ],
+          "endOfCandidates": true,
+          "fingerprint": {
+            "algorithm": "sha-256",
+            "valueHash": "8888888888888888888888888888888888888888888888888888888888888888"
+          },
+          "setup": "active",
+          "codecs": [
+            {
+              "payloadType": 111,
+              "name": "opus",
+              "clockRate": 48000,
+              "channels": 2,
+              "rtcpFeedback": [
+                "transport-cc"
+              ]
+            }
+          ],
+          "extmaps": [
+            {
+              "id": 1,
+              "uri": "urn:ietf:params:rtp-hdrext:ssrc-audio-level",
+              "direction": "sendrecv"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
