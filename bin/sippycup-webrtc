@@ -20,6 +20,7 @@ Commands:
   ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
   sdp            Evaluate, generate, or minimize normalized SDP evidence
   media-security Evaluate normalized DTLS-SRTP evidence offline
+  call-evidence   Correlate normalized WebRTC call evidence offline
   help           Show this help
 
 No command can contact an assessment target. The self-test uses only loopback,
@@ -146,6 +147,10 @@ case "${command_name}" in
     media-security)
         PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
             "${project_dir}/bin/webrtc-media-security" "$@"
+        ;;
+    call-evidence)
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${project_dir}/bin/webrtc-call-evidence" "$@"
         ;;
     *)
         printf 'Unknown WebRTC profile command: %s\n' "${command_name}" >&2

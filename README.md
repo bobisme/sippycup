@@ -233,6 +233,9 @@ scope:
 ./bin/sippycup webrtc media-security \
   examples/webrtc/dtls-srtp-policy.json \
   examples/webrtc/dtls-srtp-observation.clean.json
+./bin/sippycup webrtc call-evidence \
+  examples/webrtc/call-policy.json \
+  examples/webrtc/call-evidence.clean.json
 ```
 
 The self-test is a bounded loopback-only DTLS-SRTP audio call; it does not

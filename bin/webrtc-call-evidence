@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from sippycup_webrtc.call_evidence import main
+
+raise SystemExit(main())

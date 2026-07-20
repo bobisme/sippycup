@@ -1,0 +1,21 @@
+{
+  "apiVersion": "sippycup.dev/webrtc-call-evidence/v1",
+  "networkActivity": false,
+  "callIdHash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "components": [
+    {"kind": "sdp", "status": "pass", "reportHash": "2222222222222222222222222222222222222222222222222222222222222222", "uncertainty": []},
+    {"kind": "ice-turn", "status": "pass", "reportHash": "3333333333333333333333333333333333333333333333333333333333333333", "uncertainty": []},
+    {"kind": "dtls-srtp", "status": "pass", "reportHash": "4444444444444444444444444444444444444444444444444444444444444444", "uncertainty": []},
+    {"kind": "audio-outbound", "status": "pass", "reportHash": "5555555555555555555555555555555555555555555555555555555555555555", "uncertainty": []},
+    {"kind": "audio-inbound", "status": "pass", "reportHash": "6666666666666666666666666666666666666666666666666666666666666666", "uncertainty": []}
+  ],
+  "events": [
+    {"timeMs": 0, "type": "revision", "data": {"generation": 0, "revisionHash": "7777777777777777777777777777777777777777777777777777777777777777"}},
+    {"timeMs": 1, "type": "ice_pair", "data": {"generation": 0, "pairIdHash": "8888888888888888888888888888888888888888888888888888888888888888"}},
+    {"timeMs": 2, "type": "dtls_association", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999"}},
+    {"timeMs": 3, "type": "srtp_stream", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999", "ssrc": 1001, "direction": "outbound"}},
+    {"timeMs": 4, "type": "srtp_stream", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999", "ssrc": 2002, "direction": "inbound"}},
+    {"timeMs": 5, "type": "audio", "data": {"generation": 0, "direction": "outbound", "measurementStatus": "measured", "continuity": "pass", "roundTripLatencyMs": 80}},
+    {"timeMs": 6, "type": "audio", "data": {"generation": 0, "direction": "inbound", "measurementStatus": "measured", "continuity": "pass", "roundTripLatencyMs": 82}}
+  ]
+}

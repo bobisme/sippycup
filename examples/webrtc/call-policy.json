@@ -1,0 +1,19 @@
+{
+  "apiVersion": "sippycup.dev/webrtc-call-policy/v1",
+  "requiredDirections": ["outbound", "inbound"],
+  "recovery": {
+    "maxDowntimeMs": 2000,
+    "requireRecoveryEvidence": true
+  },
+  "privacy": {
+    "requireCandidateAddressRedaction": true,
+    "requireCredentialRedaction": true,
+    "requireBrowserMetadataRedaction": true,
+    "retainRawAudio": false
+  },
+  "limits": {
+    "maxEvents": 10000,
+    "maxGenerations": 16,
+    "maxSsrcs": 64
+  }
+}
