@@ -38,6 +38,12 @@ documents and schemas. MCP's normal `tools/list` response describes the typed
 offline tools. Every tool path is relative to `work/`; absolute paths,
 traversal, and symlinks are rejected.
 
+The catalog also publishes `mcp-live-capability-v1`, the verifier contract for
+later approval-bound tools. Publishing that schema does not enable traffic:
+the current MCP server cannot mint grants, consume grants, or execute live
+actions. The verification design and trust assumptions are documented in
+[MCP-SECURITY.md](MCP-SECURITY.md).
+
 Useful checks:
 
 ```sh

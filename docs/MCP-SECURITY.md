@@ -57,3 +57,51 @@ reviewed plan digest, expiry, nonce, and hard traffic ceilings. MCP will validat
 but never mint that capability. A separate live exit gate must prove zero
 packets for invalid grants, cancellation cleanup, ceiling enforcement,
 redaction, and evidence integrity before those tools can ship.
+
+### Capability contract
+
+The verification foundation uses
+`sippycup.dev/mcp-live-capability/v1`. An operator-controlled issuer signs the
+exact canonical JSON payload bytes with Ed25519. The envelope contains only the
+algorithm, trusted key ID, unpadded base64url payload, and detached signature.
+Sippycup has public verification keys only; the production package has no
+signing or private-key API.
+
+The signed payload binds all of the following:
+
+- audience and issuer;
+- a launcher-supplied client ID and one fixed action;
+- SHA-256 digests of the target profile and reviewed plan;
+- a sorted, unique set of canonical literal IP, port, transport, role, and
+  optional TLS-name endpoint tuples;
+- exact positive traffic ceilings for calls, packets, bytes, duration,
+  concurrency, packets per second, and calls per second;
+- issued, not-before, and expiry times within a maximum 15-minute lifetime;
+- a minimum 128-bit nonce.
+
+Validation rejects unknown fields, duplicate JSON fields, alternate JSON or
+base64 encodings, hostnames in network endpoints, noncanonical IP addresses,
+unknown keys or actions, time-window errors, binding mismatches, and requested
+ceilings above the signed limits. Inspection can verify without consuming a
+grant. Authorization atomically consumes `(issuer, nonce)` in a mode-0600
+SQLite store before any future side effect, so replay remains denied across
+process restarts and concurrent requests. Every decision is recorded. An
+unavailable or corrupt audit store denies the request.
+
+Plan, profile, and grant inputs for future live tools must be read through the
+descriptor-pinned input primitive. It walks beneath a fixed root with
+`O_NOFOLLOW`, rejects multiple hard links, detects mutation during the read,
+and returns immutable bytes and their digest. The executor must use those
+frozen bytes; it must never validate a pathname and reopen it later.
+
+The current stdio MCP client identity is self-asserted. A `clientId` match is
+therefore an audit/action binding, not proof of a human identity, unless a
+trusted launcher supplies it outside agent-controlled arguments. Until an
+authenticated launcher or transport exists, the signed grant is bearer
+authority.
+
+This verifier does not make the offline MCP server live. A future live server
+must use a separate launcher and allowlist, read-only grant/key/plan/profile
+mounts, a durable private state mount, and controller-owned egress restricted
+to the grant's literal endpoints. The existing `./bin/sippycup mcp` remains
+networkless and read-only.

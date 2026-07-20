@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/mcp-live-capability-v1.schema.json",
+  "title": "Sippycup externally issued live MCP capability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "alg", "keyId", "payload", "signature"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/mcp-live-capability/v1"},
+    "alg": {"const": "Ed25519"},
+    "keyId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "payload": {
+      "type": "string",
+      "description": "Unpadded base64url canonical JSON payload, signed exactly as encoded."
+    },
+    "signature": {
+      "type": "string",
+      "description": "Unpadded base64url 64-byte Ed25519 signature over payload bytes."
+    }
+  },
+  "$defs": {
+    "signedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion", "issuer", "audience", "clientId", "action",
+        "targetProfileSha256", "planSha256", "endpoints", "ceilings",
+        "issuedAt", "notBefore", "expiresAt", "nonce"
+      ],
+      "properties": {
+        "apiVersion": {"const": "sippycup.dev/mcp-live-capability/v1"},
+        "issuer": {"type": "string", "minLength": 1, "maxLength": 128},
+        "audience": {"const": "sippycup-mcp-live"},
+        "clientId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "action": {
+          "enum": [
+            "prepare_assessment",
+            "preflight_target",
+            "execute_one_call",
+            "run_supervised_campaign"
+          ]
+        },
+        "targetProfileSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "planSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "address", "port", "transport"],
+            "properties": {
+              "role": {"type": "string", "minLength": 1, "maxLength": 64},
+              "address": {"type": "string", "minLength": 1, "maxLength": 64},
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+              "transport": {"enum": ["udp", "tcp", "tls", "ws", "wss"]},
+              "tlsServerName": {"type": "string", "minLength": 1, "maxLength": 253}
+            }
+          }
+        },
+        "ceilings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "calls", "packets", "bytes", "durationSeconds",
+            "concurrentCalls", "packetsPerSecond", "callsPerSecond"
+          ],
+          "properties": {
+            "calls": {"type": "integer", "minimum": 1},
+            "packets": {"type": "integer", "minimum": 1},
+            "bytes": {"type": "integer", "minimum": 1},
+            "durationSeconds": {"type": "integer", "minimum": 1},
+            "concurrentCalls": {"type": "integer", "minimum": 1},
+            "packetsPerSecond": {"type": "integer", "minimum": 1},
+            "callsPerSecond": {"type": "integer", "minimum": 1}
+          }
+        },
+        "issuedAt": {"type": "integer", "minimum": 0},
+        "notBefore": {"type": "integer", "minimum": 0},
+        "expiresAt": {"type": "integer", "minimum": 0},
+        "nonce": {"type": "string", "pattern": "^[0-9a-f]{32,128}$"}
+      }
+    }
+  }
+}

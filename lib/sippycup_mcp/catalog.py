@@ -40,6 +40,7 @@ SCHEMAS = {
     "evidence-pack-v1": "schemas/evidence-pack-v1.schema.json",
     "torture-exit-gate-v1": "schemas/torture-exit-gate-v1.schema.json",
     "mcp-result-v1": "schemas/mcp-result-v1.schema.json",
+    "mcp-live-capability-v1": "schemas/mcp-live-capability-v1.schema.json",
     "webrtc-scenario-v1": "schemas/webrtc-scenario-v1.schema.json",
     "webrtc-result-v1": "schemas/webrtc-result-v1.schema.json",
     "webrtc-adapter-capabilities-v1": "schemas/webrtc-adapter-capabilities-v1.schema.json",

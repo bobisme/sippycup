@@ -114,7 +114,7 @@ cli-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_cli_entrypoint -v
 
 mcp-test:
-	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_mcp -v
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_mcp tests.test_mcp_capability -v
 
 mcp-exit-gate: mcp-test
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup mcp --exit-gate
