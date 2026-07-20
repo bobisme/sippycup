@@ -409,7 +409,31 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         self.assertIn(f"--volume={state}:/state:rw", arguments)
         self.assertIn("sippycup-mcp-live", arguments)
         self.assertIn("--check-config", arguments)
+        self.assertNotIn("--cap-add=NET_ADMIN", arguments)
         self.assertNotIn("--cap-add=NET_RAW", arguments)
+
+    def test_mcp_live_one_call_opt_in_adds_only_raw_capture_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            root = Path(root_name)
+            runtime = self.make_runtime(root)
+            trust = root / "trust"
+            state = root / "state"
+            trust.mkdir(mode=0o700)
+            state.mkdir(mode=0o700)
+            result = run_cli(
+                "mcp-live",
+                env={
+                    "SIPPYCUP_RUNTIME": str(runtime),
+                    "SIPPYCUP_MCP_LIVE_TRUST_ROOT": str(trust),
+                    "SIPPYCUP_MCP_LIVE_STATE_ROOT": str(state),
+                    "SIPPYCUP_MCP_LIVE_CLIENT_ID": "trusted-launcher:test",
+                    "SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL": "1",
+                },
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = result.stdout.splitlines()
+        self.assertIn("--cap-drop=ALL", arguments)
+        self.assertIn("--cap-add=NET_RAW", arguments)
         self.assertNotIn("--cap-add=NET_ADMIN", arguments)
 
     def test_advanced_escape_hatch_preserves_argument_boundaries(self) -> None:

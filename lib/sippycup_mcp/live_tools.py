@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 import yaml
 
+from sippycup.campaign import ManifestError, verify_frozen_plan
 from sippycup.integration import sip_options_preflight
 from sippycup.runtime import validate_plan
 from sippycup_workbench.profile import rehearse
@@ -29,7 +30,7 @@ from .capability import (
     PinnedInput,
     PinnedInputRoot,
 )
-from .security import MCPPolicyError, redact
+from .security import BoundedProcessRunner, MCPPolicyError, redact
 
 LIVE_RESULT_API_VERSION = "sippycup.dev/mcp-live-result/v1"
 SNAPSHOT_API_VERSION = "sippycup.dev/mcp-live-snapshot/v1"
@@ -41,6 +42,10 @@ Preflight = Callable[[dict[str, Any]], tuple[bool, str]]
 
 class PreflightAttemptError(RuntimeError):
     """The fixed network adapter failed after an attempt began."""
+
+
+class OneCallAttemptError(RuntimeError):
+    """The fixed one-call helper failed after execution began."""
 
 
 def _strict_json(content: bytes, field: str) -> dict[str, Any]:
@@ -196,6 +201,9 @@ class LivePreparationTools:
         *,
         client_id: str,
         preflight: Preflight = sip_options_preflight,
+        evidence_root: str | Path | None = None,
+        one_call_helper: str | None = None,
+        process_runner: BoundedProcessRunner | None = None,
     ):
         self.inputs = PinnedInputRoot(input_root)
         self.snapshots = self._private_root(snapshot_root)
@@ -204,6 +212,20 @@ class LivePreparationTools:
         self.client_id = client_id
         self.validator = validator
         self.preflight_probe = preflight
+        self.evidence = (
+            self._private_root(evidence_root)
+            if evidence_root is not None
+            else None
+        )
+        installed_helper = Path("/usr/local/libexec/sippycup/mcp-one-call")
+        self.one_call_helper = one_call_helper or str(
+            installed_helper
+            if installed_helper.is_file()
+            else Path(__file__).resolve().parents[2] / "tools/mcp-one-call-helper"
+        )
+        self.process_runner = process_runner or BoundedProcessRunner(
+            timeout=130, output_bytes=64 * 1024
+        )
         self._gate = threading.BoundedSemaphore(1)
 
     @staticmethod
@@ -254,7 +276,9 @@ class LivePreparationTools:
                 return _result(
                     tool,
                     started=started,
-                    network_activity=isinstance(exc, PreflightAttemptError),
+                    network_activity=isinstance(
+                        exc, (PreflightAttemptError, OneCallAttemptError)
+                    ),
                     error=exc,
                 )
         finally:
@@ -393,6 +417,103 @@ class LivePreparationTools:
             "networkActivity": True,
         }
 
+    def execute_one_call(
+        self,
+        capability: str,
+        target_profile: str,
+        reviewed_plan: str,
+        reviewed_manifest: str,
+    ) -> dict[str, Any]:
+        return self._invoke(
+            "execute_one_call",
+            True,
+            lambda: self._one_call(
+                capability,
+                target_profile,
+                reviewed_plan,
+                reviewed_manifest,
+            ),
+        )
+
+    def _one_call(
+        self,
+        capability_path: str,
+        profile_path: str,
+        plan_path: str,
+        manifest_path: str,
+    ) -> dict[str, Any]:
+        if self.evidence is None:
+            raise MCPPolicyError("live MCP one-call evidence root is not configured")
+        capability, profile, plan = self._read_inputs(
+            capability_path, profile_path, plan_path
+        )
+        manifest = self.inputs.read(
+            manifest_path, maximum=MAX_LIVE_INPUT_BYTES
+        )
+        plan_value = _load_plan(plan.content)
+        profile_status = _load_profile(profile.content)
+        _verify_manifest(plan_value, manifest.content)
+        _require_one_call(plan_value)
+        endpoints, ceilings = _execution_bindings(plan_value, profile_status)
+        grant = self.validator.validate(
+            capability.content,
+            _binding(
+                client_id=self.client_id,
+                action="execute_one_call",
+                profile=profile,
+                plan=plan,
+                endpoints=endpoints,
+                ceilings=ceilings,
+            ),
+            consume=True,
+        )
+        request = self._freeze_one_call(
+            capability,
+            profile,
+            plan,
+            manifest,
+            endpoints=endpoints,
+            ceilings=ceilings,
+        )
+        if int(time.time()) >= grant.expires_at:
+            raise MCPPolicyError("capability expired immediately before one-call execution")
+        try:
+            returncode, receipt, _stderr = self.process_runner.run_json(
+                [
+                    self.one_call_helper,
+                    str(request / "reviewed-plan.json"),
+                    str(request / "reviewed-manifest.yaml"),
+                    str(self.evidence),
+                ]
+            )
+        except Exception as exc:
+            raise OneCallAttemptError(
+                "fixed one-call helper failed after execution began"
+            ) from exc
+        if returncode != 0:
+            raise OneCallAttemptError(
+                "fixed one-call helper reported a bounded execution failure"
+            )
+        receipt = _validate_one_call_receipt(receipt)
+        return {
+            "authorization": {
+                "state": "consumed",
+                "issuer": grant.issuer,
+                "keyId": grant.key_id,
+                "clientId": grant.client_id,
+                "action": grant.action,
+                "expiresAt": grant.expires_at,
+                "auditRef": grant.artifact_sha256,
+            },
+            "targetProfileSha256": profile.sha256,
+            "reviewedPlanSha256": plan.sha256,
+            "reviewedManifestSha256": manifest.sha256,
+            "literalTargets": [endpoint.public() for endpoint in endpoints],
+            "trafficCeilings": ceilings,
+            "receipt": receipt,
+            "networkActivity": True,
+        }
+
     def _read_inputs(
         self, capability: str, profile: str, plan: str
     ) -> tuple[PinnedInput, PinnedInput, PinnedInput]:
@@ -486,3 +607,164 @@ class LivePreparationTools:
             shutil.rmtree(temporary, ignore_errors=True)
             raise
         return manifest
+
+    def _freeze_one_call(
+        self,
+        capability: PinnedInput,
+        profile: PinnedInput,
+        plan: PinnedInput,
+        manifest: PinnedInput,
+        *,
+        endpoints: tuple[Endpoint, ...],
+        ceilings: dict[str, int],
+    ) -> Path:
+        request_id = hashlib.sha256(
+            (
+                "sippycup.dev/mcp-one-call-request/v1"
+                + capability.sha256
+                + profile.sha256
+                + plan.sha256
+                + manifest.sha256
+            ).encode()
+        ).hexdigest()
+        destination = self.snapshots / f"one-call-{request_id}"
+        if destination.exists():
+            raise MCPPolicyError("one-call request already exists")
+        temporary = Path(
+            tempfile.mkdtemp(prefix=f".one-call-{request_id}.", dir=self.snapshots)
+        )
+        os.chmod(temporary, 0o700)
+        request = {
+            "apiVersion": "sippycup.dev/mcp-one-call-request/v1",
+            "requestId": request_id,
+            "capabilityArtifactSha256": capability.sha256,
+            "targetProfileSha256": profile.sha256,
+            "reviewedPlanSha256": plan.sha256,
+            "reviewedManifestSha256": manifest.sha256,
+            "literalTargets": [endpoint.public() for endpoint in endpoints],
+            "trafficCeilings": ceilings,
+        }
+        try:
+            for name, content in (
+                ("target-profile.yaml", profile.content),
+                ("reviewed-plan.json", plan.content),
+                ("reviewed-manifest.yaml", manifest.content),
+                (
+                    "request.json",
+                    json.dumps(
+                        request, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                    + b"\n",
+                ),
+            ):
+                path = temporary / name
+                with path.open("xb") as output:
+                    output.write(content)
+                    output.flush()
+                    os.fsync(output.fileno())
+                path.chmod(0o400)
+            os.rename(temporary, destination)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+        return destination
+
+
+def _verify_manifest(plan: dict[str, Any], manifest: bytes) -> None:
+    try:
+        verify_frozen_plan(plan, manifest)
+    except ManifestError as exc:
+        raise MCPPolicyError(f"reviewed manifest does not bind to plan: {exc}") from exc
+
+
+def _require_one_call(plan: dict[str, Any]) -> None:
+    steps = plan["steps"]
+    maxima = plan["authorization"]["hardMaxima"]
+    if (
+        len(steps) != 1
+        or steps[0]["type"] != "call"
+        or plan["plannedTotals"]["calls"] != 1
+        or maxima["calls"] != 1
+        or maxima["concurrentCalls"] != 1
+        or maxima["callsPerSecond"] != 1
+    ):
+        raise MCPPolicyError(
+            "one-call MCP requires exactly one call with calls, concurrency, and CPS equal to one"
+        )
+    if (
+        maxima["packets"] > 2000
+        or maxima["bytes"] > 2 * 1024 * 1024
+        or maxima["durationSeconds"] > 60
+        or maxima["packetsPerSecond"] > 200
+    ):
+        raise MCPPolicyError("one-call MCP traffic ceilings exceed local hard limits")
+    if plan["authorization"]["credentialRefs"] or any(
+        step.get("credentialRef") is not None for step in steps
+    ):
+        raise MCPPolicyError("one-call MCP does not accept credentials")
+    if not plan["evidence"]["capture"]:
+        raise MCPPolicyError("one-call MCP requires packet capture evidence")
+
+
+def _execution_bindings(
+    plan: dict[str, Any], profile_facts: dict[str, Any]
+) -> tuple[tuple[Endpoint, ...], dict[str, int]]:
+    signaling, ceilings = _plan_bindings(plan, profile_facts)
+    media = plan["authorization"]["mediaPorts"]
+    endpoints = list(signaling)
+    for endpoint in signaling:
+        endpoints.append(
+            Endpoint(
+                "media",
+                endpoint.address,
+                media["start"],
+                "udp",
+                None,
+                media["end"] if media["end"] > media["start"] else None,
+            )
+        )
+    return (
+        tuple(
+            sorted(
+                endpoints,
+                key=lambda endpoint: (
+                    endpoint.role,
+                    endpoint.address,
+                    endpoint.port,
+                    endpoint.port_end or endpoint.port,
+                    endpoint.transport,
+                ),
+            )
+        ),
+        ceilings,
+    )
+
+
+def _validate_one_call_receipt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "apiVersion",
+        "state",
+        "exitCode",
+        "completedSteps",
+        "evidenceId",
+        "resultSha256",
+        "evidenceManifestSha256",
+    }:
+        raise OneCallAttemptError("fixed one-call helper returned an invalid receipt")
+    if value["apiVersion"] != "sippycup.dev/mcp-one-call-receipt/v1":
+        raise OneCallAttemptError("fixed one-call helper receipt version is invalid")
+    if (
+        value["state"] not in {"succeeded", "failed", "cancelled"}
+        or type(value["exitCode"]) is not int
+        or type(value["completedSteps"]) is not int
+        or not isinstance(value["evidenceId"], str)
+        or not value["evidenceId"]
+        or any(
+            not isinstance(value[key], str)
+            or len(value[key]) != 64
+            or any(character not in "0123456789abcdef" for character in value[key])
+            for key in ("resultSha256", "evidenceManifestSha256")
+        )
+    ):
+        raise OneCallAttemptError("fixed one-call helper receipt fields are invalid")
+    return value

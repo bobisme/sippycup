@@ -45,6 +45,7 @@ SCHEMAS = {
     "mcp-live-result-v1": "schemas/mcp-live-result-v1.schema.json",
     "mcp-live-trust-v1": "schemas/mcp-live-trust-v1.schema.json",
     "mcp-live-snapshot-v1": "schemas/mcp-live-snapshot-v1.schema.json",
+    "mcp-one-call-receipt-v1": "schemas/mcp-one-call-receipt-v1.schema.json",
     "webrtc-scenario-v1": "schemas/webrtc-scenario-v1.schema.json",
     "webrtc-result-v1": "schemas/webrtc-result-v1.schema.json",
     "webrtc-adapter-capabilities-v1": "schemas/webrtc-adapter-capabilities-v1.schema.json",

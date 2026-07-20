@@ -14,7 +14,7 @@ from sippycup_mcp.capability import (
     OpenSSLEd25519Verifier,
     ReplayAuditStore,
 )
-from sippycup_mcp.live_tools import LivePreparationTools
+from sippycup_mcp.live_tools import LivePreparationTools, _require_one_call
 from sippycup_mcp.live_server import _trust_keys
 from sippycup_mcp.security import MCPPolicyError
 from sippycup_workbench.profile import default_profile
@@ -24,6 +24,27 @@ from tests.test_mcp_capability import CapabilityFixture, NOW
 ROOT = Path(__file__).parents[1]
 
 
+class FakeProcessRunner:
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def run_json(self, argv: list[str]) -> tuple[int, object, str]:
+        self.calls.append(argv)
+        return (
+            0,
+            {
+                "apiVersion": "sippycup.dev/mcp-one-call-receipt/v1",
+                "state": "succeeded",
+                "exitCode": 0,
+                "completedSteps": 1,
+                "evidenceId": "one-call-fixture",
+                "resultSha256": "a" * 64,
+                "evidenceManifestSha256": "b" * 64,
+            },
+            "",
+        )
+
+
 class LivePreparationToolTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -31,7 +52,8 @@ class LivePreparationToolTests(unittest.TestCase):
         self.inputs = self.root / "inputs"
         self.snapshots = self.root / "snapshots"
         self.state = self.root / "state"
-        for directory in (self.inputs, self.snapshots, self.state):
+        self.evidence = self.root / "evidence"
+        for directory in (self.inputs, self.snapshots, self.state, self.evidence):
             directory.mkdir(mode=0o700)
         source = (
             ROOT / "tests/fixtures/campaign/valid.yaml"
@@ -40,6 +62,9 @@ class LivePreparationToolTests(unittest.TestCase):
         manifest_path.write_text(
             source.replace("voice.test", "10.20.30.40"),
             encoding="utf-8",
+        )
+        (self.inputs / "multi-manifest.yaml").write_bytes(
+            manifest_path.read_bytes()
         )
         manifest, digest = load_manifest(manifest_path)
         plan = compile_plan(manifest, digest)
@@ -62,6 +87,29 @@ class LivePreparationToolTests(unittest.TestCase):
         self.profile_bytes = yaml.safe_dump(profile, sort_keys=False).encode()
         (self.inputs / "profile.yaml").write_bytes(self.profile_bytes)
 
+        one_manifest = yaml.safe_load(
+            source.replace("voice.test", "10.20.30.40")
+        )
+        one_manifest["metadata"]["name"] = "mcp-one-call"
+        one_manifest["authorization"]["credentialRefs"] = []
+        one_manifest["authorization"]["ceilings"]["calls"] = 1
+        one_manifest["targets"][0].pop("credentialRef")
+        one_manifest["cases"] = [one_manifest["cases"][1]]
+        self.one_manifest_bytes = yaml.safe_dump(
+            one_manifest, sort_keys=False
+        ).encode()
+        one_manifest_path = self.inputs / "one-manifest.yaml"
+        one_manifest_path.write_bytes(self.one_manifest_bytes)
+        one_document, one_digest = load_manifest(one_manifest_path)
+        one_plan = compile_plan(one_document, one_digest)
+        self.one_plan_bytes = (
+            json.dumps(
+                one_plan, sort_keys=True, separators=(",", ":")
+            ).encode()
+            + b"\n"
+        )
+        (self.inputs / "one-plan.json").write_bytes(self.one_plan_bytes)
+
         self.fixture = CapabilityFixture(self.root)
         self.endpoints = [
             {
@@ -73,6 +121,7 @@ class LivePreparationToolTests(unittest.TestCase):
         ]
         self.ceilings = dict(plan["authorization"]["hardMaxima"])
         self.calls: list[dict[str, object]] = []
+        self.process_runner = FakeProcessRunner()
 
         def fake_preflight(destination: dict[str, object]) -> tuple[bool, str]:
             self.calls.append(destination)
@@ -95,21 +144,34 @@ class LivePreparationToolTests(unittest.TestCase):
             ),
             client_id="trusted-launcher:alice",
             preflight=fake_preflight,
+            evidence_root=self.evidence,
+            one_call_helper="/fixed/mcp-one-call",
+            process_runner=self.process_runner,  # type: ignore[arg-type]
         )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def issue(self, name: str, action: str, nonce: str) -> None:
+    def issue(
+        self,
+        name: str,
+        action: str,
+        nonce: str,
+        *,
+        plan_bytes: bytes | None = None,
+        endpoints: list[dict[str, object]] | None = None,
+        ceilings: dict[str, int] | None = None,
+    ) -> None:
+        selected_plan = plan_bytes or self.plan_bytes
         artifact = self.fixture.issue(
             payload=self.fixture.payload(
                 action=action,
                 targetProfileSha256=hashlib.sha256(
                     self.profile_bytes
                 ).hexdigest(),
-                planSha256=hashlib.sha256(self.plan_bytes).hexdigest(),
-                endpoints=self.endpoints,
-                ceilings=self.ceilings,
+                planSha256=hashlib.sha256(selected_plan).hexdigest(),
+                endpoints=endpoints or self.endpoints,
+                ceilings=ceilings or self.ceilings,
                 nonce=nonce,
             )
         )
@@ -257,6 +319,133 @@ class LivePreparationToolTests(unittest.TestCase):
         (trust / "trust.json").write_text(json.dumps(manifest), encoding="utf-8")
         with self.assertRaises(MCPPolicyError):
             _trust_keys(trust)
+
+    def test_one_call_consumes_exact_grant_and_returns_bounded_receipt(self) -> None:
+        one_plan = json.loads(self.one_plan_bytes)
+        media = one_plan["authorization"]["mediaPorts"]
+        endpoints = [
+            {
+                "role": "media",
+                "address": "10.20.30.40",
+                "port": media["start"],
+                "portEnd": media["end"],
+                "transport": "udp",
+            },
+            {
+                "role": "signaling",
+                "address": "10.20.30.40",
+                "port": 5060,
+                "transport": "udp",
+            },
+        ]
+        ceilings = dict(one_plan["authorization"]["hardMaxima"])
+        self.issue(
+            "one-call.cap",
+            "execute_one_call",
+            "66666666666666666666666666666666",
+            plan_bytes=self.one_plan_bytes,
+            endpoints=endpoints,
+            ceilings=ceilings,
+        )
+        result = self.tools.execute_one_call(
+            "one-call.cap",
+            "profile.yaml",
+            "one-plan.json",
+            "one-manifest.yaml",
+        )
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertTrue(result["networkActivity"])
+        self.assertEqual(result["data"]["authorization"]["state"], "consumed")
+        self.assertEqual(result["data"]["receipt"]["completedSteps"], 1)
+        self.assertEqual(len(self.process_runner.calls), 1)
+        argv = self.process_runner.calls[0]
+        self.assertEqual(argv[0], "/fixed/mcp-one-call")
+        self.assertEqual(argv[-1], str(self.evidence))
+        self.assertNotIn("signature", json.dumps(result))
+        replay = self.tools.execute_one_call(
+            "one-call.cap",
+            "profile.yaml",
+            "one-plan.json",
+            "one-manifest.yaml",
+        )
+        self.assertFalse(replay["ok"])
+        self.assertFalse(replay["networkActivity"])
+        self.assertEqual(len(self.process_runner.calls), 1)
+
+    def test_one_call_rejects_multi_step_plan_before_helper(self) -> None:
+        self.issue(
+            "multi.cap",
+            "execute_one_call",
+            "77777777777777777777777777777777",
+        )
+        result = self.tools.execute_one_call(
+            "multi.cap",
+            "profile.yaml",
+            "plan.json",
+            "multi-manifest.yaml",
+        )
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["networkActivity"])
+        self.assertEqual(self.process_runner.calls, [])
+
+    def test_one_call_helper_failure_is_bounded_and_reports_attempt(self) -> None:
+        one_plan = json.loads(self.one_plan_bytes)
+        media = one_plan["authorization"]["mediaPorts"]
+        self.issue(
+            "helper-failure.cap",
+            "execute_one_call",
+            "88888888888888888888888888888888",
+            plan_bytes=self.one_plan_bytes,
+            endpoints=[
+                {
+                    "role": "media",
+                    "address": "10.20.30.40",
+                    "port": media["start"],
+                    "portEnd": media["end"],
+                    "transport": "udp",
+                },
+                {
+                    "role": "signaling",
+                    "address": "10.20.30.40",
+                    "port": 5060,
+                    "transport": "udp",
+                },
+            ],
+            ceilings=dict(one_plan["authorization"]["hardMaxima"]),
+        )
+
+        class FailedRunner:
+            def run_json(self, argv: list[str]) -> tuple[int, object, str]:
+                return 1, {"state": "failed"}, "secret helper detail"
+
+        self.tools.process_runner = FailedRunner()  # type: ignore[assignment]
+        result = self.tools.execute_one_call(
+            "helper-failure.cap",
+            "profile.yaml",
+            "one-plan.json",
+            "one-manifest.yaml",
+        )
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["networkActivity"])
+        self.assertNotIn("secret helper detail", json.dumps(result))
+
+    def test_one_call_local_hard_limits_and_credentials_fail_closed(self) -> None:
+        plan = json.loads(self.one_plan_bytes)
+        cases = []
+        over_duration = json.loads(self.one_plan_bytes)
+        over_duration["authorization"]["hardMaxima"]["durationSeconds"] = 61
+        cases.append(over_duration)
+        over_packets = json.loads(self.one_plan_bytes)
+        over_packets["authorization"]["hardMaxima"]["packets"] = 2001
+        cases.append(over_packets)
+        credentials = json.loads(self.one_plan_bytes)
+        credentials["authorization"]["credentialRefs"] = ["forbidden"]
+        credentials["steps"][0]["credentialRef"] = "forbidden"
+        cases.append(credentials)
+        for candidate in cases:
+            with self.subTest(candidate=candidate), self.assertRaises(MCPPolicyError):
+                _require_one_call(candidate)
+        _require_one_call(plan)
 
 
 if __name__ == "__main__":

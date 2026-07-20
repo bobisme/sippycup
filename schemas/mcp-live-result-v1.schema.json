@@ -10,7 +10,7 @@
   ],
   "properties": {
     "apiVersion": {"const": "sippycup.dev/mcp-live-result/v1"},
-    "tool": {"enum": ["prepare_assessment", "preflight_target"]},
+    "tool": {"enum": ["prepare_assessment", "preflight_target", "execute_one_call"]},
     "ok": {"type": "boolean"},
     "networkActivity": {"type": "boolean"},
     "durationMs": {"type": "integer", "minimum": 0},

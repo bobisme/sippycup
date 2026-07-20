@@ -276,6 +276,7 @@ run_live_mcp() {
     local trust_root="${SIPPYCUP_MCP_LIVE_TRUST_ROOT:-}"
     local state_root="${SIPPYCUP_MCP_LIVE_STATE_ROOT:-}"
     local client_id="${SIPPYCUP_MCP_LIVE_CLIENT_ID:-}"
+    local enable_one_call="${SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL:-0}"
     if [[ -z "${trust_root}" || -z "${state_root}" || -z "${client_id}" ]]; then
         cat >&2 <<'EOF'
 mcp-live requires SIPPYCUP_MCP_LIVE_TRUST_ROOT,
@@ -297,6 +298,13 @@ EOF
     if [[ "${runtime_name}" == docker || "${runtime_name}" == nerdctl ]]; then
         identity=(--user="$(id -u):$(id -g)")
     fi
+    local -a live_caps=(--cap-drop=ALL)
+    if [[ "${enable_one_call}" == 1 ]]; then
+        live_caps+=(--cap-add=NET_RAW)
+    elif [[ "${enable_one_call}" != 0 ]]; then
+        printf 'SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL must be 0 or 1.\n' >&2
+        exit 2
+    fi
     local -a terminal=()
     if [[ -t 0 && -t 1 ]]; then
         terminal=(-it)
@@ -306,7 +314,7 @@ EOF
         "${terminal[@]}" \
         "${identity[@]}" \
         --network=bridge \
-        --cap-drop=ALL \
+        "${live_caps[@]}" \
         --read-only \
         --security-opt=no-new-privileges=true \
         --pids-limit=64 \
@@ -316,6 +324,7 @@ EOF
         --env=SIPPYCUP_MCP_LIVE_TRUST_ROOT=/trust \
         --env=SIPPYCUP_MCP_LIVE_STATE_ROOT=/state \
         --env=SIPPYCUP_MCP_LIVE_CLIENT_ID="${client_id}" \
+        --env=SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL="${enable_one_call}" \
         --volume="${project_dir}/work:/live-inputs:ro,Z" \
         --volume="${trust_root}:/trust:ro" \
         --volume="${state_root}:/state:rw" \

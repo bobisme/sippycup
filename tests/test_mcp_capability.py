@@ -275,6 +275,32 @@ class CapabilityTests(unittest.TestCase):
             with self.assertRaises(MCPPolicyError):
                 self.validator.validate(artifact, binding, consume=False)
 
+    def test_media_port_range_is_exact_and_cannot_be_broadened(self) -> None:
+        range_endpoint = Endpoint(
+            "media", "192.0.2.10", 10000, "udp", None, 10020
+        )
+        payload = self.fixture.payload(
+            endpoints=[
+                {
+                    "role": "media",
+                    "address": "192.0.2.10",
+                    "port": 10000,
+                    "portEnd": 10020,
+                    "transport": "udp",
+                }
+            ]
+        )
+        artifact = self.fixture.issue(payload=payload)
+        binding = self.fixture.binding(endpoints=(range_endpoint,))
+        self.validator.validate(artifact, binding, consume=False)
+        broadened = self.fixture.binding(
+            endpoints=(
+                Endpoint("media", "192.0.2.10", 10000, "udp", None, 10021),
+            )
+        )
+        with self.assertRaises(MCPPolicyError):
+            self.validator.validate(artifact, broadened, consume=False)
+
     def test_ceiling_escalation_boolean_and_incomplete_budget_fail(self) -> None:
         escalated = dict(CEILINGS)
         escalated["packets"] += 1

@@ -96,6 +96,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("webrtc-result-v1", index["resources"]["schemas"])
         self.assertIn("mcp-live-capability-v1", index["resources"]["schemas"])
         self.assertIn("mcp-live-result-v1", index["resources"]["schemas"])
+        self.assertIn("mcp-one-call-receipt-v1", index["resources"]["schemas"])
         self.assertIn("webrtc-peer-self-test-v1", index["resources"]["schemas"])
         self.assertNotIn("sippycup://work", json.dumps(index))
         self.assertTrue(catalog.read_document("mcp-security").startswith("# MCP"))

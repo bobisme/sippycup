@@ -6,11 +6,17 @@ Sippycup's live MCP surface is a separate server and container boundary:
 ./bin/sippycup mcp-live
 ```
 
-It exposes only `prepare_assessment` and `preflight_target`. The first verifies
+It exposes `prepare_assessment` and `preflight_target` by default. The first verifies
 an externally signed prepare grant and freezes the exact profile and reviewed
 plan into a private immutable snapshot without traffic. The second consumes a
 separate preflight grant and sends exactly one SIP OPTIONS transaction to the
 single literal signaling destination bound by the grant, profile, and plan.
+
+The implemented `execute_one_call` tool remains disabled by default until the
+live MCP exit gate is complete. An operator can enable it for a controlled
+local gate with `SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL=1`. Enabling it adds only
+`NET_RAW` inside the isolated bridge so the fixed helper can capture evidence;
+`NET_ADMIN` remains absent.
 
 The original `./bin/sippycup mcp` remains offline and cannot access this
 surface.
@@ -49,6 +55,7 @@ Create an owner-private state root with two empty subdirectories:
 install -d -m 0700 /operator/sippycup-live-state
 install -d -m 0700 /operator/sippycup-live-state/audit
 install -d -m 0700 /operator/sippycup-live-state/snapshots
+install -d -m 0700 /operator/sippycup-live-state/evidence
 ```
 
 Then configure the launcher:
@@ -97,9 +104,23 @@ adapter. Invalid, expired, mismatched, or replayed grants report
 reports `networkActivity: true` even if the destination is unreachable, because
 one bounded transaction was attempted.
 
-This phase does not expose calls, RTP, scans, arbitrary messages, arbitrary
-commands, credentials, campaigns, or load. One-call execution remains a
-separate exit-gated phase.
+When explicitly enabled, one-call additionally requires the exact reviewed
+manifest whose SHA-256 is already bound by the frozen plan. It rejects
+credentials, multiple steps, non-call cases, disabled capture, calls/CPS/
+concurrency other than one, duration above 60 seconds, more than 2,000 packets,
+more than 2 MiB, or more than 200 packets per second. Its grant binds the
+signaling tuple and exact RTP port range. A fixed subprocess helper performs
+capture, one OPTIONS preflight, the call, watchdog enforcement, process-group
+cleanup, payload stripping, reporting, and evidence-manifest creation. The MCP
+result contains only hashes and a bounded receipt.
+
+The fixed helper has a 130-second outer deadline and is killed as a process
+group on timeout. Server/container termination is the emergency stop during
+the pre-exit-gate phase. Client-cancellation propagation and the local
+packet-level gate still need to pass before one-call is enabled by default.
+
+This surface never exposes arbitrary RTP, scans, arbitrary messages, arbitrary
+commands, credential testing, campaigns, or load.
 
 The current target restriction is enforced in the verifier and fixed adapter,
 not by a per-grant kernel egress ACL. Run this opt-in surface on a dedicated

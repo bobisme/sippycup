@@ -196,6 +196,7 @@ COPY bin/sippycup-media /usr/local/bin/sippycup-media
 COPY bin/sippycup-media-echo /usr/local/bin/sippycup-media-echo
 COPY bin/sippycup-mcp /usr/local/bin/sippycup-mcp
 COPY bin/sippycup-mcp-live /usr/local/bin/sippycup-mcp-live
+COPY tools/mcp-one-call-helper /usr/local/libexec/sippycup/mcp-one-call
 COPY bin/sippycup-torture /usr/local/bin/sippycup-torture
 COPY bin/sippycup-ui /usr/local/bin/sippycup-ui
 COPY bin/sippycup-resilience /usr/local/bin/sippycup-resilience
@@ -245,6 +246,7 @@ RUN chmod 0755 \
         /usr/local/bin/sippycup-media-echo \
         /usr/local/bin/sippycup-mcp \
         /usr/local/bin/sippycup-mcp-live \
+        /usr/local/libexec/sippycup/mcp-one-call \
         /usr/local/bin/sippycup-torture \
         /usr/local/bin/sippycup-ui \
         /usr/local/bin/sippycup-resilience \

@@ -68,7 +68,7 @@ _PAYLOAD_KEYS = frozenset(
     }
 )
 _ENDPOINT_REQUIRED_KEYS = frozenset({"role", "address", "port", "transport"})
-_ENDPOINT_ALLOWED_KEYS = _ENDPOINT_REQUIRED_KEYS | {"tlsServerName"}
+_ENDPOINT_ALLOWED_KEYS = _ENDPOINT_REQUIRED_KEYS | {"portEnd", "tlsServerName"}
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -147,13 +147,14 @@ def _timestamp(value: Any, field: str) -> int:
     return value
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class Endpoint:
     role: str
     address: str
     port: int
     transport: str
     tls_server_name: str | None = None
+    port_end: int | None = None
 
     @classmethod
     def parse(cls, value: Any) -> "Endpoint":
@@ -175,6 +176,16 @@ class Endpoint:
         port = _positive_integer(value["port"], "endpoint port")
         if port > 65535:
             raise MCPPolicyError("capability endpoint port exceeds 65535")
+        port_end_value = value.get("portEnd")
+        port_end = (
+            _positive_integer(port_end_value, "endpoint portEnd")
+            if port_end_value is not None
+            else None
+        )
+        if port_end is not None and (port_end <= port or port_end > 65535):
+            raise MCPPolicyError(
+                "capability endpoint portEnd must be greater than port and at most 65535"
+            )
         transport = _short_string(
             value["transport"], "endpoint transport", maximum=8
         ).lower()
@@ -185,7 +196,7 @@ class Endpoint:
             tls_name = _short_string(tls_name, "TLS server name", maximum=253)
         if transport not in {"tls", "wss"} and tls_name is not None:
             raise MCPPolicyError("TLS server name is only valid for TLS/WSS endpoints")
-        return cls(role, str(address), port, transport, tls_name)
+        return cls(role, str(address), port, transport, tls_name, port_end)
 
     def public(self) -> dict[str, Any]:
         value: dict[str, Any] = {
@@ -196,6 +207,8 @@ class Endpoint:
         }
         if self.tls_server_name is not None:
             value["tlsServerName"] = self.tls_server_name
+        if self.port_end is not None:
+            value["portEnd"] = self.port_end
         return value
 
 
@@ -688,6 +701,7 @@ class CapabilityValidator:
                     endpoint.role,
                     endpoint.address,
                     endpoint.port,
+                    endpoint.port_end or endpoint.port,
                     endpoint.transport,
                     endpoint.tls_server_name or "",
                 ),

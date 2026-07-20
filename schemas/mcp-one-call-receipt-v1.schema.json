@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/mcp-one-call-receipt-v1.schema.json",
+  "title": "Sippycup MCP bounded one-call receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion", "state", "exitCode", "completedSteps", "evidenceId",
+    "resultSha256", "evidenceManifestSha256"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/mcp-one-call-receipt/v1"},
+    "state": {"enum": ["succeeded", "failed", "cancelled"]},
+    "exitCode": {"type": "integer"},
+    "completedSteps": {"type": "integer", "minimum": 0, "maximum": 1},
+    "evidenceId": {"type": "string", "minLength": 1, "maxLength": 255},
+    "resultSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evidenceManifestSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

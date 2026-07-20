@@ -108,6 +108,7 @@ def build_live_tools() -> LivePreparationTools:
             ReplayAuditStore(audit_root),
         ),
         client_id=_required_environment("SIPPYCUP_MCP_LIVE_CLIENT_ID"),
+        evidence_root=state_root / "evidence",
     )
 
 
@@ -125,7 +126,8 @@ def build_server():
         "Sippycup Live",
         instructions=(
             "Prepare immutable reviewed artifacts and perform only one "
-            "capability-bound SIP OPTIONS preflight. This server cannot mint grants."
+            "capability-bound SIP OPTIONS preflight. An operator-gated mode adds "
+            "one credential-free captured call. This server cannot mint grants."
         ),
         log_level="WARNING",
     )
@@ -158,6 +160,16 @@ def build_server():
         annotations=preflight_annotations,
         structured_output=True,
     )(tools.preflight_target)
+    if os.environ.get("SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL") == "1":
+        server.tool(
+            name="execute_one_call",
+            description=(
+                "Consume a matching grant and execute exactly one credential-free "
+                "reviewed call with capture, watchdog ceilings, cleanup, and evidence."
+            ),
+            annotations=preflight_annotations,
+            structured_output=True,
+        )(tools.execute_one_call)
     return server
 
 

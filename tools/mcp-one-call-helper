@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Fixed one-call helper used only by the live MCP controller."""
+
+from pathlib import Path
+import sys
+
+script = Path(__file__).resolve()
+library = (
+    script.parents[2] / "lib"
+    if script.parent == Path("/usr/local/libexec/sippycup")
+    else script.parents[1] / "lib"
+)
+sys.path.insert(0, str(library))
+
+from sippycup_mcp.one_call import main
+
+raise SystemExit(main())

@@ -101,9 +101,10 @@ authenticated launcher or transport exists, the signed grant is bearer
 authority.
 
 This verifier does not make the offline MCP server live. The separate
-`./bin/sippycup mcp-live` launcher has its own two-tool allowlist, read-only
+`./bin/sippycup mcp-live` launcher has its own default two-tool allowlist, read-only
 grant/key/plan/profile mounts, and a durable private state mount. Its preflight
 is limited to one literal destination and one SIP OPTIONS transaction. The
-existing `./bin/sippycup mcp` remains networkless and read-only. One-call and
-campaign execution remain unavailable pending their own implementation and exit
-gates.
+existing `./bin/sippycup mcp` remains networkless and read-only. The
+credential-free, capture-backed one-call tool is implemented behind an
+operator-controlled opt-in and remains disabled by default pending its live exit
+gate. Campaign execution remains unavailable.

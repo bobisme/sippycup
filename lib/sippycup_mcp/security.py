@@ -240,8 +240,18 @@ class BoundedProcessRunner:
             try:
                 process.wait(timeout=self.timeout)
             except subprocess.TimeoutExpired as exc:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
                 raise MCPPolicyError(
                     f"fixed helper exceeded the {self.timeout}-second limit"
                 ) from exc
