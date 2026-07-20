@@ -1,0 +1,41 @@
+{
+  "apiVersion": "sippycup.dev/dtls-srtp-policy/v1",
+  "dtls": {
+    "allowedVersions": [
+      "DTLS1.2",
+      "DTLS1.3"
+    ],
+    "allowedCiphers": [
+      "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+    ],
+    "allowedRolePairs": [
+      {
+        "local": "client",
+        "remote": "server"
+      },
+      {
+        "local": "server",
+        "remote": "client"
+      }
+    ],
+    "requireVerifiedFingerprint": true,
+    "requireDowngradeProbe": true
+  },
+  "srtp": {
+    "allowedProfiles": [
+      "SRTP_AEAD_AES_128_GCM",
+      "SRTP_AES128_CM_SHA1_80"
+    ],
+    "requireDistinctRtpRtcpKeys": true,
+    "requireRtcpProtection": true,
+    "requireRekeyOnIceRestart": true,
+    "maxSequenceGap": 4096
+  },
+  "limits": {
+    "maxEvents": 10000,
+    "maxPackets": 100000,
+    "maxSsrcs": 64,
+    "maxEpochs": 16,
+    "maxDurationMs": 60000
+  }
+}

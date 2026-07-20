@@ -271,6 +271,16 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("normalized WebRTC SDP evidence offline", result.stdout)
 
+    def test_webrtc_media_security_help_needs_no_runtime(self) -> None:
+        result = run_cli(
+            "webrtc",
+            "media-security",
+            "--help",
+            env={"SIPPYCUP_RUNTIME": "/definitely/missing/runtime"},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("DTLS-SRTP security evidence offline", result.stdout)
+
     def test_container_routes_use_fixed_targets(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
             runtime = self.make_runtime(Path(root_name))

@@ -1,0 +1,125 @@
+{
+  "apiVersion": "sippycup.dev/dtls-srtp-observation/v1",
+  "networkActivity": false,
+  "events": [
+    {
+      "timeMs": 0,
+      "type": "dtls_handshake",
+      "data": {
+        "side": "local",
+        "role": "client",
+        "version": "DTLS1.2",
+        "cipher": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+        "sdpFingerprintHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "certificateFingerprintHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "verified": true
+      }
+    },
+    {
+      "timeMs": 1,
+      "type": "dtls_handshake",
+      "data": {
+        "side": "remote",
+        "role": "server",
+        "version": "DTLS1.2",
+        "cipher": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+        "sdpFingerprintHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "certificateFingerprintHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "verified": true
+      }
+    },
+    {
+      "timeMs": 2,
+      "type": "downgrade_probe",
+      "data": {
+        "offeredVersion": "DTLS1.0",
+        "outcome": "rejected",
+        "reachedMedia": false
+      }
+    },
+    {
+      "timeMs": 3,
+      "type": "srtp_context",
+      "data": {
+        "side": "local",
+        "profile": "SRTP_AEAD_AES_128_GCM",
+        "rtpKeyIdHash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "rtcpKeyIdHash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "epoch": 0,
+        "ssrc": 1001
+      }
+    },
+    {
+      "timeMs": 4,
+      "type": "srtp_context",
+      "data": {
+        "side": "remote",
+        "profile": "SRTP_AEAD_AES_128_GCM",
+        "rtpKeyIdHash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "rtcpKeyIdHash": "6666666666666666666666666666666666666666666666666666666666666666",
+        "epoch": 0,
+        "ssrc": 2002
+      }
+    },
+    {
+      "timeMs": 5,
+      "type": "rtp_packet",
+      "data": {
+        "direction": "outbound",
+        "ssrc": 1001,
+        "sequence": 65535,
+        "roc": 0,
+        "accepted": true,
+        "replay": false,
+        "authValid": true
+      }
+    },
+    {
+      "timeMs": 6,
+      "type": "rtp_packet",
+      "data": {
+        "direction": "outbound",
+        "ssrc": 1001,
+        "sequence": 0,
+        "roc": 1,
+        "accepted": true,
+        "replay": false,
+        "authValid": true
+      }
+    },
+    {
+      "timeMs": 7,
+      "type": "rtp_packet",
+      "data": {
+        "direction": "inbound",
+        "ssrc": 2002,
+        "sequence": 10,
+        "roc": 0,
+        "accepted": true,
+        "replay": false,
+        "authValid": true
+      }
+    },
+    {
+      "timeMs": 8,
+      "type": "rtcp_packet",
+      "data": {
+        "direction": "inbound",
+        "ssrc": 2002,
+        "index": 1,
+        "encrypted": true,
+        "authValid": true,
+        "accepted": true,
+        "replay": false
+      }
+    },
+    {
+      "timeMs": 9,
+      "type": "cleanup",
+      "data": {
+        "contexts": 0,
+        "sockets": 0
+      }
+    }
+  ]
+}

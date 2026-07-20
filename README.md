@@ -230,12 +230,16 @@ scope:
 ./bin/sippycup webrtc sdp evaluate \
   examples/webrtc/sdp-policy.json \
   examples/webrtc/sdp-transcript.clean.json
+./bin/sippycup webrtc media-security \
+  examples/webrtc/dtls-srtp-policy.json \
+  examples/webrtc/dtls-srtp-observation.clean.json
 ```
 
 The self-test is a bounded loopback-only DTLS-SRTP audio call; it does not
-contact an assessment target. The ICE/TURN and SDP commands are socket-free
-policy oracles. See `docs/WEBRTC-PEER.md`, `docs/WEBRTC-ICE-TURN.md`, and
-`docs/WEBRTC-SDP.md`.
+contact an assessment target. The ICE/TURN, SDP, and DTLS-SRTP commands are
+socket-free policy oracles. See `docs/WEBRTC-PEER.md`,
+`docs/WEBRTC-ICE-TURN.md`, `docs/WEBRTC-SDP.md`, and
+`docs/WEBRTC-DTLS-SRTP.md`.
 
 The repository also includes deterministic one-second PCMU, PCMA, and G.722
 audio canaries for both call directions. Their source generator, packetization,

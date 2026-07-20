@@ -21,6 +21,13 @@ from .sdp_oracle import (
     evaluate as evaluate_sdp,
     normalize_sdp,
 )
+from .dtls_srtp import (
+    OBSERVATION_VERSION as MEDIA_SECURITY_OBSERVATION_VERSION,
+    POLICY_VERSION as MEDIA_SECURITY_POLICY_VERSION,
+    REPORT_VERSION as MEDIA_SECURITY_REPORT_VERSION,
+    MediaSecurityError,
+    evaluate as evaluate_media_security,
+)
 
 __all__ = [
     "RESULT_VERSION",
@@ -38,4 +45,9 @@ __all__ = [
     "SDPOracleError",
     "evaluate_sdp",
     "normalize_sdp",
+    "MEDIA_SECURITY_OBSERVATION_VERSION",
+    "MEDIA_SECURITY_POLICY_VERSION",
+    "MEDIA_SECURITY_REPORT_VERSION",
+    "MediaSecurityError",
+    "evaluate_media_security",
 ]

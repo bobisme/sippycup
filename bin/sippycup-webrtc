@@ -19,6 +19,7 @@ Commands:
   self-test      Run one bounded Pion-to-Pion audio call on loopback
   ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
   sdp            Evaluate, generate, or minimize normalized SDP evidence
+  media-security Evaluate normalized DTLS-SRTP evidence offline
   help           Show this help
 
 No command can contact an assessment target. The self-test uses only loopback,
@@ -141,6 +142,10 @@ case "${command_name}" in
     sdp)
         PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
             "${project_dir}/bin/webrtc-sdp" "$@"
+        ;;
+    media-security)
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${project_dir}/bin/webrtc-media-security" "$@"
         ;;
     *)
         printf 'Unknown WebRTC profile command: %s\n' "${command_name}" >&2
