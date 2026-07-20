@@ -16,6 +16,7 @@ Commands:
   build          Build the pinned optional profile
   status         Report whether the optional image is installed
   capabilities   Print the peer's network-free capability contract
+  validate       Validate a scenario/result offline
   self-test      Run one bounded Pion-to-Pion audio call on loopback
   signaling-self-test
                  Run bounded browser-style WSS checks on loopback
@@ -133,6 +134,10 @@ case "${command_name}" in
         runtime="$(runtime_path)"
         require_image "${runtime}"
         run_confined "${runtime}" capabilities
+        ;;
+    validate)
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${project_dir}/bin/webrtc-validate" "$@"
         ;;
     self-test)
         runtime="$(runtime_path)"

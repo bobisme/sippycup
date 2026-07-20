@@ -223,7 +223,11 @@ scope:
 
 ```sh
 ./bin/sippycup webrtc build
+./bin/sippycup webrtc validate \
+  examples/webrtc/offline-scenario.json \
+  --result examples/webrtc/offline-result.json
 ./bin/sippycup webrtc self-test
+./bin/sippycup webrtc signaling-self-test
 ./bin/sippycup webrtc ice-turn \
   examples/webrtc/ice-turn-policy.json \
   examples/webrtc/ice-turn-observation.clean.json
@@ -238,10 +242,10 @@ scope:
   examples/webrtc/call-evidence.clean.json
 ```
 
-The self-test is a bounded loopback-only DTLS-SRTP audio call; it does not
-contact an assessment target. The ICE/TURN, SDP, DTLS-SRTP, and cross-layer
-call-evidence commands are socket-free policy oracles. See `docs/WEBRTC-PEER.md`,
-`docs/WEBRTC-ICE-TURN.md`, `docs/WEBRTC-SDP.md`, and
+The validator and evidence commands are socket-free. The two self-tests use
+loopback only: one places a bounded DTLS-SRTP audio call and the other checks a
+fixed browser-style WSS service. Neither can contact an assessment target. See
+`docs/WEBRTC-PEER.md`, `docs/WEBRTC-ICE-TURN.md`, `docs/WEBRTC-SDP.md`, and
 `docs/WEBRTC-DTLS-SRTP.md`.
 
 The repository also includes deterministic one-second PCMU, PCMA, and G.722

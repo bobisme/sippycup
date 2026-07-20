@@ -97,5 +97,16 @@ result = json.loads(
 validate_result(result)
 ```
 
-The future `bin/sippycup` WebRTC commands will call these same validators
-before planning or execution.
+Use the unified network-free validator before installing the optional peer:
+
+```sh
+./bin/sippycup webrtc validate \
+  examples/webrtc/offline-scenario.json \
+  --result examples/webrtc/offline-result.json
+```
+
+Add `--capabilities CAPABILITIES.json` to bind required capabilities to a
+captured adapter capability document. Without that flag, validation checks the
+scenario against its declared requirements and reports the binding as
+`not-supplied`; it does not claim that an installed adapter supports them.
+Validation never grants target authorization.
