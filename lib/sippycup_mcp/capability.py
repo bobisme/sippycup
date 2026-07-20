@@ -431,10 +431,14 @@ class ReplayAuditStore:
             ):
                 raise MCPPolicyError("capability audit database is unsafe")
         connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        connection.execute("PRAGMA busy_timeout=5000")
-        connection.execute("PRAGMA synchronous=FULL")
-        connection.execute("PRAGMA journal_mode=WAL")
-        return connection
+        try:
+            connection.execute("PRAGMA busy_timeout=5000")
+            connection.execute("PRAGMA synchronous=FULL")
+            connection.execute("PRAGMA journal_mode=WAL")
+            return connection
+        except Exception:
+            connection.close()
+            raise
 
     def _initialize(self) -> None:
         try:

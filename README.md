@@ -42,6 +42,13 @@ only an allowlisted documentation/schema catalog and typed offline tools; it
 cannot authorize targets or send traffic. Run `make mcp-exit-gate` after a
 build, and see `docs/MCP.md` plus `docs/MCP-SECURITY.md`.
 
+An opt-in, separately sandboxed `./bin/sippycup mcp-live` server adds immutable
+artifact preparation and one capability-bound SIP OPTIONS preflight. It
+requires an operator-owned public-key trust root, private replay/audit state,
+and an externally issued short-lived grant; Sippycup cannot mint one. Calls,
+RTP, campaigns, arbitrary messages, and load remain unavailable through MCP.
+See `docs/MCP-LIVE.md`.
+
 The launcher and Makefile choose `podman`, then `nerdctl`, then `docker`.
 Override the choice with the path or name of one compatible executable:
 

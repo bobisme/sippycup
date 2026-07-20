@@ -52,7 +52,7 @@ load_registry() {
             exit 2
         fi
         case "${mode}" in
-            builtin|doctor|workbench|direct|host|container|container-isolated|container-offline) ;;
+            builtin|doctor|workbench|direct|host|container|container-isolated|container-offline|container-live-mcp) ;;
             *)
                 printf 'Invalid mode for %s: %s\n' "${name}" "${mode}" >&2
                 exit 2
@@ -272,6 +272,57 @@ EOF
         "${command[@]}"
 }
 
+run_live_mcp() {
+    local trust_root="${SIPPYCUP_MCP_LIVE_TRUST_ROOT:-}"
+    local state_root="${SIPPYCUP_MCP_LIVE_STATE_ROOT:-}"
+    local client_id="${SIPPYCUP_MCP_LIVE_CLIENT_ID:-}"
+    if [[ -z "${trust_root}" || -z "${state_root}" || -z "${client_id}" ]]; then
+        cat >&2 <<'EOF'
+mcp-live requires SIPPYCUP_MCP_LIVE_TRUST_ROOT,
+SIPPYCUP_MCP_LIVE_STATE_ROOT, and SIPPYCUP_MCP_LIVE_CLIENT_ID.
+See docs/MCP-LIVE.md. No container or network activity was started.
+EOF
+        exit 2
+    fi
+    if [[ ! -d "${trust_root}" || -L "${trust_root}" \
+        || ! -d "${state_root}" || -L "${state_root}" ]]
+    then
+        printf 'mcp-live trust and state roots must be real directories.\n' >&2
+        exit 2
+    fi
+    local runtime runtime_name
+    runtime="$(resolve_runtime)"
+    runtime_name="$(basename -- "${runtime}")"
+    local -a identity=()
+    if [[ "${runtime_name}" == docker || "${runtime_name}" == nerdctl ]]; then
+        identity=(--user="$(id -u):$(id -g)")
+    fi
+    local -a terminal=()
+    if [[ -t 0 && -t 1 ]]; then
+        terminal=(-it)
+    fi
+    exec "${runtime}" run \
+        --rm \
+        "${terminal[@]}" \
+        "${identity[@]}" \
+        --network=bridge \
+        --cap-drop=ALL \
+        --read-only \
+        --security-opt=no-new-privileges=true \
+        --pids-limit=64 \
+        --tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m \
+        --hostname=sippycup-live \
+        --env=SIPPYCUP_MCP_LIVE_INPUT_ROOT=/live-inputs \
+        --env=SIPPYCUP_MCP_LIVE_TRUST_ROOT=/trust \
+        --env=SIPPYCUP_MCP_LIVE_STATE_ROOT=/state \
+        --env=SIPPYCUP_MCP_LIVE_CLIENT_ID="${client_id}" \
+        --volume="${project_dir}/work:/live-inputs:ro,Z" \
+        --volume="${trust_root}:/trust:ro" \
+        --volume="${state_root}:/state:rw" \
+        "${image}" \
+        sippycup-mcp-live "$@"
+}
+
 load_registry
 
 isolated=0
@@ -332,7 +383,7 @@ container_target="${command_container_target[${command_name}]}"
 
 if [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
     case "${mode}" in
-        doctor|container|container-isolated|container-offline)
+        doctor|container|container-isolated|container-offline|container-live-mcp)
             render_command_help "${command_name}"
             exit 0
             ;;
@@ -430,5 +481,13 @@ EOF
         fi
         offline_container=1
         run_container "${container_target}" "$@"
+        ;;
+    container-live-mcp)
+        if (( isolated != 0 || admin != 0 )); then
+            printf '%s has a fixed least-privilege live sandbox and rejects container options.\n' \
+                "${command_name}" >&2
+            exit 2
+        fi
+        run_live_mcp "$@"
         ;;
 esac

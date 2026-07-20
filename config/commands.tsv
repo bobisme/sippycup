@@ -4,6 +4,7 @@ commands|builtin|commands||Getting started|offline|List the stable public comman
 version|builtin|version||Getting started|offline|Show the stable Sippycup CLI version
 doctor|doctor|doctor|sippycup-workbench|Getting started|offline|Inspect the prepared image or explicitly inspect the host
 mcp|container-offline||sippycup-mcp|Getting started|offline|Let local agents discover and run allowlisted offline workflows
+mcp-live|container-live-mcp||sippycup-mcp-live|Getting started|network|Run capability-bound preparation and one-transaction preflight tools
 webrtc|host|sippycup-webrtc||Getting started|local-network|Manage and self-test the optional independent WebRTC peer
 web-security|host|sippycup-web-security||Preparation|offline|Compile bounded admin and WebSocket security evidence
 init|workbench|init|sippycup-workbench|Preparation|offline|Create a fail-closed pending target profile

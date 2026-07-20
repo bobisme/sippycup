@@ -60,6 +60,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "version",
                 "doctor",
                 "mcp",
+                "mcp-live",
                 "webrtc",
                 "web-security",
                 "init",
@@ -364,7 +365,52 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 2)
                     self.assertEqual(result.stdout, "")
-                    self.assertIn("fixed offline sandbox", result.stderr)
+            self.assertIn("fixed offline sandbox", result.stderr)
+
+    def test_mcp_live_requires_operator_roots_before_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            root = Path(root_name)
+            runtime = self.make_runtime(root)
+            result = run_cli(
+                "mcp-live",
+                "--check-config",
+                env={"SIPPYCUP_RUNTIME": str(runtime)},
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("requires SIPPYCUP_MCP_LIVE_TRUST_ROOT", result.stderr)
+        self.assertNotIn(" run ", result.stderr)
+
+    def test_mcp_live_launcher_has_fixed_least_privilege_mounts(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            root = Path(root_name)
+            runtime = self.make_runtime(root)
+            trust = root / "trust"
+            state = root / "state"
+            trust.mkdir(mode=0o700)
+            state.mkdir(mode=0o700)
+            result = run_cli(
+                "mcp-live",
+                "--check-config",
+                env={
+                    "SIPPYCUP_RUNTIME": str(runtime),
+                    "SIPPYCUP_MCP_LIVE_TRUST_ROOT": str(trust),
+                    "SIPPYCUP_MCP_LIVE_STATE_ROOT": str(state),
+                    "SIPPYCUP_MCP_LIVE_CLIENT_ID": "trusted-launcher:test",
+                },
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = result.stdout.splitlines()
+        self.assertIn("--network=bridge", arguments)
+        self.assertIn("--cap-drop=ALL", arguments)
+        self.assertIn("--read-only", arguments)
+        self.assertIn("--security-opt=no-new-privileges=true", arguments)
+        self.assertIn(f"--volume={trust}:/trust:ro", arguments)
+        self.assertIn(f"--volume={state}:/state:rw", arguments)
+        self.assertIn("sippycup-mcp-live", arguments)
+        self.assertIn("--check-config", arguments)
+        self.assertNotIn("--cap-add=NET_RAW", arguments)
+        self.assertNotIn("--cap-add=NET_ADMIN", arguments)
 
     def test_advanced_escape_hatch_preserves_argument_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:

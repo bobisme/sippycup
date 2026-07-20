@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/mcp-live-result-v1.schema.json",
+  "title": "Sippycup capability-backed MCP tool result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion", "tool", "ok", "networkActivity", "durationMs",
+    "sensitivity", "data", "warnings", "errors"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/mcp-live-result/v1"},
+    "tool": {"enum": ["prepare_assessment", "preflight_target"]},
+    "ok": {"type": "boolean"},
+    "networkActivity": {"type": "boolean"},
+    "durationMs": {"type": "integer", "minimum": 0},
+    "sensitivity": {"const": "internal"},
+    "data": {},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}

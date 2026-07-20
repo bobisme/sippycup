@@ -44,6 +44,10 @@ the current MCP server cannot mint grants, consume grants, or execute live
 actions. The verification design and trust assumptions are documented in
 [MCP-SECURITY.md](MCP-SECURITY.md).
 
+The separately launched, capability-backed preparation/preflight surface is
+documented in [MCP-LIVE.md](MCP-LIVE.md). It uses the same top-level
+`./bin/sippycup` entrypoint but is not part of this offline server.
+
 Useful checks:
 
 ```sh

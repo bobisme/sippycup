@@ -44,6 +44,7 @@ commands=(
     sippycup-media
     sippycup-media-echo
     sippycup-mcp
+    sippycup-mcp-live
     sippycup-torture
     sippycup-ui
     sippycup-resilience
@@ -111,6 +112,7 @@ first_party_help=(
     sippycup-media
     sippycup-media-echo
     sippycup-mcp
+    sippycup-mcp-live
     sippycup-pack
     sippycup-torture
     sippycup-ui

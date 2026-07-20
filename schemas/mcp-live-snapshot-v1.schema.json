@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/mcp-live-snapshot-v1.schema.json",
+  "title": "Sippycup immutable live MCP preparation snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion", "snapshotId", "targetProfileSha256",
+    "reviewedPlanSha256", "capabilityArtifactSha256",
+    "literalTargets", "trafficCeilings", "snapshotSha256"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/mcp-live-snapshot/v1"},
+    "snapshotId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "targetProfileSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reviewedPlanSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "capabilityArtifactSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "literalTargets": {"type": "array", "minItems": 1},
+    "trafficCeilings": {"type": "object"},
+    "snapshotSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

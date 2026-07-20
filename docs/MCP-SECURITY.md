@@ -100,8 +100,10 @@ trusted launcher supplies it outside agent-controlled arguments. Until an
 authenticated launcher or transport exists, the signed grant is bearer
 authority.
 
-This verifier does not make the offline MCP server live. A future live server
-must use a separate launcher and allowlist, read-only grant/key/plan/profile
-mounts, a durable private state mount, and controller-owned egress restricted
-to the grant's literal endpoints. The existing `./bin/sippycup mcp` remains
-networkless and read-only.
+This verifier does not make the offline MCP server live. The separate
+`./bin/sippycup mcp-live` launcher has its own two-tool allowlist, read-only
+grant/key/plan/profile mounts, and a durable private state mount. Its preflight
+is limited to one literal destination and one SIP OPTIONS transaction. The
+existing `./bin/sippycup mcp` remains networkless and read-only. One-call and
+campaign execution remain unavailable pending their own implementation and exit
+gates.
