@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schemas/webrtc-exit-gate-v1.schema.json",
+  "title": "Sippycup browser-realistic WebRTC local exit gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "status",
+    "networkActivity",
+    "networkScope",
+    "components",
+    "seededFailure",
+    "cancellationObserved",
+    "limits",
+    "secretsRetained",
+    "literalAddressesRetained",
+    "rawMessagesRetained",
+    "authorizationGranted",
+    "capacityClaim",
+    "residualGaps"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/webrtc-exit-gate/v1"},
+    "status": {"const": "pass"},
+    "networkActivity": {"const": true},
+    "networkScope": {"const": "disposable-loopback-no-egress"},
+    "components": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sha256", "status", "checks"],
+        "properties": {
+          "id": {"enum": ["direct", "relay", "signaling"]},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "status": {"const": "pass"},
+          "checks": {"type": "integer", "minimum": 6, "maximum": 12}
+        }
+      }
+    },
+    "seededFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "detected", "recoveryPassed", "sha256"],
+      "properties": {
+        "id": {"const": "origin-accept"},
+        "detected": {"const": true},
+        "recoveryPassed": {"const": true},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "cancellationObserved": {"const": true},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callsPerMediaComponent",
+        "rtpPacketsPerCall",
+        "payloadBytesPerPacket",
+        "maxComponentDeadlineSeconds",
+        "maxPeerPortSpan",
+        "maxSignalingConnections",
+        "maxSignalingMessages"
+      ],
+      "properties": {
+        "callsPerMediaComponent": {"const": 1},
+        "rtpPacketsPerCall": {"const": 50},
+        "payloadBytesPerPacket": {"const": 160},
+        "maxComponentDeadlineSeconds": {"const": 30},
+        "maxPeerPortSpan": {"const": 1000},
+        "maxSignalingConnections": {"const": 12},
+        "maxSignalingMessages": {"const": 24}
+      }
+    },
+    "secretsRetained": {"const": false},
+    "literalAddressesRetained": {"const": false},
+    "rawMessagesRetained": {"const": false},
+    "authorizationGranted": {"const": false},
+    "capacityClaim": {"type": "null"},
+    "residualGaps": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"type": "string", "maxLength": 128}
+    }
+  }
+}

@@ -38,6 +38,7 @@ scenario requirement.
 ./bin/sippycup webrtc self-test
 ./bin/sippycup webrtc signaling-self-test
 ./bin/sippycup webrtc relay-self-test
+./bin/sippycup webrtc exit-gate
 ```
 
 Both commands run in the optional image with no external container network,
@@ -47,6 +48,18 @@ check starts one fixed loopback WSS fixture and covers TLS, Origin,
 authentication, expiry, replay, authorization, size/rate, state, and
 reconnection behavior. The relay check forces the same media path through a
 disposable authenticated loopback TURN/UDP server.
+
+`exit-gate` runs all three clean components, injects and detects a foreign
+Origin acceptance flaw, proves a clean recovery run, and forces a one-second
+media cancellation. Its aggregate report binds each component by SHA-256,
+rechecks redaction and ceilings, grants no authorization, and makes no
+capacity claim.
+
+Exact v1 limits are one call per media component, 50 RTP packets per call,
+160 payload bytes per packet, a 30-second maximum component deadline, at most
+1,000 peer UDP ports, 12 signaling connections, and 24 signaling messages.
+Every container has no external network, drops all capabilities, and uses a
+read-only root filesystem.
 
 ## 4. Evaluate evidence offline
 
@@ -93,3 +106,7 @@ successful local lab, or old approval artifact cannot authorize traffic.
 - Live command unavailable: the service adapter or approval is incomplete.
   Continue with offline evidence; do not substitute an arbitrary WebSocket
   client.
+
+Residual local-gate gaps are explicit: a real browser engine, TURN over TCP
+and TLS, a service-specific target signaling adapter, and approval-bound
+target execution.

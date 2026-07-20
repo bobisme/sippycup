@@ -228,6 +228,8 @@ scope:
   --result examples/webrtc/offline-result.json
 ./bin/sippycup webrtc self-test
 ./bin/sippycup webrtc signaling-self-test
+./bin/sippycup webrtc relay-self-test
+./bin/sippycup webrtc exit-gate
 ./bin/sippycup webrtc ice-turn \
   examples/webrtc/ice-turn-policy.json \
   examples/webrtc/ice-turn-observation.clean.json

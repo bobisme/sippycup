@@ -21,6 +21,7 @@ Commands:
   signaling-self-test
                  Run bounded browser-style WSS checks on loopback
   relay-self-test Run a bounded audio call through loopback TURN only
+  exit-gate      Run the disposable local interoperability/safety gate
   ice-turn       Evaluate normalized ICE/STUN/TURN evidence offline
   sdp            Evaluate, generate, or minimize normalized SDP evidence
   media-security Evaluate normalized DTLS-SRTP evidence offline
@@ -155,6 +156,46 @@ case "${command_name}" in
         runtime="$(runtime_path)"
         require_image "${runtime}"
         run_confined "${runtime}" relay-self-test "$@"
+        ;;
+    exit-gate)
+        if (( $# != 0 )); then
+            printf 'exit-gate accepts no arguments.\n' >&2
+            exit 2
+        fi
+        runtime="$(runtime_path)"
+        require_image "${runtime}"
+        gate_root="$(mktemp -d "${TMPDIR:-/tmp}/sippycup-webrtc-gate.XXXXXX")"
+        readonly gate_root
+        trap 'rm -rf -- "${gate_root}"' EXIT
+        run_confined "${runtime}" self-test >"${gate_root}/direct.json"
+        run_confined "${runtime}" relay-self-test >"${gate_root}/relay.json"
+        run_confined "${runtime}" signaling-self-test >"${gate_root}/signaling.json"
+        set +e
+        run_confined "${runtime}" signaling-self-test \
+            --seed-failure origin-accept \
+            >"${gate_root}/seeded.json" 2>"${gate_root}/seeded.stderr"
+        seeded_status=$?
+        run_confined "${runtime}" self-test --timeout 1s \
+            >"${gate_root}/cancelled.json" 2>"${gate_root}/cancelled.stderr"
+        cancellation_status=$?
+        set -e
+        if (( seeded_status == 0 )); then
+            printf 'Seeded WSS failure unexpectedly passed.\n' >&2
+            exit 1
+        fi
+        if (( cancellation_status == 0 )); then
+            printf 'One-second cancellation control unexpectedly passed.\n' >&2
+            exit 1
+        fi
+        run_confined "${runtime}" signaling-self-test >"${gate_root}/recovery.json"
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${project_dir}/bin/webrtc-exit-gate" \
+            --direct "${gate_root}/direct.json" \
+            --relay "${gate_root}/relay.json" \
+            --signaling "${gate_root}/signaling.json" \
+            --seeded "${gate_root}/seeded.json" \
+            --recovery "${gate_root}/recovery.json" \
+            --cancellation-observed
         ;;
     ice-turn)
         PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \

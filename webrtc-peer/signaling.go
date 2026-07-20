@@ -75,6 +75,7 @@ type signalingSelfTestReport struct {
 type loopbackSignalingAdapter struct {
 	mu              sync.Mutex
 	nonces          map[string]struct{}
+	acceptForeign   bool
 	connections     int
 	openConnections int
 	messages        int
@@ -90,6 +91,13 @@ func (a *loopbackSignalingAdapter) handshake(
 	request *http.Request,
 ) error {
 	if request.Header.Get("Origin") != allowedBrowserOrigin {
+		if a.acceptForeign && request.Header.Get("Origin") == foreignBrowserOrigin {
+			a.mu.Lock()
+			a.connections++
+			a.openConnections++
+			a.mu.Unlock()
+			return nil
+		}
 		return errors.New("origin denied")
 	}
 	a.mu.Lock()
@@ -225,6 +233,11 @@ func runSignalingSelfTest(arguments []string) error {
 	flags := flag.NewFlagSet("signaling-self-test", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	timeout := flags.Duration("timeout", 10*time.Second, "hard loopback deadline")
+	seedFailure := flags.String(
+		"seed-failure",
+		"",
+		"local negative control: origin-accept",
+	)
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -234,10 +247,14 @@ func runSignalingSelfTest(arguments []string) error {
 	if *timeout < time.Second || *timeout > 30*time.Second {
 		return errors.New("timeout must be between 1s and 30s")
 	}
+	if *seedFailure != "" && *seedFailure != "origin-accept" {
+		return errors.New("seed-failure must be origin-accept")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
 	adapter := newLoopbackSignalingAdapter()
+	adapter.acceptForeign = *seedFailure == "origin-accept"
 	server := httptest.NewUnstartedServer(websocket.Server{
 		Handshake: adapter.handshake,
 		Handler:   adapter.serve,
@@ -312,7 +329,15 @@ func exerciseSignalingFixture(
 	_, err := dialSignaling(ctx, wssURL, allowedBrowserOrigin, nil)
 	appendCheck("tls-validation", "untrusted-certificate-rejected", errorClass(err), nil)
 
-	_, err = dialSignaling(ctx, wssURL, foreignBrowserOrigin, rootCAs)
+	foreignConnection, err := dialSignaling(
+		ctx,
+		wssURL,
+		foreignBrowserOrigin,
+		rootCAs,
+	)
+	if foreignConnection != nil {
+		_ = foreignConnection.Close()
+	}
 	appendCheck("origin-enforcement", "handshake-rejected", errorClass(err), nil)
 
 	run := func(
