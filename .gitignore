@@ -5,3 +5,7 @@ config/*.yaml
 config/*.yml
 __pycache__/
 *.py[cod]
+# maw admin tree (consolidated layout) — runtime/admin only
+/.maw/
+/.manifold/
+/repo.git/
