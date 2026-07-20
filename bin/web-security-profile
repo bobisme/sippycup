@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from sippycup_web_security.contracts import main
+
+raise SystemExit(main())

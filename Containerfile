@@ -199,6 +199,9 @@ COPY bin/sippycup-torture /usr/local/bin/sippycup-torture
 COPY bin/sippycup-ui /usr/local/bin/sippycup-ui
 COPY bin/sippycup-resilience /usr/local/bin/sippycup-resilience
 COPY bin/sippycup-workbench /usr/local/bin/sippycup-workbench
+COPY bin/sippycup-web-security /usr/local/bin/sippycup-web-security
+COPY bin/web-security-profile /usr/local/bin/web-security-profile
+COPY bin/web-security-evidence /usr/local/bin/web-security-evidence
 COPY bin/smoke /usr/local/bin/sippycup-smoke
 COPY lib/sippycup /usr/local/lib/sippycup
 COPY lib/sippycup_oracle /usr/local/lib/sippycup_oracle
@@ -211,6 +214,7 @@ COPY lib/sippycup_mcp /usr/local/lib/sippycup_mcp
 COPY lib/sippycup_resilience /usr/local/lib/sippycup_resilience
 COPY lib/sippycup_webrtc /usr/local/lib/sippycup_webrtc
 COPY lib/sippycup_workbench /usr/local/lib/sippycup_workbench
+COPY lib/sippycup_web_security /usr/local/lib/sippycup_web_security
 COPY media /usr/local/share/sippycup/media
 COPY profiles/chaos /usr/local/share/sippycup/chaos-profiles
 COPY README.md /usr/local/share/sippycup/README.md

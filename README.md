@@ -255,6 +255,18 @@ digits and bounded re-INVITE transitions. The safe session format, dry-run
 workflow, echo fixture, and timing report are documented in
 `docs/MEDIA-SEND.md`.
 
+Admin and WebSocket security scope is independently approval-gated. The
+network-free profile compiler and evidence oracle are available through:
+
+```sh
+./bin/sippycup web-security plan \
+  examples/web-security/offline-profile.json \
+  examples/web-security/example-adapter.json
+```
+
+See `docs/WEB-SECURITY.md`. The checked-in adapter is an offline example and
+does not imply permission to test any deployed service.
+
 Analyze a returned raw codec payload with `sippycup media analyze`. It reports
 marker acquisition, synchronized round-trip latency, continuity, clipping,
 gain, duration, direction, and silence facts with explicit uncertainty and

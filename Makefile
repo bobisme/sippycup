@@ -2,7 +2,7 @@ IMAGE ?= localhost/sippycup:latest
 WEBRTC_IMAGE ?= localhost/sippycup-webrtc:latest
 CAPTURE ?= work/selftest.pcap
 
-.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate mcp-exit-gate mcp-test media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test webrtc-build webrtc-selftest webrtc-test workbench-test
+.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate mcp-exit-gate mcp-test media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test web-security-test webrtc-build webrtc-selftest webrtc-test workbench-test
 
 build:
 	"$$(./bin/container-runtime)" build --tag "$(IMAGE)" --file Containerfile .
@@ -128,3 +128,6 @@ webrtc-build:
 
 webrtc-selftest:
 	SIPPYCUP_WEBRTC_IMAGE="$(WEBRTC_IMAGE)" ./bin/sippycup webrtc self-test
+
+web-security-test:
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v

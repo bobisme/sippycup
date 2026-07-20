@@ -1,0 +1,79 @@
+{
+  "apiVersion": "sippycup.dev/web-security-profile/v1",
+  "executionClass": "offline_fixture",
+  "adapter": {
+    "id": "example-voice-console",
+    "version": "1.0.0"
+  },
+  "authorization": {
+    "required": false,
+    "reference": null,
+    "notBefore": null,
+    "notAfter": null,
+    "surfaces": []
+  },
+  "destinations": [
+    {
+      "id": "admin-loopback",
+      "surface": "admin",
+      "scheme": "https",
+      "connectAddress": "127.0.0.1",
+      "port": 8443,
+      "tlsServerName": "admin.example.test"
+    },
+    {
+      "id": "websocket-loopback",
+      "surface": "websocket",
+      "scheme": "wss",
+      "connectAddress": "::1",
+      "port": 8444,
+      "tlsServerName": "signal.example.test"
+    }
+  ],
+  "credentialRefs": [
+    {
+      "id": "viewer-account",
+      "provider": "env",
+      "sourceRef": "env://SIPPYCUP_VIEWER_CREDENTIAL",
+      "role": "viewer"
+    },
+    {
+      "id": "operator-account",
+      "provider": "fd",
+      "sourceRef": "fd://3",
+      "role": "operator"
+    }
+  ],
+  "origins": [
+    {
+      "id": "approved-origin",
+      "value": "https://console.example.test",
+      "classification": "allowed"
+    },
+    {
+      "id": "foreign-origin",
+      "value": "https://foreign.example.test",
+      "classification": "disallowed"
+    }
+  ],
+  "checks": [
+    "admin.auth-required",
+    "admin.role-boundary",
+    "admin.csrf",
+    "websocket.origin",
+    "websocket.auth-required",
+    "websocket.message-authorization",
+    "websocket.size-limit",
+    "websocket.state-machine"
+  ],
+  "limits": {
+    "maxCases": 16,
+    "maxConnections": 8,
+    "maxHttpRequests": 32,
+    "maxWsMessages": 64,
+    "maxAuthFailures": 4,
+    "maxBytes": 1048576,
+    "maxDurationSeconds": 60,
+    "maxRequestsPerSecond": 4
+  }
+}

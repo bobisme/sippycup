@@ -61,6 +61,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "doctor",
                 "mcp",
                 "webrtc",
+                "web-security",
                 "init",
                 "rehearse",
                 "one-call",
@@ -213,6 +214,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             "chaos",
             "report",
             "webrtc",
+            "web-security",
         ):
             with self.subTest(command=command):
                 result = run_cli(command, "--help", env=missing)

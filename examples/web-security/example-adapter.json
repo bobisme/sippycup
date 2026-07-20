@@ -1,0 +1,133 @@
+{
+  "apiVersion": "sippycup.dev/web-security-adapter/v1",
+  "id": "example-voice-console",
+  "version": "1.0.0",
+  "checks": [
+    "admin.auth-required",
+    "admin.role-boundary",
+    "admin.csrf",
+    "admin.session-expiry",
+    "admin.object-scope",
+    "admin.rate-limit",
+    "websocket.origin",
+    "websocket.auth-required",
+    "websocket.session-expiry",
+    "websocket.replay",
+    "websocket.message-authorization",
+    "websocket.size-limit",
+    "websocket.rate-limit",
+    "websocket.state-machine",
+    "websocket.reconnect"
+  ],
+  "routes": [
+    {
+      "id": "login",
+      "surface": "admin",
+      "operation": "login"
+    },
+    {
+      "id": "session",
+      "surface": "admin",
+      "operation": "session-check"
+    },
+    {
+      "id": "admin-read",
+      "surface": "admin",
+      "operation": "admin-read"
+    },
+    {
+      "id": "admin-write",
+      "surface": "admin",
+      "operation": "admin-write"
+    },
+    {
+      "id": "signal-connect",
+      "surface": "websocket",
+      "operation": "ws-connect"
+    },
+    {
+      "id": "signal-message",
+      "surface": "websocket",
+      "operation": "ws-message"
+    },
+    {
+      "id": "signal-close",
+      "surface": "websocket",
+      "operation": "ws-close"
+    }
+  ],
+  "cases": [
+    {
+      "id": "admin-anonymous-denied",
+      "check": "admin.auth-required",
+      "routeId": "admin-read",
+      "credentialRole": null,
+      "originClass": null,
+      "expectedOutcome": "denied"
+    },
+    {
+      "id": "viewer-write-denied",
+      "check": "admin.role-boundary",
+      "routeId": "admin-write",
+      "credentialRole": "viewer",
+      "originClass": null,
+      "expectedOutcome": "denied"
+    },
+    {
+      "id": "admin-cross-origin-denied",
+      "check": "admin.csrf",
+      "routeId": "admin-write",
+      "credentialRole": "operator",
+      "originClass": "disallowed",
+      "expectedOutcome": "denied"
+    },
+    {
+      "id": "ws-approved-origin-allowed",
+      "check": "websocket.origin",
+      "routeId": "signal-connect",
+      "credentialRole": "viewer",
+      "originClass": "allowed",
+      "expectedOutcome": "allowed"
+    },
+    {
+      "id": "ws-foreign-origin-denied",
+      "check": "websocket.origin",
+      "routeId": "signal-connect",
+      "credentialRole": "viewer",
+      "originClass": "disallowed",
+      "expectedOutcome": "denied"
+    },
+    {
+      "id": "ws-anonymous-denied",
+      "check": "websocket.auth-required",
+      "routeId": "signal-connect",
+      "credentialRole": null,
+      "originClass": "allowed",
+      "expectedOutcome": "denied"
+    },
+    {
+      "id": "viewer-admin-message-denied",
+      "check": "websocket.message-authorization",
+      "routeId": "signal-message",
+      "credentialRole": "viewer",
+      "originClass": "allowed",
+      "expectedOutcome": "denied"
+    },
+    {
+      "id": "oversize-message-rejected",
+      "check": "websocket.size-limit",
+      "routeId": "signal-message",
+      "credentialRole": "viewer",
+      "originClass": "allowed",
+      "expectedOutcome": "rejected"
+    },
+    {
+      "id": "message-before-ready-rejected",
+      "check": "websocket.state-machine",
+      "routeId": "signal-message",
+      "credentialRole": "viewer",
+      "originClass": "allowed",
+      "expectedOutcome": "rejected"
+    }
+  ]
+}
