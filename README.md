@@ -30,25 +30,46 @@ registry. Running it without a command still opens the shell for compatibility.
 See `docs/CLI.md` for execution boundaries, compatibility, and the advanced
 third-party-tool escape hatch.
 
-Local agents can use the same entrypoint through the offline MCP server:
+## Agent access through MCP
+
+Sippycup has separate MCP security boundaries:
+
+| Surface | Entrypoint | Default state | Network behavior |
+|---|---|---|---|
+| Offline discovery and analysis | `./bin/sippycup mcp` | Available after build | No network namespace, no Linux capabilities, read-only files |
+| Immutable preparation and SIP OPTIONS preflight | `./bin/sippycup mcp-live` | Requires operator configuration | Preparation is offline; preflight consumes a matching grant before one bounded transaction |
+| Captured, credential-free one-call execution | `./bin/sippycup mcp-live` | Disabled pending the live exit gate | Explicit opt-in adds only `NET_RAW`; the grant fixes one call, endpoints, RTP range, time, and traffic ceilings |
+
+Start the ordinary offline server with:
 
 ```sh
 ./bin/sippycup mcp
 ```
 
-This launches a stdio-only server with networking disabled, all capabilities
-dropped, a read-only root filesystem, and `work/` mounted read-only. It exposes
-only an allowlisted documentation/schema catalog and typed offline tools; it
-cannot authorize targets or send traffic. Run `make mcp-exit-gate` after a
-build, and see `docs/MCP.md` plus `docs/MCP-SECURITY.md`.
+It is stdio-only and exposes an allowlisted documentation/schema catalog plus
+typed offline tools. It cannot authorize targets, consume live grants, or send
+traffic. Run `make mcp-exit-gate` after a build.
 
-An opt-in, separately sandboxed `./bin/sippycup mcp-live` server adds immutable
-artifact preparation and one capability-bound SIP OPTIONS preflight. It
-requires an operator-owned public-key trust root, private replay/audit state,
-and an externally issued short-lived grant; Sippycup cannot mint one. A
-credential-free, capture-backed one-call tool is implemented but disabled by
-default pending its live exit gate. Campaigns, arbitrary messages, and load
-remain unavailable through MCP. See `docs/MCP-LIVE.md`.
+`mcp-live` is a different container boundary. Before starting it, an operator
+must provide an Ed25519 public-key trust root, owner-private replay/audit/
+snapshot/evidence state, and a trusted launcher client ID. Check that
+configuration without traffic:
+
+```sh
+./bin/sippycup mcp-live --check-config
+```
+
+Every live action requires a short-lived externally issued grant binding the
+client, action, exact profile and reviewed-plan hashes, literal endpoints,
+expiry, one-time nonce, and hard traffic ceilings. Sippycup verifies and
+consumes grants but contains no signing or private-key API. Invalid, expired,
+mismatched, or replayed grants invoke no network adapter.
+
+One-call execution remains disabled by default until its approval-bound live
+exit gate is complete. MCP does not expose campaigns, arbitrary commands or
+messages, credentials, scanners, or load. See
+[`docs/MCP.md`](docs/MCP.md), [`docs/MCP-SECURITY.md`](docs/MCP-SECURITY.md),
+and [`docs/MCP-LIVE.md`](docs/MCP-LIVE.md).
 
 The launcher and Makefile choose `podman`, then `nerdctl`, then `docker`.
 Override the choice with the path or name of one compatible executable:
