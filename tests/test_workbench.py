@@ -112,6 +112,10 @@ class DoctorTests(unittest.TestCase):
                     result = diagnose(root)
         run.assert_not_called()
         self.assertFalse(result["network_activity"])
+        self.assertEqual(
+            "./bin/sippycup webrtc build",
+            result["optional_profiles"]["webrtc"]["install"],
+        )
 
 
 class TriageTests(unittest.TestCase):

@@ -41,7 +41,12 @@ Examples:
 ./bin/sippycup torture exit-gate
 ./bin/sippycup --isolated --admin chaos capabilities
 ./bin/sippycup selftest /work/selftest.pcap
+./bin/sippycup webrtc validate examples/webrtc/offline-scenario.json
+./bin/sippycup webrtc signaling-self-test
 ```
+
+The guided optional WebRTC path, including failure recovery and the live
+admission boundary, is documented in `docs/WEBRTC-WORKFLOW.md`.
 
 An activity label describes what a command *can* do; it is never target
 authorization. `offline` help or planning does not make a later execution

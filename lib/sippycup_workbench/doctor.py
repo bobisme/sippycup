@@ -28,6 +28,18 @@ ADDED_TOOLS = (
     "turnutils_peer",
 )
 OPTIONAL_TOOLS = ("zeek", "visqol", "heplify")
+OPTIONAL_PROFILES = {
+    "webrtc": {
+        "inspect": "./bin/sippycup webrtc status",
+        "install": "./bin/sippycup webrtc build",
+        "verify": "./bin/sippycup webrtc self-test",
+    },
+    "webrtc-signaling": {
+        "inspect": "./bin/sippycup webrtc status",
+        "install": "./bin/sippycup webrtc build",
+        "verify": "./bin/sippycup webrtc signaling-self-test",
+    },
+}
 _VERSION_ARGUMENTS = {
     "python3": ("--version",),
     "sipp": ("-v",),
@@ -150,5 +162,6 @@ def diagnose(workdir: str | Path) -> dict[str, Any]:
         "ok": not any(item["code"] != "doctor.capture_capability" for item in problems),
         "checks": checks,
         "tools": tools,
+        "optional_profiles": OPTIONAL_PROFILES,
         "problems": problems,
     }

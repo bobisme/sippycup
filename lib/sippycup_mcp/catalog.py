@@ -27,6 +27,7 @@ DOCUMENTS = {
     "webrtc-peer": "docs/WEBRTC-PEER.md",
     "webrtc-sdp": "docs/WEBRTC-SDP.md",
     "webrtc-threat-model": "docs/WEBRTC-THREAT-MODEL.md",
+    "webrtc-workflow": "docs/WEBRTC-WORKFLOW.md",
     "web-security": "docs/WEB-SECURITY.md",
 }
 SCHEMAS = {

@@ -80,6 +80,14 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
         ]
         if missing_optional:
             print(f"Optional profiles not installed: {', '.join(missing_optional)}")
+            print("Optional analysis profiles: see docs/OPTIONAL-PROFILES.md")
+        print("WebRTC profile status: ./bin/sippycup webrtc status")
+        print("WebRTC profile install: ./bin/sippycup webrtc build")
+        print("WebRTC local verification: ./bin/sippycup webrtc self-test")
+        print(
+            "WebRTC WSS verification: "
+            "./bin/sippycup webrtc signaling-self-test"
+        )
         print("Network activity: none")
         return
     if value.get("schema_version") == "sippycup.dev/triage/v1":
