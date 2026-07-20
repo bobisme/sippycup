@@ -239,8 +239,8 @@ scope:
 ```
 
 The self-test is a bounded loopback-only DTLS-SRTP audio call; it does not
-contact an assessment target. The ICE/TURN, SDP, and DTLS-SRTP commands are
-socket-free policy oracles. See `docs/WEBRTC-PEER.md`,
+contact an assessment target. The ICE/TURN, SDP, DTLS-SRTP, and cross-layer
+call-evidence commands are socket-free policy oracles. See `docs/WEBRTC-PEER.md`,
 `docs/WEBRTC-ICE-TURN.md`, `docs/WEBRTC-SDP.md`, and
 `docs/WEBRTC-DTLS-SRTP.md`.
 

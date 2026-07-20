@@ -11,11 +11,13 @@
   ],
   "events": [
     {"timeMs": 0, "type": "revision", "data": {"generation": 0, "revisionHash": "7777777777777777777777777777777777777777777777777777777777777777"}},
-    {"timeMs": 1, "type": "ice_pair", "data": {"generation": 0, "pairIdHash": "8888888888888888888888888888888888888888888888888888888888888888"}},
+    {"timeMs": 1, "type": "ice_pair", "data": {"generation": 0, "pairIdHash": "8888888888888888888888888888888888888888888888888888888888888888", "sequence": 0, "reason": "initial"}},
     {"timeMs": 2, "type": "dtls_association", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999"}},
     {"timeMs": 3, "type": "srtp_stream", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999", "ssrc": 1001, "direction": "outbound"}},
     {"timeMs": 4, "type": "srtp_stream", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999", "ssrc": 2002, "direction": "inbound"}},
-    {"timeMs": 5, "type": "audio", "data": {"generation": 0, "direction": "outbound", "measurementStatus": "measured", "continuity": "pass", "roundTripLatencyMs": 80}},
-    {"timeMs": 6, "type": "audio", "data": {"generation": 0, "direction": "inbound", "measurementStatus": "measured", "continuity": "pass", "roundTripLatencyMs": 82}}
+    {"timeMs": 5, "type": "srtcp_stream", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999", "ssrc": 1001, "direction": "outbound"}},
+    {"timeMs": 6, "type": "srtcp_stream", "data": {"generation": 0, "associationIdHash": "9999999999999999999999999999999999999999999999999999999999999999", "ssrc": 2002, "direction": "inbound"}},
+    {"timeMs": 7, "type": "audio", "data": {"generation": 0, "direction": "outbound", "measurementStatus": "measured", "continuity": "pass", "roundTripLatencyMs": 80, "canaryAssetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+    {"timeMs": 8, "type": "audio", "data": {"generation": 0, "direction": "inbound", "measurementStatus": "measured", "continuity": "pass", "roundTripLatencyMs": 82, "canaryAssetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
   ]
 }

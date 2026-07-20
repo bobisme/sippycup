@@ -77,14 +77,33 @@ def _digest(value: Any, path: str) -> str:
 
 def validate_policy(document: Any) -> dict[str, Any]:
     policy = dict(_object(document, "$"))
-    _exact(policy, "$", {"apiVersion", "requiredDirections", "recovery", "privacy", "limits"})
+    _exact(policy, "$", {"apiVersion", "media", "recovery", "privacy", "limits"})
     if policy["apiVersion"] != POLICY_VERSION:
         raise CallEvidenceError("$.apiVersion is unsupported")
-    directions = _array(policy["requiredDirections"], "$.requiredDirections")
+    media = _object(policy["media"], "$.media")
+    _exact(
+        media,
+        "$.media",
+        {
+            "requiredDirections",
+            "requireRtcpEvidence",
+            "requireCanaryEvidence",
+            "maxRoundTripLatencyMs",
+        },
+    )
+    directions = _array(media["requiredDirections"], "$.media.requiredDirections")
     if not directions or len(directions) != len(set(directions)):
-        raise CallEvidenceError("$.requiredDirections must be non-empty and unique")
+        raise CallEvidenceError("$.media.requiredDirections must be non-empty and unique")
     for index, item in enumerate(directions):
-        _enum(item, f"$.requiredDirections[{index}]", {"outbound", "inbound"})
+        _enum(item, f"$.media.requiredDirections[{index}]", {"outbound", "inbound"})
+    _boolean(media["requireRtcpEvidence"], "$.media.requireRtcpEvidence")
+    _boolean(media["requireCanaryEvidence"], "$.media.requireCanaryEvidence")
+    _integer(
+        media["maxRoundTripLatencyMs"],
+        "$.media.maxRoundTripLatencyMs",
+        1,
+        300000,
+    )
     recovery = _object(policy["recovery"], "$.recovery")
     _exact(recovery, "$.recovery", {"maxDowntimeMs", "requireRecoveryEvidence"})
     _integer(recovery["maxDowntimeMs"], "$.recovery.maxDowntimeMs", 0, 300000)
@@ -114,15 +133,17 @@ def validate_policy(document: Any) -> dict[str, Any]:
 
 _EVENT_FIELDS = {
     "revision": {"generation", "revisionHash"},
-    "ice_pair": {"generation", "pairIdHash"},
+    "ice_pair": {"generation", "pairIdHash", "sequence", "reason"},
     "dtls_association": {"generation", "associationIdHash"},
     "srtp_stream": {"generation", "associationIdHash", "ssrc", "direction"},
+    "srtcp_stream": {"generation", "associationIdHash", "ssrc", "direction"},
     "audio": {
         "generation",
         "direction",
         "measurementStatus",
         "continuity",
         "roundTripLatencyMs",
+        "canaryAssetHash",
     },
     "recovery": {"generation", "outcome", "downtimeMs"},
 }
@@ -180,9 +201,15 @@ def validate_evidence(document: Any, policy_document: Any) -> dict[str, Any]:
             _digest(data["revisionHash"], f"{path}.data.revisionHash")
         elif kind == "ice_pair":
             _digest(data["pairIdHash"], f"{path}.data.pairIdHash")
+            _integer(data["sequence"], f"{path}.data.sequence", 0, 65535)
+            _enum(
+                data["reason"],
+                f"{path}.data.reason",
+                {"initial", "reselection", "ice_restart"},
+            )
         elif kind == "dtls_association":
             _digest(data["associationIdHash"], f"{path}.data.associationIdHash")
-        elif kind == "srtp_stream":
+        elif kind in {"srtp_stream", "srtcp_stream"}:
             _digest(data["associationIdHash"], f"{path}.data.associationIdHash")
             _integer(data["ssrc"], f"{path}.data.ssrc", 0, 4294967295)
             _enum(data["direction"], f"{path}.data.direction", {"outbound", "inbound"})
@@ -194,6 +221,9 @@ def validate_evidence(document: Any, policy_document: Any) -> dict[str, Any]:
                 {"measured", "not_measurable"},
             )
             _enum(data["continuity"], f"{path}.data.continuity", {"pass", "fail", "unknown"})
+            canary_hash = data["canaryAssetHash"]
+            if canary_hash is not None:
+                _digest(canary_hash, f"{path}.data.canaryAssetHash")
             latency = data["roundTripLatencyMs"]
             if latency is not None and (
                 isinstance(latency, bool)
@@ -225,12 +255,36 @@ def _privacy_scan(value: Any, policy: Mapping[str, Any], path: str = "$") -> Non
     elif isinstance(value, list):
         for index, item in enumerate(value):
             _privacy_scan(item, policy, f"{path}[{index}]")
-    elif privacy["requireCandidateAddressRedaction"] and isinstance(value, str):
-        try:
-            ipaddress.ip_address(value)
-        except ValueError:
-            return
-        raise CallEvidenceError(f"{path} contains a literal candidate address")
+    elif isinstance(value, str):
+        lowered = value.lower()
+        if privacy["requireCandidateAddressRedaction"]:
+            try:
+                ipaddress.ip_address(value)
+            except ValueError:
+                pass
+            else:
+                raise CallEvidenceError(f"{path} contains a literal candidate address")
+            if any(
+                marker in lowered
+                for marker in ("candidate:", "typ host", "typ srflx", "typ relay")
+            ):
+                raise CallEvidenceError(f"{path} contains a raw candidate")
+        if privacy["requireCredentialRedaction"] and any(
+            marker in lowered
+            for marker in (
+                "ice-pwd",
+                "ice-ufrag",
+                "authorization",
+                "bearer",
+                "cookie",
+            )
+        ):
+            raise CallEvidenceError(f"{path} contains credential material")
+        if privacy["requireBrowserMetadataRedaction"] and any(
+            marker in lowered
+            for marker in ("mozilla/", "chrome/", "firefox/", "deviceid")
+        ):
+            raise CallEvidenceError(f"{path} contains browser or device metadata")
 
 
 def evaluate(policy_document: Any, evidence_document: Any) -> dict[str, Any]:
@@ -243,7 +297,11 @@ def evaluate(policy_document: Any, evidence_document: Any) -> dict[str, Any]:
         findings.append({"code": code, "generation": generation, "detail": detail})
 
     components = {item["kind"]: item for item in evidence["components"]}
-    for required in ("sdp", "ice-turn", "dtls-srtp"):
+    required_components = {"sdp", "ice-turn", "dtls-srtp"}
+    required_components.update(
+        f"audio-{direction}" for direction in policy["media"]["requiredDirections"]
+    )
+    for required in sorted(required_components):
         if required not in components:
             unknowns.append({"code": "call.component_missing", "component": required})
     for component in evidence["components"]:
@@ -270,20 +328,55 @@ def evaluate(policy_document: Any, evidence_document: Any) -> dict[str, Any]:
                         "layer": layer,
                     }
                 )
+        for singleton in ("revision", "dtls_association"):
+            if len(layers.get(singleton, [])) > 1:
+                fail("call.layer_ambiguous", generation, singleton)
+        ice_pairs = layers.get("ice_pair", [])
+        ice_sequences = [item["sequence"] for item in ice_pairs]
+        if ice_sequences != list(range(len(ice_pairs))):
+            fail("call.ice_pair_sequence_invalid", generation, repr(ice_sequences))
+        if ice_pairs:
+            expected_reason = "initial" if generation == 0 else "ice_restart"
+            if ice_pairs[0]["reason"] != expected_reason:
+                fail(
+                    "call.ice_generation_reason_invalid",
+                    generation,
+                    ice_pairs[0]["reason"],
+                )
+            if any(item["reason"] == "initial" for item in ice_pairs[1:]):
+                fail("call.ice_reselection_reason_invalid", generation, "initial")
         associations = {
             item["associationIdHash"]
             for item in layers.get("dtls_association", [])
         }
-        for stream in layers.get("srtp_stream", []):
+        for stream in layers.get("srtp_stream", []) + layers.get("srtcp_stream", []):
             if stream["associationIdHash"] not in associations:
-                fail("call.srtp_dtls_mismatch", generation, stream["direction"])
+                fail(
+                    "call.media_dtls_mismatch",
+                    generation,
+                    f"{stream['direction']}:{stream['ssrc']}",
+                )
         audio_directions = {
             item["direction"] for item in layers.get("audio", [])
         }
         stream_directions = {
             item["direction"] for item in layers.get("srtp_stream", [])
         }
-        for direction in policy["requiredDirections"]:
+        rtcp_directions = {
+            item["direction"] for item in layers.get("srtcp_stream", [])
+        }
+        stream_ssrcs = {
+            (item["direction"], item["ssrc"])
+            for item in layers.get("srtp_stream", [])
+        }
+        for rtcp in layers.get("srtcp_stream", []):
+            if (rtcp["direction"], rtcp["ssrc"]) not in stream_ssrcs:
+                fail(
+                    "call.srtcp_without_rtp_stream",
+                    generation,
+                    f"{rtcp['direction']}:{rtcp['ssrc']}",
+                )
+        for direction in policy["media"]["requiredDirections"]:
             if direction not in stream_directions:
                 unknowns.append(
                     {
@@ -296,6 +389,17 @@ def evaluate(policy_document: Any, evidence_document: Any) -> dict[str, Any]:
                 unknowns.append(
                     {
                         "code": "call.audio_direction_missing",
+                        "generation": generation,
+                        "direction": direction,
+                    }
+                )
+            if (
+                policy["media"]["requireRtcpEvidence"]
+                and direction not in rtcp_directions
+            ):
+                unknowns.append(
+                    {
+                        "code": "call.srtcp_direction_missing",
                         "generation": generation,
                         "direction": direction,
                     }
@@ -314,8 +418,42 @@ def evaluate(policy_document: Any, evidence_document: Any) -> dict[str, Any]:
                         "direction": audio["direction"],
                     }
                 )
+            if (
+                policy["media"]["requireCanaryEvidence"]
+                and audio["canaryAssetHash"] is None
+            ):
+                unknowns.append(
+                    {
+                        "code": "call.canary_not_observed",
+                        "generation": generation,
+                        "direction": audio["direction"],
+                    }
+                )
+            latency = audio["roundTripLatencyMs"]
+            if audio["measurementStatus"] == "measured" and latency is None:
+                unknowns.append(
+                    {
+                        "code": "call.latency_not_observed",
+                        "generation": generation,
+                        "direction": audio["direction"],
+                    }
+                )
+            elif (
+                latency is not None
+                and latency > policy["media"]["maxRoundTripLatencyMs"]
+            ):
+                fail(
+                    "call.latency_ceiling_exceeded",
+                    generation,
+                    f"{audio['direction']}:{latency}",
+                )
         recoveries = layers.get("recovery", [])
-        if policy["recovery"]["requireRecoveryEvidence"] and generation > 0 and not recoveries:
+        needs_recovery = generation > 0 or len(ice_pairs) > 1
+        if (
+            policy["recovery"]["requireRecoveryEvidence"]
+            and needs_recovery
+            and not recoveries
+        ):
             unknowns.append({"code": "call.recovery_missing", "generation": generation})
         for recovery in recoveries:
             if recovery["outcome"] == "failed":
@@ -326,6 +464,8 @@ def evaluate(policy_document: Any, evidence_document: Any) -> dict[str, Any]:
                 fail("call.recovery_too_slow", generation, str(recovery["downtimeMs"]))
 
     generations = set(by_generation)
+    if generations and generations != set(range(max(generations) + 1)):
+        fail("call.generation_sequence_invalid", -1, repr(sorted(generations)))
     ssrcs = {
         item["ssrc"]
         for layers in by_generation.values()

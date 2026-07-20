@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schemas/webrtc-call-evidence-v1.schema.json",
+  "title": "Sippycup normalized WebRTC cross-layer call evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "networkActivity", "callIdHash", "components", "events"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/webrtc-call-evidence/v1"},
+    "networkActivity": {"type": "boolean"},
+    "callIdHash": {"$ref": "#/$defs/digest"},
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/component"}
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/event"}
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "direction": {
+      "enum": ["outbound", "inbound"]
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "status", "reportHash", "uncertainty"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "sdp",
+            "ice-turn",
+            "dtls-srtp",
+            "audio-outbound",
+            "audio-inbound"
+          ]
+        },
+        "status": {"enum": ["pass", "fail", "incomplete"]},
+        "reportHash": {"$ref": "#/$defs/digest"},
+        "uncertainty": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+          }
+        }
+      }
+    },
+    "event": {
+      "oneOf": [
+        {"$ref": "#/$defs/revision_event"},
+        {"$ref": "#/$defs/ice_event"},
+        {"$ref": "#/$defs/dtls_event"},
+        {"$ref": "#/$defs/srtp_event"},
+        {"$ref": "#/$defs/srtcp_event"},
+        {"$ref": "#/$defs/audio_event"},
+        {"$ref": "#/$defs/recovery_event"}
+      ]
+    },
+    "event_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
+        }
+      }
+    },
+    "revision_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "revision"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generation", "revisionHash"],
+          "properties": {
+            "generation": {"$ref": "#/$defs/generation"},
+            "revisionHash": {"$ref": "#/$defs/digest"}
+          }
+        }
+      }
+    },
+    "ice_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "ice_pair"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generation", "pairIdHash", "sequence", "reason"],
+          "properties": {
+            "generation": {"$ref": "#/$defs/generation"},
+            "pairIdHash": {"$ref": "#/$defs/digest"},
+            "sequence": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "reason": {"enum": ["initial", "reselection", "ice_restart"]}
+          }
+        }
+      }
+    },
+    "dtls_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "dtls_association"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generation", "associationIdHash"],
+          "properties": {
+            "generation": {"$ref": "#/$defs/generation"},
+            "associationIdHash": {"$ref": "#/$defs/digest"}
+          }
+        }
+      }
+    },
+    "stream_data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "associationIdHash", "ssrc", "direction"],
+      "properties": {
+        "generation": {"$ref": "#/$defs/generation"},
+        "associationIdHash": {"$ref": "#/$defs/digest"},
+        "ssrc": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "direction": {"$ref": "#/$defs/direction"}
+      }
+    },
+    "srtp_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "srtp_stream"},
+        "data": {"$ref": "#/$defs/stream_data"}
+      }
+    },
+    "srtcp_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "srtcp_stream"},
+        "data": {"$ref": "#/$defs/stream_data"}
+      }
+    },
+    "audio_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "audio"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "generation",
+            "direction",
+            "measurementStatus",
+            "continuity",
+            "roundTripLatencyMs",
+            "canaryAssetHash"
+          ],
+          "properties": {
+            "generation": {"$ref": "#/$defs/generation"},
+            "direction": {"$ref": "#/$defs/direction"},
+            "measurementStatus": {"enum": ["measured", "not_measurable"]},
+            "continuity": {"enum": ["pass", "fail", "unknown"]},
+            "roundTripLatencyMs": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "maximum": 300000
+            },
+            "canaryAssetHash": {
+              "oneOf": [
+                {"$ref": "#/$defs/digest"},
+                {"type": "null"}
+              ]
+            }
+          }
+        }
+      }
+    },
+    "recovery_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeMs", "type", "data"],
+      "properties": {
+        "timeMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "type": {"const": "recovery"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generation", "outcome", "downtimeMs"],
+          "properties": {
+            "generation": {"$ref": "#/$defs/generation"},
+            "outcome": {"enum": ["recovered", "failed", "unknown"]},
+            "downtimeMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 300000
+            }
+          }
+        }
+      }
+    }
+  }
+}

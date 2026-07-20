@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.invalid/schemas/webrtc-call-policy-v1.schema.json",
+  "title": "Sippycup WebRTC cross-layer call policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "media", "recovery", "privacy", "limits"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/webrtc-call-policy/v1"},
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requiredDirections",
+        "requireRtcpEvidence",
+        "requireCanaryEvidence",
+        "maxRoundTripLatencyMs"
+      ],
+      "properties": {
+        "requiredDirections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["outbound", "inbound"]}
+        },
+        "requireRtcpEvidence": {"type": "boolean"},
+        "requireCanaryEvidence": {"type": "boolean"},
+        "maxRoundTripLatencyMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxDowntimeMs", "requireRecoveryEvidence"],
+      "properties": {
+        "maxDowntimeMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000
+        },
+        "requireRecoveryEvidence": {"type": "boolean"}
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireCandidateAddressRedaction",
+        "requireCredentialRedaction",
+        "requireBrowserMetadataRedaction",
+        "retainRawAudio"
+      ],
+      "properties": {
+        "requireCandidateAddressRedaction": {"type": "boolean"},
+        "requireCredentialRedaction": {"type": "boolean"},
+        "requireBrowserMetadataRedaction": {"type": "boolean"},
+        "retainRawAudio": {"const": false}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxEvents", "maxGenerations", "maxSsrcs"],
+      "properties": {
+        "maxEvents": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "maxGenerations": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "maxSsrcs": {"type": "integer", "minimum": 1, "maximum": 4096}
+      }
+    }
+  }
+}

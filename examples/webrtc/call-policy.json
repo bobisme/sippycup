@@ -1,6 +1,11 @@
 {
   "apiVersion": "sippycup.dev/webrtc-call-policy/v1",
-  "requiredDirections": ["outbound", "inbound"],
+  "media": {
+    "requiredDirections": ["outbound", "inbound"],
+    "requireRtcpEvidence": true,
+    "requireCanaryEvidence": true,
+    "maxRoundTripLatencyMs": 2000
+  },
   "recovery": {
     "maxDowntimeMs": 2000,
     "requireRecoveryEvidence": true
