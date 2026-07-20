@@ -48,7 +48,9 @@ Start the ordinary offline server with:
 
 It is stdio-only and exposes an allowlisted documentation/schema catalog plus
 typed offline tools. It cannot authorize targets, consume live grants, or send
-traffic. Run `make mcp-exit-gate` after a build.
+traffic. Run `make mcp-exit-gate` after a build. Copy-paste installation
+commands for Claude Code, Codex, and other stdio clients are in
+[`docs/MCP.md`](docs/MCP.md).
 
 `mcp-live` is a different container boundary. Before starting it, an operator
 must provide an Ed25519 public-key trust root, owner-private replay/audit/
