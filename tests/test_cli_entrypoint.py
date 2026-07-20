@@ -59,6 +59,8 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "commands",
                 "version",
                 "doctor",
+                "mcp",
+                "webrtc",
                 "init",
                 "rehearse",
                 "one-call",
@@ -210,10 +212,44 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             "resilience",
             "chaos",
             "report",
+            "webrtc",
         ):
             with self.subTest(command=command):
                 result = run_cli(command, "--help", env=missing)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_webrtc_selftest_uses_fixed_optional_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            result = run_cli(
+                "webrtc",
+                "self-test",
+                "--timeout",
+                "5s",
+                env={
+                    "SIPPYCUP_RUNTIME": str(runtime),
+                    "SIPPYCUP_WEBRTC_IMAGE": "example.invalid/sippycup-webrtc:test",
+                },
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = result.stdout.splitlines()
+        for expected in (
+            "run",
+            "--rm",
+            "--network=none",
+            "--cap-drop=ALL",
+            "--read-only",
+            "--security-opt=no-new-privileges=true",
+            "--pids-limit=128",
+            "--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m",
+            "example.invalid/sippycup-webrtc:test",
+            "self-test",
+            "--timeout",
+            "5s",
+        ):
+            self.assertIn(expected, arguments)
+        self.assertNotIn("--network=host", arguments)
+        self.assertNotIn("--cap-add=NET_RAW", arguments)
 
     def test_container_routes_use_fixed_targets(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
@@ -224,6 +260,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             }
             cases = {
                 "doctor": "sippycup-workbench",
+                "mcp": "sippycup-mcp",
                 "preflight": "sippycup-preflight",
                 "selftest": "sippycup-selftest",
                 "shell": "/bin/bash",
@@ -238,6 +275,18 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                     self.assertIn(target, arguments)
                     if command == "selftest":
                         self.assertNotIn("--network=host", arguments)
+                    if command == "mcp":
+                        self.assertIn("--network=none", arguments)
+                        self.assertIn("--cap-drop=ALL", arguments)
+                        self.assertIn("--read-only", arguments)
+                        self.assertIn("--security-opt=no-new-privileges=true", arguments)
+                        self.assertIn("--pids-limit=64", arguments)
+                        self.assertIn("--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m", arguments)
+                        self.assertTrue(
+                            any(item.endswith("/work:/work:ro,Z") for item in arguments)
+                        )
+                        self.assertNotIn("--cap-add=NET_RAW", arguments)
+                        self.assertNotIn("--cap-add=NET_BIND_SERVICE", arguments)
 
     def test_container_options_reuse_packaged_direct_command(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
@@ -256,6 +305,21 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         self.assertIn("--cap-add=SYS_ADMIN", arguments)
         self.assertIn("--device=/dev/net/tun", arguments)
         self.assertNotIn("--network=host", arguments)
+
+    def test_mcp_rejects_privilege_broadening(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            for option in ("--isolated", "--admin"):
+                with self.subTest(option=option):
+                    result = run_cli(
+                        option,
+                        "mcp",
+                        "--self-test",
+                        env={"SIPPYCUP_RUNTIME": str(runtime)},
+                    )
+                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("fixed offline sandbox", result.stderr)
 
     def test_advanced_escape_hatch_preserves_argument_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:

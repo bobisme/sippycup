@@ -1,0 +1,66 @@
+{
+  "apiVersion": "sippycup.dev/webrtc-result/v1",
+  "kind": "WebRTCResult",
+  "scenarioId": "offline-contract-001",
+  "status": "pass",
+  "networkActivity": false,
+  "summary": {
+    "assertions": 2,
+    "passed": 1,
+    "failed": 0,
+    "unknown": 0,
+    "notApplicable": 1
+  },
+  "events": [
+    {
+      "sequence": 0,
+      "source": "fixture-peer",
+      "kind": "negotiation.offer.parsed",
+      "sensitivity": "internal",
+      "data": {
+        "revision": 1,
+        "sdpSha256": "d1c51e6e73086dd16bc86abb41a60136f20f06cd53f10c609c0f40f0c50b1208"
+      }
+    },
+    {
+      "sequence": 1,
+      "source": "fixture-oracle",
+      "kind": "dtls.fingerprint.bound",
+      "sensitivity": "internal",
+      "data": {
+        "matched": true,
+        "algorithm": "sha-256"
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "id": "dtls.fingerprint-binding",
+      "verdict": "pass",
+      "unknownReason": null,
+      "evidenceRefs": ["normalized-events"]
+    },
+    {
+      "id": "turn.credential-lifetime",
+      "verdict": "not_applicable",
+      "unknownReason": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "artifactId": "normalized-events",
+      "sha256": "82fe5b9b3b26a8765474c9865f6893ed50dca505dd6528dbaf22a4d56689a076",
+      "mediaType": "application/x-ndjson",
+      "sensitivity": "internal"
+    }
+  ],
+  "redactions": {
+    "count": 4,
+    "classes": [
+      "candidate-address",
+      "ice-credential",
+      "sdp"
+    ]
+  }
+}

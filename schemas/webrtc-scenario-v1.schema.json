@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/webrtc-scenario-v1.schema.json",
+  "title": "Sippycup WebRTC assessment scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "executionClass",
+    "adapter",
+    "authorization",
+    "destinations",
+    "credentialRefs",
+    "limits",
+    "negotiation",
+    "evidence"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/webrtc-scenario/v1"},
+    "kind": {"const": "WebRTCScenario"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scenarioId"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "scenarioId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      }
+    },
+    "executionClass": {
+      "enum": ["offline_fixture", "local_lab", "approved_target"]
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "capabilityVersion", "requiredCapabilities"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "capabilityVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 11,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "audio",
+              "trickle-ice",
+              "ice-restart",
+              "stun",
+              "turn-udp",
+              "turn-tcp",
+              "turn-tls",
+              "dtls-srtp",
+              "rtcp",
+              "wss-signaling"
+            ]
+          }
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "approvalRef",
+        "validFrom",
+        "validUntil",
+        "negativeTests"
+      ],
+      "properties": {
+        "required": {"type": "boolean"},
+        "approvalRef": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "validFrom": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "validUntil": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "negativeTests": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "auth",
+              "origin",
+              "signaling-state",
+              "ice",
+              "turn",
+              "dtls",
+              "srtp",
+              "consent"
+            ]
+          }
+        }
+      }
+    },
+    "destinations": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "address", "port", "transport"],
+        "properties": {
+          "role": {"enum": ["signaling", "stun", "turn", "media"]},
+          "address": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 64
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "transport": {"enum": ["udp", "tcp", "tls", "wss"]}
+        }
+      }
+    },
+    "credentialRefs": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 5,
+        "maxLength": 256,
+        "pattern": "^[a-z][a-z0-9+.-]*://[A-Za-z0-9._/-]+$",
+        "not": {"pattern": "^(inline|data)://"}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxCalls",
+        "maxConcurrency",
+        "maxDurationSeconds",
+        "maxSignalingMessages",
+        "maxPackets",
+        "maxBytes",
+        "maxEvidenceBytes"
+      ],
+      "properties": {
+        "maxCalls": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "maxConcurrency": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "maxSignalingMessages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "maxPackets": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "maxEvidenceBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1073741824
+        }
+      }
+    },
+    "negotiation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audioOnly",
+        "trickleIce",
+        "iceRestart",
+        "requireRtcpMux",
+        "requireBundle"
+      ],
+      "properties": {
+        "audioOnly": {"const": true},
+        "trickleIce": {"type": "boolean"},
+        "iceRestart": {"type": "boolean"},
+        "requireRtcpMux": {"type": "boolean"},
+        "requireBundle": {"type": "boolean"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sensitivity", "retainRawAudio", "retainFullSdp"],
+      "properties": {
+        "sensitivity": {"enum": ["internal", "restricted"]},
+        "retainRawAudio": {"const": false},
+        "retainFullSdp": {"type": "boolean"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"executionClass": {"const": "approved_target"}},
+        "required": ["executionClass"]
+      },
+      "then": {
+        "properties": {
+          "authorization": {
+            "properties": {
+              "required": {"const": true},
+              "approvalRef": {"type": "string"},
+              "validFrom": {"type": "string"},
+              "validUntil": {"type": "string"}
+            }
+          },
+          "destinations": {"minItems": 1},
+          "evidence": {
+            "properties": {"retainFullSdp": {"const": false}}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "authorization": {
+            "properties": {
+              "required": {"const": false},
+              "approvalRef": {"const": null},
+              "validFrom": {"const": null},
+              "validUntil": {"const": null}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

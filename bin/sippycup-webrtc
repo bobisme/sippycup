@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+readonly core_image="${SIPPYCUP_IMAGE:-localhost/sippycup:latest}"
+readonly image="${SIPPYCUP_WEBRTC_IMAGE:-localhost/sippycup-webrtc:latest}"
+
+usage() {
+    cat <<'EOF'
+Usage: sippycup-webrtc COMMAND
+
+Manage the optional independent WebRTC peer profile.
+
+Commands:
+  build          Build the pinned optional profile
+  status         Report whether the optional image is installed
+  capabilities   Print the peer's network-free capability contract
+  self-test      Run one bounded Pion-to-Pion audio call on loopback
+  help           Show this help
+
+No command can contact an assessment target. The self-test uses only loopback,
+drops all capabilities, has a read-only root filesystem, and runs with no
+external container network.
+EOF
+}
+
+runtime_path() {
+    "${project_dir}/bin/container-runtime"
+}
+
+image_exists() {
+    local runtime="$1"
+    "${runtime}" image inspect "${image}" >/dev/null 2>&1
+}
+
+require_image() {
+    local runtime="$1"
+    if ! image_exists "${runtime}"; then
+        printf 'Optional WebRTC image is not installed: %s\n' "${image}" >&2
+        printf 'Run: ./bin/sippycup webrtc build\n' >&2
+        exit 1
+    fi
+}
+
+run_confined() {
+    local runtime="$1"
+    shift
+    "${runtime}" run --rm \
+        --network=none \
+        --cap-drop=ALL \
+        --read-only \
+        --security-opt=no-new-privileges=true \
+        --pids-limit=128 \
+        --tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m \
+        "${image}" "$@"
+}
+
+command_name="${1:-help}"
+if (( $# > 0 )); then
+    shift
+fi
+
+case "${command_name}" in
+    help|--help|-h)
+        if (( $# != 0 )); then
+            printf 'help accepts no arguments.\n' >&2
+            exit 2
+        fi
+        usage
+        ;;
+    build)
+        if (( $# != 0 )); then
+            printf 'build accepts no arguments.\n' >&2
+            exit 2
+        fi
+        runtime="$(runtime_path)"
+        "${runtime}" image inspect "${core_image}" >/dev/null 2>&1 || {
+            printf 'Core image is not installed: %s\n' "${core_image}" >&2
+            printf 'Run: make build\n' >&2
+            exit 1
+        }
+        source_commit="$(
+            git -C "${project_dir}" rev-parse --verify HEAD 2>/dev/null \
+                || printf 'unknown\n'
+        )"
+        source_digest="$(
+            cd "${project_dir}"
+            sha256sum \
+                Containerfile.webrtc \
+                webrtc-peer/go.mod \
+                webrtc-peer/go.sum \
+                webrtc-peer/main.go \
+                | sha256sum | cut -d ' ' -f 1
+        )"
+        "${runtime}" build \
+            --build-arg "BASE_IMAGE=${core_image}" \
+            --build-arg "SIPPYCUP_WEBRTC_COMMIT=${source_commit}" \
+            --build-arg "SIPPYCUP_WEBRTC_SOURCE_DIGEST=${source_digest}" \
+            --tag "${image}" \
+            --file "${project_dir}/Containerfile.webrtc" \
+            "${project_dir}"
+        ;;
+    status)
+        if (( $# != 0 )); then
+            printf 'status accepts no arguments.\n' >&2
+            exit 2
+        fi
+        runtime="$(runtime_path)"
+        if image_exists "${runtime}"; then
+            printf 'WebRTC profile: installed\n'
+            printf 'Image: %s\n' "${image}"
+            printf 'Network activity: none\n'
+        else
+            printf 'WebRTC profile: not installed\n'
+            printf 'Install: ./bin/sippycup webrtc build\n'
+            printf 'Network activity: none\n'
+            exit 1
+        fi
+        ;;
+    capabilities)
+        if (( $# != 0 )); then
+            printf 'capabilities accepts no arguments.\n' >&2
+            exit 2
+        fi
+        runtime="$(runtime_path)"
+        require_image "${runtime}"
+        run_confined "${runtime}" capabilities
+        ;;
+    self-test)
+        runtime="$(runtime_path)"
+        require_image "${runtime}"
+        run_confined "${runtime}" self-test "$@"
+        ;;
+    *)
+        printf 'Unknown WebRTC profile command: %s\n' "${command_name}" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

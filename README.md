@@ -30,6 +30,18 @@ registry. Running it without a command still opens the shell for compatibility.
 See `docs/CLI.md` for execution boundaries, compatibility, and the advanced
 third-party-tool escape hatch.
 
+Local agents can use the same entrypoint through the offline MCP server:
+
+```sh
+./bin/sippycup mcp
+```
+
+This launches a stdio-only server with networking disabled, all capabilities
+dropped, a read-only root filesystem, and `work/` mounted read-only. It exposes
+only an allowlisted documentation/schema catalog and typed offline tools; it
+cannot authorize targets or send traffic. Run `make mcp-exit-gate` after a
+build, and see `docs/MCP.md` plus `docs/MCP-SECURITY.md`.
+
 The launcher and Makefile choose `podman`, then `nerdctl`, then `docker`.
 Override the choice with the path or name of one compatible executable:
 
@@ -200,9 +212,22 @@ Open the same capture in a terminal UI:
 See `docs/CALL-CHECKLIST.md` for the details to request and a repeatable
 manual-call procedure.
 
-Heavyweight ViSQOL, Zeek, HOMER/HEP, and Pion WebRTC integrations are kept
+Heavyweight ViSQOL, Zeek, HOMER/HEP, and the independent WebRTC peer are kept
 outside the core image. Their scope and admission criteria are documented in
-`docs/OPTIONAL-PROFILES.md`.
+`docs/OPTIONAL-PROFILES.md`. The WebRTC trust boundaries and versioned offline
+contracts are in `docs/WEBRTC-THREAT-MODEL.md` and
+`docs/WEBRTC-CONTRACTS.md`.
+
+Install and verify the optional independent WebRTC peer when that surface is in
+scope:
+
+```sh
+./bin/sippycup webrtc build
+./bin/sippycup webrtc self-test
+```
+
+The self-test is a bounded loopback-only DTLS-SRTP audio call; it does not
+contact an assessment target. See `docs/WEBRTC-PEER.md`.
 
 The repository also includes deterministic one-second PCMU, PCMA, and G.722
 audio canaries for both call directions. Their source generator, packetization,

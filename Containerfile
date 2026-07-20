@@ -166,13 +166,16 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
         whois \
     && rm -rf /var/lib/apt/lists/*
 
+ARG MCP_VERSION=1.27.2
+
 RUN python3 -m venv /opt/voip-tools \
     && /opt/voip-tools/bin/pip install --no-cache-dir \
         "boofuzz==${BOOFUZZ_VERSION}" \
         "PyYAML==${PYYAML_VERSION}" \
         "scapy==${SCAPY_VERSION}" \
         "sipvicious==${SIPVICIOUS_VERSION}" \
-        "urwid==${URWID_VERSION}"
+        "urwid==${URWID_VERSION}" \
+        "mcp==${MCP_VERSION}"
 
 COPY --from=sipp-builder /build/sipp/sipp /usr/local/bin/sipp
 COPY --from=pjsip-builder /build-pjsua /usr/local/bin/pjsua
@@ -191,6 +194,7 @@ COPY bin/sippycup-pack /usr/local/bin/sippycup-pack
 COPY bin/sippycup-envelope /usr/local/bin/sippycup-envelope
 COPY bin/sippycup-media /usr/local/bin/sippycup-media
 COPY bin/sippycup-media-echo /usr/local/bin/sippycup-media-echo
+COPY bin/sippycup-mcp /usr/local/bin/sippycup-mcp
 COPY bin/sippycup-torture /usr/local/bin/sippycup-torture
 COPY bin/sippycup-ui /usr/local/bin/sippycup-ui
 COPY bin/sippycup-resilience /usr/local/bin/sippycup-resilience
@@ -203,10 +207,17 @@ COPY lib/sippycup_torture /usr/local/lib/sippycup_torture
 COPY lib/sippycup_tui /usr/local/lib/sippycup_tui
 COPY lib/sippycup_learn /usr/local/lib/sippycup_learn
 COPY lib/sippycup_media /usr/local/lib/sippycup_media
+COPY lib/sippycup_mcp /usr/local/lib/sippycup_mcp
 COPY lib/sippycup_resilience /usr/local/lib/sippycup_resilience
+COPY lib/sippycup_webrtc /usr/local/lib/sippycup_webrtc
 COPY lib/sippycup_workbench /usr/local/lib/sippycup_workbench
 COPY media /usr/local/share/sippycup/media
 COPY profiles/chaos /usr/local/share/sippycup/chaos-profiles
+COPY README.md /usr/local/share/sippycup/README.md
+COPY config/commands.tsv /usr/local/share/sippycup/config/commands.tsv
+COPY docs /usr/local/share/sippycup/docs
+COPY schemas /usr/local/share/sippycup/schemas
+COPY examples/evidence-pack/sanitized-evidence.tar /usr/local/share/sippycup/fixtures/sanitized-evidence.tar
 COPY tools/generate_audio_canaries.py /usr/local/libexec/sippycup/generate_audio_canaries.py
 COPY completions/campaign.bash /usr/share/bash-completion/completions/campaign
 
@@ -227,6 +238,7 @@ RUN chmod 0755 \
         /usr/local/bin/sippycup-envelope \
         /usr/local/bin/sippycup-media \
         /usr/local/bin/sippycup-media-echo \
+        /usr/local/bin/sippycup-mcp \
         /usr/local/bin/sippycup-torture \
         /usr/local/bin/sippycup-ui \
         /usr/local/bin/sippycup-resilience \

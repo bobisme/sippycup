@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/webrtc-peer-self-test-v1.schema.json",
+  "title": "Sippycup independent WebRTC peer self-test",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "status",
+    "networkActivity",
+    "networkScope",
+    "durationMs",
+    "checks",
+    "events",
+    "limits"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "sippycup.dev/webrtc-peer-self-test/v1"
+    },
+    "kind": {"const": "WebRTCPeerSelfTest"},
+    "status": {"enum": ["pass", "fail"]},
+    "networkActivity": {"const": true},
+    "networkScope": {"const": "loopback"},
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 30000
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed"],
+        "properties": {
+          "id": {
+            "enum": [
+              "loopback-candidate-confinement",
+              "offer-answer-connected",
+              "dtls-srtp-pcmu-audio",
+              "ice-restart",
+              "rtcp-reader-active",
+              "graceful-cleanup"
+            ]
+          },
+          "passed": {"type": "boolean"},
+          "expected": {"$ref": "#/$defs/jsonValue"},
+          "observed": {"$ref": "#/$defs/jsonValue"},
+          "detail": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "elapsedMs",
+          "source",
+          "kind",
+          "sensitivity",
+          "data"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          },
+          "elapsedMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000
+          },
+          "source": {"enum": ["left", "right", "runner"]},
+          "kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sensitivity": {"const": "internal"},
+          "data": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": ["string", "number", "integer", "boolean", "null"]
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deadlineSeconds",
+        "packets",
+        "payloadBytes",
+        "portMin",
+        "portMax"
+      ],
+      "properties": {
+        "deadlineSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "packets": {"const": 50},
+        "payloadBytes": {"const": 160},
+        "portMin": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65534
+        },
+        "portMax": {
+          "type": "integer",
+          "minimum": 1025,
+          "maximum": 65535
+        }
+      }
+    }
+  },
+  "$defs": {
+    "jsonValue": {
+      "oneOf": [
+        {"type": ["string", "number", "integer", "boolean", "null"]},
+        {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        },
+        {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        }
+      ]
+    }
+  }
+}

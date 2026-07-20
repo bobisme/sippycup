@@ -43,6 +43,7 @@ commands=(
     sippycup-envelope
     sippycup-media
     sippycup-media-echo
+    sippycup-mcp
     sippycup-torture
     sippycup-ui
     sippycup-resilience
@@ -78,6 +79,7 @@ done
 
 PYTHONPATH=/usr/local/lib python3 - <<'PY'
 import boofuzz
+import mcp
 import scapy.all
 import sipvicious
 import yaml
@@ -85,10 +87,12 @@ import sippycup
 import sippycup_chaos
 import sippycup_learn
 import sippycup_media
+import sippycup_mcp
 import sippycup_resilience
 import sippycup_oracle
 import sippycup_torture
 import sippycup_tui
+import sippycup_webrtc
 import sippycup_workbench
 print("ok       Python modules: dependencies and all first-party packages")
 PY
@@ -106,6 +110,7 @@ first_party_help=(
     sippycup-evidence
     sippycup-media
     sippycup-media-echo
+    sippycup-mcp
     sippycup-pack
     sippycup-torture
     sippycup-ui

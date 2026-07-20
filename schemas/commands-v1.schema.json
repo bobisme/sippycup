@@ -45,7 +45,8 @@
               "direct",
               "host",
               "container",
-              "container-isolated"
+              "container-isolated",
+              "container-offline"
             ]
           },
           "summary": {

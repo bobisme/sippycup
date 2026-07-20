@@ -28,6 +28,8 @@ The registry makes execution location explicit:
   always selects the isolated network.
 - `doctor` inspects the prepared image by default. `doctor --host` is the
   explicit local inventory.
+- `mcp` runs in a fixed offline container: no network, no Linux capabilities,
+  read-only root and work files, and no `--isolated`/`--admin` broadening.
 - Adding `--isolated` or `--admin` before a packaged first-party command runs
   that command in the image with the requested boundary.
 

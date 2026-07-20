@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/webrtc-result-v1.schema.json",
+  "title": "Sippycup WebRTC assessment result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "scenarioId",
+    "status",
+    "networkActivity",
+    "summary",
+    "events",
+    "assertions",
+    "evidence",
+    "redactions"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/webrtc-result/v1"},
+    "kind": {"const": "WebRTCResult"},
+    "scenarioId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "status": {"enum": ["pass", "fail", "incomplete"]},
+    "networkActivity": {"type": "boolean"},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assertions",
+        "passed",
+        "failed",
+        "unknown",
+        "notApplicable"
+      ],
+      "properties": {
+        "assertions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "passed": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "failed": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "unknown": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "notApplicable": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/event"}
+    },
+    "assertions": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/assertion"}
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "redactions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "classes"],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "classes": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "source", "kind", "sensitivity", "data"],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sensitivity": {
+          "enum": ["public", "internal", "restricted"]
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "verdict", "unknownReason", "evidenceRefs"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9._-]*$"
+        },
+        "verdict": {
+          "enum": ["pass", "fail", "unknown", "not_applicable"]
+        },
+        "unknownReason": {
+          "type": ["string", "null"],
+          "enum": [
+            "missing_evidence",
+            "encrypted",
+            "unsupported",
+            "malformed",
+            "redacted",
+            "not_observed",
+            "adapter_failure",
+            null
+          ]
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"verdict": {"const": "unknown"}},
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "unknownReason": {
+                "enum": [
+                  "missing_evidence",
+                  "encrypted",
+                  "unsupported",
+                  "malformed",
+                  "redacted",
+                  "not_observed",
+                  "adapter_failure"
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {"unknownReason": {"const": null}}
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "sha256", "mediaType", "sensitivity"],
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sensitivity": {
+          "enum": ["public", "internal", "restricted"]
+        }
+      }
+    }
+  }
+}

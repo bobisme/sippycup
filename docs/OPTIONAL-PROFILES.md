@@ -31,13 +31,23 @@ destination, and remain disabled by default.
 
 ## WebRTC profile: Pion
 
-A small Pion peer is justified only if Quad confirms that the Ferivox staging
-surface includes WebRTC, ICE, or DTLS-SRTP. It would exercise candidate
+WebRTC is now an explicit assessment track. A small, independently implemented
+peer such as Pion will exercise audio-only offer/answer, trickle ICE, candidate
 gathering, ICE restart, STUN/TURN transports, DTLS fingerprints, SRTP/RTCP,
-and direct RTP access under the same literal-address and traffic ceilings.
+and deterministic media canaries under the same literal-address and traffic
+ceilings as the rest of Sippycup.
 
-No Pion component will be added merely because WebRTC testing might become
-useful later.
+The profile will also cover pluggable WSS signaling, browser-origin and session
+controls, SDP negotiation, consent freshness, TURN authorization, DTLS-SRTP
+identity binding, and privacy-safe evidence. Signaling adapters remain
+service-specific because WebRTC does not define a signaling protocol.
+
+The peer stays outside the core image so users who only assess SIP/RTP systems
+do not inherit its build and runtime footprint.
+
+The trust boundaries, authorization classes, evidence requirements, and live
+admission criteria are defined in
+[`WEBRTC-THREAT-MODEL.md`](WEBRTC-THREAT-MODEL.md).
 
 ## Admission gates
 

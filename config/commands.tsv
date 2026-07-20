@@ -3,6 +3,8 @@ help|builtin|help||Getting started|offline|Show global or command-specific help
 commands|builtin|commands||Getting started|offline|List the stable public command registry
 version|builtin|version||Getting started|offline|Show the stable Sippycup CLI version
 doctor|doctor|doctor|sippycup-workbench|Getting started|offline|Inspect the prepared image or explicitly inspect the host
+mcp|container-offline||sippycup-mcp|Getting started|offline|Let local agents discover and run allowlisted offline workflows
+webrtc|host|sippycup-webrtc||Getting started|local-network|Manage and self-test the optional independent WebRTC peer
 init|workbench|init|sippycup-workbench|Preparation|offline|Create a fail-closed pending target profile
 rehearse|workbench|rehearse|sippycup-workbench|Preparation|offline|Validate target scope and authorization without traffic
 one-call|workbench|one-call|sippycup-workbench|Preparation|offline|Render a bounded one-call plan without executing it

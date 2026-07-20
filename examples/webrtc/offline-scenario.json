@@ -1,0 +1,68 @@
+{
+  "apiVersion": "sippycup.dev/webrtc-scenario/v1",
+  "kind": "WebRTCScenario",
+  "metadata": {
+    "name": "Offline WebRTC contract fixture",
+    "scenarioId": "offline-contract-001"
+  },
+  "executionClass": "offline_fixture",
+  "adapter": {
+    "name": "fixture-peer",
+    "capabilityVersion": "sippycup.dev/webrtc-adapter-capabilities/v1",
+    "requiredCapabilities": [
+      "audio",
+      "trickle-ice",
+      "ice-restart",
+      "stun",
+      "dtls-srtp",
+      "rtcp"
+    ]
+  },
+  "authorization": {
+    "required": false,
+    "approvalRef": null,
+    "validFrom": null,
+    "validUntil": null,
+    "negativeTests": [
+      "signaling-state",
+      "ice",
+      "dtls"
+    ]
+  },
+  "destinations": [
+    {
+      "role": "signaling",
+      "address": "127.0.0.1",
+      "port": 8443,
+      "transport": "wss"
+    },
+    {
+      "role": "stun",
+      "address": "::1",
+      "port": 3478,
+      "transport": "udp"
+    }
+  ],
+  "credentialRefs": [],
+  "limits": {
+    "maxCalls": 1,
+    "maxConcurrency": 1,
+    "maxDurationSeconds": 30,
+    "maxSignalingMessages": 100,
+    "maxPackets": 5000,
+    "maxBytes": 8388608,
+    "maxEvidenceBytes": 1048576
+  },
+  "negotiation": {
+    "audioOnly": true,
+    "trickleIce": true,
+    "iceRestart": true,
+    "requireRtcpMux": true,
+    "requireBundle": true
+  },
+  "evidence": {
+    "sensitivity": "internal",
+    "retainRawAudio": false,
+    "retainFullSdp": false
+  }
+}

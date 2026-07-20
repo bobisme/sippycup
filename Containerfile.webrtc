@@ -1,0 +1,36 @@
+ARG GO_IMAGE=docker.io/library/golang@sha256:564e366a28ad1d70f460a2b97d1d299a562f08707eb0ecb24b659e5bd6c108e1
+ARG BASE_IMAGE=localhost/sippycup:latest
+FROM ${GO_IMAGE} AS webrtc-builder
+
+ARG PION_WEBRTC_VERSION=v4.2.13
+ARG SIPPYCUP_WEBRTC_COMMIT=unknown
+ARG SIPPYCUP_WEBRTC_SOURCE_DIGEST=unknown
+
+WORKDIR /src
+COPY webrtc-peer/go.mod webrtc-peer/go.sum ./
+RUN go mod download
+COPY webrtc-peer/main.go ./
+RUN test "$(go list -m -f '{{.Version}}' github.com/pion/webrtc/v4)" = "${PION_WEBRTC_VERSION}" \
+    && CGO_ENABLED=0 go build \
+        -trimpath \
+        -buildvcs=false \
+        -ldflags="-s -w -X main.buildVersion=${PION_WEBRTC_VERSION} -X main.buildCommit=${SIPPYCUP_WEBRTC_COMMIT} -X main.buildSourceDigest=${SIPPYCUP_WEBRTC_SOURCE_DIGEST}" \
+        -o /out/sippycup-webrtc-peer \
+        .
+
+FROM ${BASE_IMAGE}
+
+ARG PION_WEBRTC_VERSION=v4.2.13
+ARG SIPPYCUP_WEBRTC_COMMIT=unknown
+ARG SIPPYCUP_WEBRTC_SOURCE_DIGEST=unknown
+LABEL dev.sippycup.profile="webrtc"
+LABEL dev.sippycup.pion-webrtc.version="${PION_WEBRTC_VERSION}"
+LABEL dev.sippycup.source.commit="${SIPPYCUP_WEBRTC_COMMIT}"
+LABEL dev.sippycup.source.digest="${SIPPYCUP_WEBRTC_SOURCE_DIGEST}"
+
+COPY --from=webrtc-builder /out/sippycup-webrtc-peer /usr/local/bin/sippycup-webrtc-peer
+RUN chmod 0755 /usr/local/bin/sippycup-webrtc-peer \
+    && /usr/local/bin/sippycup-webrtc-peer capabilities >/dev/null
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sippycup-webrtc-peer"]
+CMD ["help"]

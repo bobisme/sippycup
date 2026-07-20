@@ -52,7 +52,7 @@ load_registry() {
             exit 2
         fi
         case "${mode}" in
-            builtin|doctor|workbench|direct|host|container|container-isolated) ;;
+            builtin|doctor|workbench|direct|host|container|container-isolated|container-offline) ;;
             *)
                 printf 'Invalid mode for %s: %s\n' "${name}" "${mode}" >&2
                 exit 2
@@ -207,11 +207,27 @@ run_container() {
     local -a caps=(--cap-add=NET_RAW --cap-add=NET_BIND_SERVICE)
     local -a devices=()
     local -a network=(--network=host)
+    local -a confinement=()
+    local mount="${project_dir}/work:/work:Z"
 
-    if (( isolated != 0 )); then
+    if (( offline_container != 0 )); then
+        network=(--network=none)
+        caps=(--cap-drop=ALL)
+        confinement=(
+            --read-only
+            --security-opt=no-new-privileges=true
+            --pids-limit=64
+            --tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m
+            --env=PYTHONDONTWRITEBYTECODE=1
+            --env=SIPPYCUP_MCP_REQUIRE_SANDBOX=1
+        )
+        mount="${project_dir}/work:/work:ro,Z"
+    fi
+
+    if (( isolated != 0 && offline_container == 0 )); then
         network=()
     fi
-    if (( admin != 0 )); then
+    if (( admin != 0 && offline_container == 0 )); then
         caps+=(--cap-add=NET_ADMIN)
     fi
     if (( admin != 0 && isolated != 0 )); then
@@ -249,8 +265,9 @@ EOF
         "${network[@]}" \
         "${caps[@]}" \
         "${devices[@]}" \
+        "${confinement[@]}" \
         --hostname=sippycup \
-        --volume="${project_dir}/work:/work:Z" \
+        --volume="${mount}" \
         "${image}" \
         "${command[@]}"
 }
@@ -260,6 +277,7 @@ load_registry
 isolated=0
 admin=0
 advanced=0
+offline_container=0
 while (($# > 0)); do
     case "$1" in
         --isolated)
@@ -314,7 +332,7 @@ container_target="${command_container_target[${command_name}]}"
 
 if [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
     case "${mode}" in
-        doctor|container|container-isolated)
+        doctor|container|container-isolated|container-offline)
             render_command_help "${command_name}"
             exit 0
             ;;
@@ -402,6 +420,15 @@ EOF
         ;;
     container-isolated)
         isolated=1
+        run_container "${container_target}" "$@"
+        ;;
+    container-offline)
+        if (( isolated != 0 || admin != 0 )); then
+            printf '%s has a fixed offline sandbox and rejects container options.\n' \
+                "${command_name}" >&2
+            exit 2
+        fi
+        offline_container=1
         run_container "${container_target}" "$@"
         ;;
 esac

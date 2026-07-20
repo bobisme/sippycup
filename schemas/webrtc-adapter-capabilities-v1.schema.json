@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/webrtc-adapter-capabilities-v1.schema.json",
+  "title": "Sippycup WebRTC adapter capabilities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "implementation",
+    "implementationVersion",
+    "buildCommit",
+    "sourceDigest",
+    "goVersion",
+    "capabilities",
+    "verifiedCapabilities",
+    "networkActivity"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "sippycup.dev/webrtc-adapter-capabilities/v1"
+    },
+    "kind": {"const": "WebRTCAdapterCapabilities"},
+    "implementation": {"const": "pion-webrtc"},
+    "implementationVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "buildCommit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "sourceDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "goVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "audio",
+          "trickle-ice",
+          "ice-restart",
+          "stun",
+          "turn-udp",
+          "turn-tcp",
+          "turn-tls",
+          "dtls-srtp",
+          "rtcp",
+          "wss-signaling"
+        ]
+      }
+    },
+    "verifiedCapabilities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "audio",
+          "trickle-ice",
+          "ice-restart",
+          "stun",
+          "turn-udp",
+          "turn-tcp",
+          "turn-tls",
+          "dtls-srtp",
+          "rtcp",
+          "wss-signaling"
+        ]
+      }
+    },
+    "networkActivity": {"const": false}
+  }
+}
