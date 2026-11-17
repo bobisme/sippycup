@@ -227,6 +227,13 @@ run_container() {
     if (( isolated != 0 && offline_container == 0 )); then
         network=()
     fi
+    # A host-network container inherits the host's name table, which does not
+    # know the fixed container hostname. Tools that resolve their own name
+    # (sipsak, and so the OPTIONS preflight) otherwise fail before sending.
+    local -a name_resolution=()
+    if [[ "${network[*]}" == "--network=host" ]]; then
+        name_resolution=(--add-host=sippycup:127.0.0.1)
+    fi
     if (( admin != 0 && offline_container == 0 )); then
         caps+=(--cap-add=NET_ADMIN)
     fi
@@ -249,7 +256,9 @@ Desktop or use a Linux Podman/Docker host. Sippycup will not rewrite the target.
 EOF
     fi
 
-    local -a terminal=()
+    # Without --interactive the runtime closes the container's stdin, so a
+    # stdio MCP client or any piped input would reach nothing.
+    local -a terminal=(--interactive)
     if [[ -t 0 && -t 1 ]]; then
         terminal=(-it)
     fi
@@ -267,9 +276,31 @@ EOF
         "${devices[@]}" \
         "${confinement[@]}" \
         --hostname=sippycup \
+        "${name_resolution[@]}" \
         --volume="${mount}" \
         "${image}" \
         "${command[@]}"
+}
+
+# Packaged first-party commands see the host work directory as /work. Rewrite
+# path-shaped arguments that resolve beneath it so the same `work/...` spelling
+# works on the host and with --isolated/--admin. Arguments without a slash
+# (subcommands, option names, plain values) are never touched.
+translate_work_arguments() {
+    translated_arguments=()
+    local argument resolved
+    local work_root="${project_dir}/work"
+    for argument in "$@"; do
+        if [[ "${argument}" == */* && "${argument}" != -* && "${argument}" != /work/* ]]; then
+            resolved="$(realpath -m -- "${argument}" 2>/dev/null || true)"
+            if [[ "${resolved}" == "${work_root}" ]]; then
+                argument=/work
+            elif [[ "${resolved}" == "${work_root}"/* ]]; then
+                argument="/work/${resolved#"${work_root}/"}"
+            fi
+        fi
+        translated_arguments+=("${argument}")
+    done
 }
 
 run_live_mcp() {
@@ -305,7 +336,9 @@ EOF
         printf 'SIPPYCUP_MCP_LIVE_ENABLE_ONE_CALL must be 0 or 1.\n' >&2
         exit 2
     fi
-    local -a terminal=()
+    # Without --interactive the runtime closes the container's stdin, so a
+    # stdio MCP client or any piped input would reach nothing.
+    local -a terminal=(--interactive)
     if [[ -t 0 && -t 1 ]]; then
         terminal=(-it)
     fi
@@ -458,13 +491,16 @@ EOF
         ;;
     workbench)
         if (( isolated != 0 || admin != 0 )); then
-            run_container "${container_target}" "${host_target}" "$@"
+            translate_work_arguments "$@"
+            run_container "${container_target}" "${host_target}" \
+                "${translated_arguments[@]}"
         fi
         exec "${project_dir}/bin/sippycup-workbench" "${host_target}" "$@"
         ;;
     direct)
         if (( isolated != 0 || admin != 0 )); then
-            run_container "${container_target}" "$@"
+            translate_work_arguments "$@"
+            run_container "${container_target}" "${translated_arguments[@]}"
         fi
         exec "${project_dir}/bin/${host_target}" "$@"
         ;;

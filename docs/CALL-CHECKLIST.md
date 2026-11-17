@@ -20,6 +20,44 @@ times in UTC and use a new PCAP for each test case.
 Do not place passwords in this repository, shell history, PCAP filenames, or
 test notes.
 
+## Placing the call with the bundled softphone
+
+The image has no sound device. PJSUA plays a prepared WAV file as the caller's
+voice and records what it hears. Prepare a short mono 16-bit WAV of the agreed
+phrase under `work/`, then keep every option, including the password, in a
+mode-0600 file under the ignored `work/` tree so nothing secret reaches argv
+or shell history:
+
+```text
+--null-audio
+--add-codec PCMU
+--id sip:USER@DOMAIN
+--registrar sip:DOMAIN
+--realm *
+--username USER
+--password PASSWORD
+--play-file /work/ENGAGEMENT/phrase.wav
+--auto-play
+--rec-file /work/ENGAGEMENT/heard.wav
+--auto-rec
+--duration 30
+--log-file /work/ENGAGEMENT/pjsua.log
+```
+
+Omit the five account lines for a service that accepts unauthenticated calls.
+Start the scoped host capture in one terminal, then place the call from the
+toolbox in another:
+
+```sh
+./bin/sippycup capture --target APPROVED_ADDRESS
+./bin/sippycup -- pjsua --config-file /work/ENGAGEMENT/uac.cfg \
+  sip:DESTINATION@DOMAIN
+```
+
+PJSUA hangs up after `--duration` seconds; type `q` and Enter to leave it.
+`heard.wav` and the log may contain voice and identifiers: treat them like the
+capture. Delete the configuration file when the engagement ends.
+
 ## Baseline call
 
 - [ ] Start a target-scoped capture.

@@ -352,6 +352,91 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         self.assertIn("--device=/dev/net/tun", arguments)
         self.assertNotIn("--network=host", arguments)
 
+    def test_container_options_translate_host_work_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            result = run_cli(
+                "--isolated",
+                "campaign",
+                "execute",
+                "work/engagement/plan.json",
+                "--manifest",
+                str(ROOT / "work" / "engagement" / "campaign.yaml"),
+                "--run-root",
+                "./work/engagement/runs",
+                "--interface",
+                "any",
+                "--note=work/not-a-separate-argument",
+                "/work/already/container.json",
+                "examples/outside-work.yaml",
+                "work/../README.md",
+                env={"SIPPYCUP_RUNTIME": str(runtime)},
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = result.stdout.splitlines()
+        tail = arguments[arguments.index("campaign") + 1 :]
+        self.assertEqual(
+            tail,
+            [
+                "execute",
+                "/work/engagement/plan.json",
+                "--manifest",
+                "/work/engagement/campaign.yaml",
+                "--run-root",
+                "/work/engagement/runs",
+                "--interface",
+                "any",
+                "--note=work/not-a-separate-argument",
+                "/work/already/container.json",
+                "examples/outside-work.yaml",
+                "work/../README.md",
+            ],
+        )
+
+    def test_piped_stdin_reaches_every_container_route(self) -> None:
+        # run_cli pipes stdout, so the launcher sees no terminal. A stdio MCP
+        # client is in the same position and needs the container's stdin open.
+        with tempfile.TemporaryDirectory() as root_name:
+            root = Path(root_name)
+            runtime = self.make_runtime(root)
+            routes = {
+                "mcp": run_cli("mcp", env={"SIPPYCUP_RUNTIME": str(runtime)}),
+                "escape": run_cli(
+                    "--", "pjsua", env={"SIPPYCUP_RUNTIME": str(runtime)}
+                ),
+                "mcp-live": run_cli(
+                    "mcp-live",
+                    env={
+                        "SIPPYCUP_RUNTIME": str(runtime),
+                        "SIPPYCUP_MCP_LIVE_TRUST_ROOT": str(root),
+                        "SIPPYCUP_MCP_LIVE_STATE_ROOT": str(root),
+                        "SIPPYCUP_MCP_LIVE_CLIENT_ID": "test-client",
+                    },
+                ),
+            }
+        for name, result in routes.items():
+            with self.subTest(route=name):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                arguments = result.stdout.splitlines()
+                self.assertIn("--interactive", arguments)
+                self.assertNotIn("-it", arguments)
+
+    def test_fixed_hostname_resolves_only_where_the_runtime_omits_it(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            env = {"SIPPYCUP_RUNTIME": str(runtime)}
+            host_network = run_cli("preflight", "192.0.2.1", env=env)
+            isolated = run_cli("--isolated", "preflight", "192.0.2.1", env=env)
+            offline = run_cli("mcp", env=env)
+        host_arguments = host_network.stdout.splitlines()
+        self.assertIn("--network=host", host_arguments)
+        self.assertIn("--hostname=sippycup", host_arguments)
+        self.assertIn("--add-host=sippycup:127.0.0.1", host_arguments)
+        for result in (isolated, offline):
+            self.assertNotIn(
+                "--add-host=sippycup:127.0.0.1", result.stdout.splitlines()
+            )
+
     def test_mcp_rejects_privilege_broadening(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
             runtime = self.make_runtime(Path(root_name))

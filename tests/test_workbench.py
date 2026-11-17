@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -52,6 +54,33 @@ class ProfileTests(unittest.TestCase):
         )
         self.assertTrue(result.ready, result.errors)
         self.assertEqual(result.facts["maximum_preflight_transactions"], 1)
+
+    def test_unquoted_yaml_timestamps_are_accepted_with_a_timezone(self) -> None:
+        profile = default_profile(name="stage", host="192.0.2.20")
+        profile["target"]["approved_addresses"] = ["192.0.2.20"]
+        profile["authorization"].update(
+            {"status": "approved", "approval_id": "quad-one-call"}
+        )
+        # PyYAML delivers these spellings as datetime objects, not strings.
+        profile["authorization"]["valid_from"] = yaml.safe_load(
+            "2026-07-20T10:00:00Z"
+        )
+        profile["authorization"]["valid_until"] = yaml.safe_load(
+            "2026-07-20T12:00:00Z"
+        )
+        self.assertIsInstance(profile["authorization"]["valid_until"], datetime)
+        now = datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)
+        result = rehearse(profile, now=now)
+        self.assertTrue(result.ready, result.errors)
+
+        profile["authorization"]["valid_until"] = yaml.safe_load(
+            "2026-07-20 12:00:00"
+        )
+        result = rehearse(profile, now=now)
+        self.assertFalse(result.ready)
+        self.assertIn(
+            "authorization.valid_until must include a timezone", result.errors
+        )
 
     def test_expired_authorization_is_blocked(self) -> None:
         profile = default_profile(name="stage", host="192.0.2.20")

@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import shutil
+import socket
 import subprocess
 import struct
 import sys
@@ -24,6 +26,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from sippycup.campaign import compile_plan
 from sippycup.integration import (
+    sip_options_preflight,
     CaptureWatchdog,
     execute_campaign,
     resolve_secrets,
@@ -54,6 +57,47 @@ def one_call_plan(*, credential: bool = False, max_packets: int = 100):
         manifest["authorization"]["credentialRefs"] = []
     raw = yaml.safe_dump(manifest, sort_keys=True).encode()
     return compile_plan(manifest, hashlib.sha256(raw).hexdigest()), raw
+
+
+class OptionsPreflightTests(unittest.TestCase):
+    def test_udp_reply_reaches_client_from_rfc3261_compliant_server(self):
+        """A compliant server answers at the Via sent-by port, or the source
+        port only when rport is requested; it never guesses the source port."""
+        server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(server.close)
+        server.bind(("127.0.0.1", 0))
+        server.settimeout(5)
+        seen = {}
+
+        def serve():
+            try:
+                request, source = server.recvfrom(4096)
+            except OSError:
+                return
+            text = request.decode()
+            via = re.search(r"^Via: SIP/2.0/UDP (\S+?)(;.*)?$", text, re.M)
+            sent_by, parameters = via.group(1), via.group(2) or ""
+            seen["via"] = via.group(0)
+            if re.search(r";rport(;|$)", parameters):
+                reply_port = source[1]
+            elif ":" in sent_by:
+                reply_port = int(sent_by.rsplit(":", 1)[1])
+            else:
+                reply_port = 5060
+            server.sendto(b"SIP/2.0 200 OK\r\n\r\n", (source[0], reply_port))
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        ok, detail = sip_options_preflight(
+            {
+                "address": "127.0.0.1",
+                "port": server.getsockname()[1],
+                "transport": "udp",
+            }
+        )
+        thread.join(5)
+        self.assertTrue(ok, f"{detail}; request carried {seen.get('via')!r}")
+        self.assertEqual(detail, "SIP/2.0 200 OK")
 
 
 class IntegrationTests(unittest.TestCase):

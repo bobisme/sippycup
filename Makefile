@@ -21,7 +21,7 @@ selftest:
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup selftest /work/selftest.pcap
 
 campaign-selftest:
-	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated \
+	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated -- \
 		campaign-integration-selftest /work/campaign-selftest
 
 matrix-gate:

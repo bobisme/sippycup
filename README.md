@@ -334,11 +334,17 @@ The versioned campaign workflow turns written scope into a frozen,
 independently revalidated plan and a complete capture-to-report run directory:
 
 ```sh
-./bin/sippycup campaign plan campaign.yaml --resolve voice.test=10.20.30.40 \
-  --output plan.json
-./bin/sippycup campaign execute plan.json --manifest campaign.yaml \
-  --run-root work/runs --interface any
+./bin/sippycup campaign plan work/campaign.yaml \
+  --resolve voice.test=10.20.30.40 --output work/plan.json
+./bin/sippycup --isolated campaign execute work/plan.json \
+  --manifest work/campaign.yaml --run-root work/runs --interface any
 ```
+
+Execution captures packets itself, so it needs `NET_RAW`. Under rootless
+Podman only `--isolated` provides that; keep the manifest, plan, and run root
+under `work/`, which the launcher maps to the container's `/work`. Without
+`--isolated` the command runs directly on the host and requires host SIPp,
+sipsak, tcpdump, and capture privileges.
 
 Execution is preflight-gated, deadline-bound, signal-safe, and records
 structured events without placing credential values in argv. See

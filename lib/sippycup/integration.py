@@ -430,25 +430,40 @@ def sip_options_preflight(destination: dict[str, Any]) -> tuple[bool, str]:
     family = socket.AF_INET6 if ":" in address else socket.AF_INET
     call_id = random.token_hex(12)
     host = f"[{address}]" if family == socket.AF_INET6 else address
-    request = (
-        f"OPTIONS sip:{host}:{port} SIP/2.0\r\n"
-        f"Via: SIP/2.0/{transport.upper()} 127.0.0.1;branch=z9hG4bK{random.token_hex(8)}\r\n"
-        "From: <sip:sippycup@localhost>;tag=preflight\r\n"
-        f"To: <sip:{host}:{port}>\r\n"
-        f"Call-ID: {call_id}@localhost\r\n"
-        "CSeq: 1 OPTIONS\r\n"
-        "Max-Forwards: 1\r\n"
-        "Content-Length: 0\r\n\r\n"
-    ).encode()
+    branch = random.token_hex(8)
+
+    def build_request(local: tuple[Any, ...]) -> bytes:
+        # A compliant server answers a UDP request at the Via sent-by port
+        # (default 5060), not the datagram's source port, unless the client
+        # names its real port and asks for RFC 3581 symmetric routing. Without
+        # both, the reply never reaches this ephemeral socket.
+        local_address, local_port = local[0], local[1]
+        sent_by = f"[{local_address}]" if ":" in local_address else local_address
+        return (
+            f"OPTIONS sip:{host}:{port} SIP/2.0\r\n"
+            f"Via: SIP/2.0/{transport.upper()} {sent_by}:{local_port}"
+            f";rport;branch=z9hG4bK{branch}\r\n"
+            "From: <sip:sippycup@localhost>;tag=preflight\r\n"
+            f"To: <sip:{host}:{port}>\r\n"
+            f"Call-ID: {call_id}@localhost\r\n"
+            "CSeq: 1 OPTIONS\r\n"
+            "Max-Forwards: 1\r\n"
+            "Content-Length: 0\r\n\r\n"
+        ).encode()
+
     try:
         if transport == "udp":
             with socket.socket(family, socket.SOCK_DGRAM) as connection:
                 connection.settimeout(2)
-                connection.sendto(request, (address, port))
+                # Connecting pins the reply source to the frozen destination
+                # and reveals the local address and port for the Via header.
+                connection.connect((address, port))
+                connection.send(build_request(connection.getsockname()))
                 response = connection.recv(4096)
         else:
             with socket.create_connection((address, port), timeout=2) as raw:
                 connection = raw
+                request = build_request(raw.getsockname())
                 if transport == "tls":
                     context = ssl.create_default_context()
                     connection = context.wrap_socket(raw, server_hostname=address)
@@ -624,7 +639,13 @@ def execute_campaign(
                     result = RunResult(code, "cancelled", 0)
                     raise _FinishExecution
                 if capture.poll() is not None:
-                    raise RuntimeError("capture process failed during startup")
+                    raise RuntimeError(
+                        "capture process failed during startup; see capture.log "
+                        "in the run directory. Packet capture needs CAP_NET_RAW, "
+                        "which an unprivileged host or a rootless host-network "
+                        "container lacks: run `./bin/sippycup --isolated "
+                        "campaign execute ...` instead"
+                    )
                 if time.monotonic() >= ready_deadline:
                     raise RuntimeError("capture process did not become ready")
                 time.sleep(0.02)

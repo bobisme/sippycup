@@ -164,6 +164,12 @@ def _mapping(document: dict[str, Any], key: str) -> dict[str, Any]:
 def _parse_time(value: Any, field: str) -> datetime | None:
     if value is None:
         return None
+    if isinstance(value, datetime):
+        # YAML turns an unquoted RFC 3339 timestamp into a datetime. Accept it
+        # so the natural spelling works, but still insist on an explicit zone.
+        if value.tzinfo is None:
+            raise ProfileError(f"{field} must include a timezone")
+        return value.astimezone(timezone.utc)
     if not isinstance(value, str) or not value:
         raise ProfileError(f"{field} must be an RFC 3339 timestamp or null")
     try:

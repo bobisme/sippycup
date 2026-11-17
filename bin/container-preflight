@@ -108,7 +108,11 @@ timeout 15 sipsak "${sipsak_args[@]}"
 sip_status=$?
 printf 'SIP OPTIONS exit status: %s\n' "${sip_status}"
 
-if [[ "${transport}" == tcp || "${transport}" == tls ]]; then
-    exit "${nc_status:-0}"
-fi
-exit "${sip_status}"
+# Report the first failing stage so a reachable port with a dead or failing
+# SIP service is not mistaken for a successful preflight.
+for stage_status in "${nc_status:-0}" "${tls_status:-0}" "${sip_status}"; do
+    if (( stage_status != 0 )); then
+        exit "${stage_status}"
+    fi
+done
+exit 0

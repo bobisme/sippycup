@@ -197,7 +197,7 @@ exact text.
 Place supervised runs below the engagement root:
 
 ```sh
-./bin/sippycup campaign execute work/ferivox-assessment/plan.json \
+./bin/sippycup --isolated campaign execute work/ferivox-assessment/plan.json \
   --manifest work/ferivox-assessment/campaign.yaml \
   --run-root work/ferivox-assessment/runs \
   --interface any

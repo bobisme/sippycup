@@ -355,11 +355,26 @@ generic step runner.
 `campaign execute` wraps the supervisor in a complete evidence lifecycle:
 
 ```sh
-./bin/sippycup campaign execute plan.json \
-  --manifest campaign.yaml \
+./bin/sippycup --isolated campaign execute work/plan.json \
+  --manifest work/campaign.yaml \
   --run-root work/runs \
   --interface any
 ```
+
+The lifecycle runs its own `tcpdump`, so it needs `NET_RAW`. A rootless
+container on the host network does not have it, and neither does an
+unprivileged host shell; both stop with `capture process failed during
+startup` before any traffic. With rootless Podman, use `--isolated` as shown.
+The launcher then runs the packaged `campaign` in the container's private
+network namespace and rewrites arguments that resolve beneath the host `work/`
+directory to `/work/...`, so the plan, manifest, and run root must live there.
+The other `campaign execute` examples in this document omit `--isolated` and
+`work/` for brevity. Without container options the command runs directly on
+the host and needs host SIPp, sipsak, tcpdump, and capture privileges.
+
+Isolated traffic leaves through the runtime's NAT. Signaling and the bounded
+preflight use symmetric response routing, but media returns only if the
+target sends RTP to the observed source address.
 
 It creates a collision-safe UTC run directory with mode 0700, starts `tcpdump`
 and waits for its output file before any packet is sent, sends one bounded SIP
@@ -450,5 +465,10 @@ afterward.
 
 Known limitations: the bundled SIPp adapter refuses authenticated calls because
 SIPp exposes its password option in process argv; supply a custom stdin-aware
-runner. TLS preflight uses normal certificate validation. Campaign execution
+runner. Its `call` step is SIPp's built-in `uac` scenario: one unauthenticated
+INVITE to the user `service` with no audio. A target that requires
+credentials or a specific destination will reject it; use the manual softphone
+call in `CALL-CHECKLIST.md` for that baseline. TLS preflight uses normal
+certificate validation against the frozen literal address, so it fails unless
+the certificate carries that IP as a subject alternative name. Campaign execution
 is local and sequential—there is no distributed controller.
