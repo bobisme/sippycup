@@ -158,5 +158,15 @@ practice-gate:
 		PYTHONDONTWRITEBYTECODE=1 \
 		python3 -m unittest tests.test_practice_gate -v
 
+# Live, loopback-only softphone checks (DTMF, SRTP, registration status,
+# media scope) against the practice target plus one isolated PJSUA peer.
+# Opt-in like practice-gate; needs both images. See docs/PRACTICE-TARGET.md.
+.PHONY: softphone-gate
+softphone-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_SOFTPHONE_GATE=1 SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		PYTHONDONTWRITEBYTECODE=1 \
+		python3 -m unittest tests.test_softphone_gate -v
+
 web-security-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v

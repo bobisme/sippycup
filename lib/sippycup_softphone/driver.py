@@ -38,7 +38,29 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from .evidence import (
+    DEFAULT_DTMF_AFTER_SECONDS,
+    DTMF_SETTLE_SECONDS,
+    MAX_DTMF_AFTER_SECONDS,
+    DtmfError,
+    dtmf_digits,
+    dtmf_log_facts,
+    dtmf_schedule,
+    dtmf_seconds,
+    negotiated_sdp,
+    parse_messages,
+    registration_final_status,
+    setup_timing,
+    srtp_log_facts,
+    validate_dtmf,
+)
+
 TRANSPORTS = ("udp", "tcp", "tls")
+SRTP_MODES = ("off", "optional", "mandatory")
+# PJSUA --use-srtp values: 0 disabled, 1 optional (RTP/AVP plus a=crypto),
+# 2 mandatory (RTP/SAVP). Keying is SDES (--srtp-keying=0).
+SRTP_USE = {"off": 0, "optional": 1, "mandatory": 2}
+SDES_CLEARTEXT_WARNING = "sdes-key-exposed-on-cleartext-signaling"
 START_TIMEOUT_SECONDS = 10.0
 HANGUP_TIMEOUT_SECONDS = 5.0
 QUIT_TIMEOUT_SECONDS = 5.0
@@ -54,8 +76,9 @@ _CODEC = re.compile(r"^[A-Za-z0-9][A-Za-z0-9./-]{0,31}$")
 
 _STATE = re.compile(r"Call (\d+) state changed to ([A-Z_]+)")
 _DISCONNECTED = re.compile(r"Call (\d+) is DISCONNECTED \[reason=(\d+) \(([^)]*)\)\]")
-_REGISTRATION_OK = re.compile(r"(?<!un)registration success, status=(\d{3})")
-_REGISTRATION_FAILED = re.compile(r"(?<!un)registration failed, status=(\d{3})", re.I)
+_REGISTRATION_OK = re.compile(r"(?<!un)registration success, status=(\d{3})\b")
+# A word boundary: PJSIP error codes such as status=171165 are not SIP statuses.
+_REGISTRATION_FAILED = re.compile(r"(?<!un)registration failed, status=(\d{3})\b", re.I)
 _REGISTRATION_ERROR = re.compile(r"SIP registration error", re.I)
 _READY = re.compile(r"Ready: Success")
 _DURATION_EXCEEDED = re.compile(r"Duration \(\d+ seconds\) has been exceeded")
@@ -74,6 +97,8 @@ _AUTH_HEADER = re.compile(
     r"(?im)^([ \t]*(?:proxy-)?authorization[ \t]*:[ \t]*)[^\r\n]*"
 )
 _PASSWORD_OPTION = re.compile(r"(?im)(--password[ \t=]+)\S+")
+# SDES master keys in a=crypto lines: media keys, kept out of persisted logs.
+_SDES_KEY = re.compile(r"(inline:)[A-Za-z0-9+/=]+")
 
 
 class SoftphoneError(ValueError):
@@ -124,6 +149,17 @@ class SoftphoneCall:
     # system bundle is the trust store. Verification cannot be disabled.
     tls_server_name: str | None = None
     tls_ca_file: Path | None = None
+    # RFC 4733 digits sent after answer (``,`` is a 1 s pause), never by
+    # SIP INFO or in-band; ``None`` sends nothing.
+    dtmf: str | None = None
+    dtmf_after_seconds: float = DEFAULT_DTMF_AFTER_SECONDS
+    # SDES-SRTP: off, optional, or mandatory.
+    srtp: str = "off"
+    # True offers only ``codecs`` (plus telephone-event): PJSUA's
+    # ``--dis-codec=*`` disables every codec and ``--add-codec`` re-enables
+    # the listed ones. False (the default) only raises their priority, and
+    # PJSUA still offers every other codec it has.
+    exclusive_codecs: bool = False
 
 
 @dataclass
@@ -155,6 +191,14 @@ class SoftphoneResult:
     tls_server_name: str | None = None
     tls_trust: str | None = None
     tls_detail: str | None = None
+    # DTMF, SRTP, SDP, and setup facts; ``None`` when not requested or not
+    # observed. See ``place_call``.
+    dtmf: dict[str, Any] | None = None
+    srtp: dict[str, Any] | None = None
+    sdp: dict[str, Any] | None = None
+    setup: dict[str, Any] | None = None
+    local_rtp_port: int | None = None
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -285,6 +329,30 @@ def _validate(call: SoftphoneCall, password: str | None) -> str:
             raise SoftphoneError(f"invalid codec name: {codec!r}")
     if call.answer_timeout_seconds <= 0 or call.registration_timeout_seconds <= 0:
         raise SoftphoneError("timeouts must be positive")
+    if call.srtp not in SRTP_MODES:
+        raise SoftphoneError("srtp must be off, optional, or mandatory")
+    if not isinstance(call.exclusive_codecs, bool):
+        raise SoftphoneError("exclusive_codecs must be true or false")
+    if call.dtmf is not None:
+        try:
+            validate_dtmf(call.dtmf)
+        except DtmfError as error:
+            raise SoftphoneError(str(error)) from error
+        after = call.dtmf_after_seconds
+        if (
+            isinstance(after, bool)
+            or not isinstance(after, (int, float))
+            or not 0 <= after <= MAX_DTMF_AFTER_SECONDS
+        ):
+            raise SoftphoneError(
+                f"DTMF delay must be from 0 to {MAX_DTMF_AFTER_SECONDS} seconds after answer"
+            )
+        needed = after + dtmf_seconds(call.dtmf) + DTMF_SETTLE_SECONDS
+        if needed > call.duration_seconds:
+            raise SoftphoneError(
+                f"the call duration ({call.duration_seconds}s) is shorter than the DTMF delay "
+                f"plus the digits ({needed:.2f}s)"
+            )
     for address in (call.bound_address, call.advertised_address):
         if address is not None:
             _literal_address(address)
@@ -358,6 +426,8 @@ def build_config(call: SoftphoneCall, *, password: str | None = None, log_file: 
     ]
     # PJSUA raises each added codec above the previous one, so the first
     # preference is added last.
+    if call.exclusive_codecs is True:
+        lines.append("--dis-codec=*")
     lines.extend(f"--add-codec={codec}" for codec in reversed(call.codecs))
     if call.transport == "udp":
         lines.append("--no-tcp")
@@ -374,6 +444,17 @@ def build_config(call: SoftphoneCall, *, password: str | None = None, log_file: 
                 "--no-tcp",
                 "--tls-verify-server",
                 f"--tls-ca-file={tls_ca_list(call)}",
+            ]
+        )
+    if call.srtp != "off":
+        # SDES keys travel in SDP, so they are confidential only over TLS:
+        # require TLS for SRTP when the signaling is TLS; otherwise SRTP is
+        # still tested and the result warns that the keys were exposed.
+        lines.extend(
+            [
+                f"--use-srtp={SRTP_USE[call.srtp]}",
+                f"--srtp-secure={1 if call.transport == 'tls' else 0}",
+                "--srtp-keying=0",
             ]
         )
     if ":" in address:
@@ -416,6 +497,7 @@ def redact(text: str, secrets: Sequence[str] = ()) -> str:
     for secret in sorted({value for value in secrets if value}, key=len, reverse=True):
         text = text.replace(secret, "<redacted>")
     text = _AUTH_HEADER.sub(lambda match: match.group(1) + "<redacted>", text)
+    text = _SDES_KEY.sub(lambda match: match.group(1) + "<redacted>", text)
     return _PASSWORD_OPTION.sub(lambda match: match.group(1) + "<redacted>", text)
 
 
@@ -430,6 +512,12 @@ def _peer_address(peer: str) -> str | None:
         return None
 
 
+def _observed_peer(text: str) -> str | None:
+    """The media peer PJSUA printed, or None for its "-" placeholder."""
+    peer = text.rstrip(",")
+    return peer if _peer_address(peer) is not None else None
+
+
 def _peer_port(peer: str) -> int | None:
     if peer.startswith("["):
         tail = peer.split("]", 1)[1] if "]" in peer else ""
@@ -440,7 +528,9 @@ def _peer_port(peer: str) -> int | None:
 
 
 def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
-    if peer is None:
+    # PJSUA prints "peer=-" (or another placeholder) until the first RTP
+    # packet arrives; an unknown peer is unknown, not out of scope.
+    if peer is None or _peer_address(peer) is None:
         return False
     if (
         call.allowed_media_addresses is not None
@@ -452,6 +542,80 @@ def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
         start, end = call.allowed_media_ports
         return port is None or not start <= port <= end
     return False
+
+
+def _observe_media_facts(
+    call: SoftphoneCall, result: SoftphoneResult, raw_text: str, combined: str
+) -> None:
+    """Fill registration, SDP, setup, SRTP, and DTMF facts from PJSUA's log."""
+    messages = parse_messages(raw_text)
+    negotiated = negotiated_sdp(messages)
+    offer = negotiated["offer"]
+    answer = negotiated["answer"]
+    if offer is not None or answer is not None:
+        result.sdp = negotiated
+    result.local_rtp_port = offer["port"] if offer is not None else None
+    result.setup = setup_timing(messages)
+    if result.registration_attempted and result.registered is False and result.registration_status is None:
+        # A rejected digest ends with a PJSIP error rather than a SIP status
+        # line; the final REGISTER response in the message log is the status.
+        result.registration_status = registration_final_status(messages)
+    if result.dialed:
+        facts = srtp_log_facts(combined)
+        active = bool(result.answered and facts["active"] is True)
+        result.srtp = {
+            "requested": call.srtp,
+            "keying": "sdes" if call.srtp != "off" else None,
+            "active": active,
+            "suite": facts["suite"] if active else None,
+            "offerProfile": offer["profile"] if offer else None,
+            "answerProfile": answer["profile"] if answer else None,
+            "offerCrypto": bool(offer and offer["cryptoSuites"]),
+            "answerCrypto": bool(answer and answer["cryptoSuites"]),
+            "secureSignaling": call.transport == "tls",
+            "source": "pjsua-log",
+        }
+        if call.srtp != "off" and call.transport != "tls":
+            result.warnings.append(SDES_CLEARTEXT_WARNING)
+        if call.srtp == "mandatory" and not active and result.error in (None, "softphone_exited_unexpectedly"):
+            result.error = "srtp_not_negotiated"
+    if call.dtmf is not None:
+        # PJSUA prints its console lines into the log file as well: read the
+        # log, and the console only for what the log lacks, never both.
+        facts = dtmf_log_facts(raw_text)
+        console = dtmf_log_facts(combined[len(raw_text):])
+        for key in ("sent", "received"):
+            facts[key] = facts[key] or console[key]
+        facts["errors"] = facts["errors"] or console["errors"]
+        facts["remoteUnsupported"] = facts["remoteUnsupported"] or console["remoteUnsupported"]
+        requested = dtmf_digits(call.dtmf)
+        negotiated_events = None if answer is None else bool(answer["telephoneEvents"])
+        if facts["remoteUnsupported"] or (result.answered and negotiated_events is False):
+            status = "notNegotiated"
+        elif not result.answered:
+            status = "notSent"
+        elif facts["sent"] == requested:
+            status = "sent"
+        elif facts["sent"]:
+            status = "incomplete"
+        else:
+            status = "notSent"
+        result.dtmf = {
+            "requested": call.dtmf,
+            "requestedDigits": requested,
+            "afterSeconds": call.dtmf_after_seconds,
+            "method": "rfc4733",
+            "status": status,
+            "negotiated": negotiated_events,
+            "offeredPayloadTypes": offer["telephoneEvents"] if offer else [],
+            "answeredPayloadTypes": answer["telephoneEvents"] if answer else [],
+            "sent": facts["sent"],
+            "received": facts["received"],
+            "errors": facts["errors"][:4],
+            "source": "pjsua-log",
+        }
+        if result.answered and result.error is None and status != "sent":
+            result.error = "dtmf_not_negotiated" if status == "notNegotiated" else "dtmf_not_sent"
 
 
 def _parent_death_signal() -> None:  # pragma: no cover - runs in the child
@@ -505,7 +669,7 @@ def parse_pjsua_log(text: str) -> dict[str, Any]:
         if (match := _MEDIA.search(line)) is not None:
             facts["codec"] = match.group(1)
             facts["media_direction"] = match.group(3)
-            facts["media_peer"] = match.group(4).rstrip(",")
+            facts["media_peer"] = _observed_peer(match.group(4)) or facts["media_peer"]
         if stripped.startswith("RX pt="):
             direction = "rx"
         elif stripped.startswith("TX pt="):
@@ -670,18 +834,57 @@ def tls_verification(text: str, expected: str) -> tuple[bool | None, str | None]
 
 
 def _stop_process(process: subprocess.Popen[bytes], grace: float = 2.0) -> None:
-    if process.poll() is not None:
-        return
-    for signum in (signal.SIGTERM, signal.SIGKILL):
+    """Stop and reap PJSUA, then kill anything left in its process group.
+
+    PJSUA runs as a session leader, so its process group holds every
+    descendant (for example PJSUA under the ``unshare`` name-pinning
+    wrapper). A descendant that outlives the leader could still write into
+    the private directory after the driver removed it.
+    """
+    if process.poll() is None:
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(process.pid, signum)
+            except ProcessLookupError:
+                break
+            try:
+                process.wait(timeout=grace)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        if process.poll() is None:  # pragma: no cover - SIGKILL could not be delivered
+            try:
+                process.wait(timeout=grace)
+            except subprocess.TimeoutExpired:
+                pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+PRIVATE_REMOVE_ATTEMPTS = 20
+PRIVATE_REMOVE_DELAY = 0.05
+
+
+def remove_private_directory(private: Path, secret_files: Sequence[Path] = ()) -> bool:
+    """Remove a private directory: secret files first, then retry the tree.
+
+    Returns True when the directory is gone. A late writer can recreate a
+    log file between the tree walk and ``rmdir``; retrying briefly covers it.
+    """
+    for path in secret_files:
         try:
-            os.killpg(process.pid, signum)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=grace)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    for attempt in range(PRIVATE_REMOVE_ATTEMPTS):
+        shutil.rmtree(private, ignore_errors=True)
+        if not os.path.lexists(private):
+            return True
+        if attempt + 1 < PRIVATE_REMOVE_ATTEMPTS:
+            time.sleep(PRIVATE_REMOVE_DELAY)
+    return False
 
 
 def place_call(
@@ -782,6 +985,12 @@ def place_call(
         quality_requested_at: float | None = None
         stopping = False
         hangup_by: str | None = None
+        # Each chunk is one legacy-console command pair: ``#`` (send RFC 2833
+        # DTMF) and then the digits. PJSUA refuses, rather than falling back
+        # to SIP INFO or in-band tones, when the peer did not negotiate
+        # telephone-event.
+        dtmf_plan = dtmf_schedule(call.dtmf) if call.dtmf is not None else []
+        dtmf_index = 0
 
         def quit_now() -> None:
             nonlocal phase, deadline
@@ -827,7 +1036,7 @@ def place_call(
                 elif _REGISTRATION_ERROR.search(line) and result.registered is not True:
                     result.registered = False
                 if (match := _MEDIA.search(line)) is not None:
-                    result.media_peer = match.group(4).rstrip(",")
+                    result.media_peer = _observed_peer(match.group(4)) or result.media_peer
                     result.codec = match.group(1)
                 if _DURATION_EXCEEDED.search(line):
                     hangup_by = hangup_by or "duration"
@@ -900,6 +1109,17 @@ def place_call(
                 if quality_requested_at is None and confirmed_at is not None and now >= confirmed_at + 0.5:
                     send("dq")
                     quality_requested_at = now
+                if (
+                    dtmf_index < len(dtmf_plan)
+                    and confirmed_at is not None
+                    and not disconnected
+                    and not stopping
+                    and now >= confirmed_at + call.dtmf_after_seconds + dtmf_plan[dtmf_index][0]
+                ):
+                    send("#")
+                    send(dtmf_plan[dtmf_index][1])
+                    mark("DTMF")
+                    dtmf_index += 1
                 if disconnected:
                     quit_now()
                 elif now >= deadline:
@@ -970,6 +1190,7 @@ def place_call(
             result.error = "media_peer_outside_scope"
         if result.final_status is None and result.disconnect_status is not None and not result.answered:
             result.final_status = result.disconnect_status
+        _observe_media_facts(call, result, raw_text, raw_text + "\n" + console_text)
         if call.transport == "tls":
             verified, detail = tls_verification(
                 raw_text + "\n" + console_text, tls_expected_name(call) or ""
@@ -985,4 +1206,5 @@ def place_call(
         _persist(call.log_file, redact(raw_text, secrets))
         if call.console_file is not None:
             _persist(call.console_file, redact(console_text, secrets))
-        shutil.rmtree(private, ignore_errors=True)
+        if not remove_private_directory(private, (config_path,)):
+            result.warnings.append("private-directory-not-removed")

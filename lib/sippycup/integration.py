@@ -371,6 +371,8 @@ def select_runner(step: Mapping[str, Any]) -> str:
     """
     if step["type"] == "call" and (
         "dial" in step or step.get("credentialRef") is not None or "tls" in step
+        # DTMF and SRTP are performed only by the PJSUA softphone runner.
+        or "call" in step or "media" in step
     ):
         # A reviewed TLS server name or trust anchor needs a client that
         # verifies the certificate; the bundled SIPp TLS client does not.

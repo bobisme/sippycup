@@ -41,6 +41,7 @@ authorize traffic to a real host.
   | `tone` | `601` | Answers, plays the `media/canary-v1` callee-to-caller canary three times, hangs up |
   | `busy` | `486` | Rejects before answer with `486 Busy Here` |
   | `decline` | `603` | Rejects before answer with `603 Decline` |
+  | `dtmf` | `602` | Answers with a steady 425 Hz tone, collects up to 32 RFC 4733 digits (4 s after the last digit), and sends the same digits back as RFC 4733 events |
   | anything else | | `404 Not Found` after authentication |
 
 - **Unauthenticated requests:** every INVITE and REGISTER without valid
@@ -327,6 +328,37 @@ Under unittest, `tests/test_practice_gate.py` runs only with
 `SIPPYCUP_PRACTICE_GATE=1` and skips when an image is absent; the make target
 sets `SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1` so a missing image fails it.
 `make full-gate` includes it.
+
+## Softphone gate
+
+```sh
+make softphone-gate
+```
+
+An opt-in gate for the softphone voice features, built on the practice gate
+(same images, same target lifecycle). Evidence is kept in
+`work/practice/softphone-gate-<UTC>-<PID>/`. It:
+
+- places a guided call to `dtmf` with `--dtmf '159#,*0AD'` and requires
+  `pass`, the digits `159#*0AD` decoded from the capture in both directions
+  (sent and echoed back by Asterisk), and an oracle `media.dtmf` pass;
+- registers with a wrong password and requires `registration-failed` with
+  SIP status 401 in the human output and `result.json`, after exactly one
+  credentialed REGISTER;
+- places `--srtp mandatory` over TLS and requires `pass`, `RTP/SAVP` with an
+  active suite, RTP in both directions, and no SDES key in the softphone log;
+- places `--srtp optional` over UDP and requires the
+  `sdes-key-exposed-on-cleartext-signaling` warning;
+- in an isolated container, places `--srtp mandatory` against a plain-RTP
+  PJSUA peer and requires `srtp-not-negotiated` with final status 488;
+- runs `./bin/sippycup --practice campaign run` on a campaign whose call case
+  sends `2468` to `dtmf` with `retainPayload: true`, and requires success,
+  the runner line's `dtmf.status: sent`, the digits sent and echoed in the
+  capture, RTP in both directions on the authorized media ports with
+  `localRtpPort` reported, and no password in the evidence.
+
+`tests/test_softphone_gate.py` runs it only with `SIPPYCUP_SOFTPHONE_GATE=1`.
+It is not part of `make full-gate`.
 
 ## Limits
 

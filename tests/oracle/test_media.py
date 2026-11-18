@@ -338,6 +338,39 @@ class MediaInvariantTests(unittest.TestCase):
             assertions(analysis)["media.sequence"].verdict, Verdict.FAIL
         )
 
+    def test_rfc4733_event_packets_do_not_count_as_timestamp_jumps(self) -> None:
+        # A 280 ms event keeps its start timestamp (RFC 4733 2.5.1.2); audio
+        # then resumes on the real clock. Only audio drives jitter and jumps.
+        media = [
+            rtp_frame(600, "0.32", caller_to_callee=True, sequence=1, timestamp=0),
+            rtp_frame(601, "0.34", caller_to_callee=True, sequence=2, timestamp=160),
+        ]
+        for index in range(15):
+            media.append(rtp_frame(
+                602 + index, f"{Decimal('0.36') + Decimal(index) * Decimal('0.02')}",
+                caller_to_callee=True, sequence=3 + index, timestamp=320, payload_type=101,
+            ))
+        media.append(rtp_frame(620, "0.66", caller_to_callee=True, sequence=18, timestamp=2720))
+        media.append(rtp_frame(621, "0.68", caller_to_callee=True, sequence=19, timestamp=2880))
+        media.extend([
+            rtp_frame(630, "0.32", caller_to_callee=False, sequence=1, timestamp=0),
+            rtp_frame(631, "0.34", caller_to_callee=False, sequence=2, timestamp=160),
+        ])
+        analysis = evaluate_invariants(
+            tuple(media), baseline_dialog(), MediaExpectations(require_dtmf=True)
+        )
+        stream = next(
+            item for item in analysis.streams
+            if item.direction is MediaDirection.CALLER_TO_CALLEE
+        )
+        self.assertEqual(stream.metrics.timestamp_jumps, Known(0))
+        self.assertEqual(stream.metrics.lost, Known(0))
+        self.assertEqual(stream.metrics.received, 19)
+        result = assertions(analysis)
+        self.assertEqual(result["media.sequence"].verdict, Verdict.PASS)
+        self.assertEqual(result["media.jitter"].verdict, Verdict.PASS)
+        self.assertEqual(result["media.dtmf"].verdict, Verdict.PASS)
+
     def test_symmetric_rtp_is_explicit_and_configurable(self) -> None:
         media = (
             rtp_frame(

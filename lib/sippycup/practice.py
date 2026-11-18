@@ -41,6 +41,10 @@ DESTINATIONS = {
     "tone": "answers and plays the canary-v1 callee_to_caller prompt three times (alias 601)",
     "busy": "rejects before answer with 486 Busy Here (alias 486)",
     "decline": "rejects before answer with 603 Decline (alias 603)",
+    "dtmf": (
+        "answers with a steady 425 Hz tone, collects up to 32 RFC 4733 digits (4 s inter-digit "
+        "timeout), and sends the same digits back as RFC 4733 events (alias 602)"
+    ),
 }
 UNAUTHENTICATED_POLICY = (
     "Every INVITE and REGISTER without valid Digest credentials is challenged "

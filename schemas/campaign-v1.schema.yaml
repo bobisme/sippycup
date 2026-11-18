@@ -119,6 +119,19 @@ properties:
               type: string
               pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$'
             register: {type: boolean, default: false}
+        media:
+          description: >-
+            Media security of this target's softphone calls: SDES-SRTP off,
+            optional (RTP/AVP with a=crypto), or mandatory (RTP/SAVP; a call
+            that does not negotiate SRTP fails). SDES keys are confidential
+            only over TLS signaling; over UDP/TCP the runner warns
+            sdes-key-exposed-on-cleartext-signaling. Frozen into every call
+            step of the target.
+          type: object
+          additionalProperties: false
+          required: [srtp]
+          properties:
+            srtp: {enum: ['off', optional, mandatory]}
       dependentRequired:
         account: [credentialRef]
   cases:
@@ -169,11 +182,35 @@ properties:
           required: [user]
           properties:
             user: {$ref: '#/$defs/sipUser'}
-      if:
-        required: [dial]
-      then:
-        properties:
-          type: {const: call}
+        call:
+          description: >-
+            Reviewed in-call actions for the softphone runner. dtmf is 1-32
+            RFC 4733 digits (0-9 A-D * #) with ',' as a 1 s pause, sent
+            dtmfAfterSeconds (default 1) after answer; durationSeconds
+            (default 5, clamped to the budget; not with generated) is how
+            long the call stays connected, for example to hear an IVR
+            respond. The runner never falls back to SIP INFO or in-band
+            DTMF. Valid only for type call.
+          type: object
+          additionalProperties: false
+          required: [dtmf]
+          properties:
+            dtmf:
+              type: string
+              pattern: '^[0-9A-D*#,]{1,64}$'
+            dtmfAfterSeconds: {type: integer, minimum: 0, maximum: 60}
+            durationSeconds: {type: integer, minimum: 1, maximum: 3600}
+      allOf:
+        - if:
+            required: [dial]
+          then:
+            properties:
+              type: {const: call}
+        - if:
+            required: [call]
+          then:
+            properties:
+              type: {const: call}
   matrix:
     $ref: '#/$defs/matrix'
   expectations:

@@ -403,6 +403,23 @@ def _clock_rate(frame: FrameRecord, dialog: DialogRecord) -> int | None:
     return None
 
 
+def _is_telephone_event(frame: FrameRecord, dialog: DialogRecord) -> bool:
+    """True for an RFC 4733 event packet of a negotiated telephone-event type.
+
+    An event keeps its start timestamp for its whole duration (RFC 4733
+    section 2.5.1.2), so these packets are counted for sequence loss but
+    not used for RFC 3550 jitter or timestamp-jump checks.
+    """
+    if frame.rtp is None:
+        return False
+    payload_type = _known(frame.rtp.payload_type)
+    receiver = _expected_receiver(dialog, frame, _direction(frame, dialog))
+    if payload_type is None or receiver is None:
+        return False
+    events = receiver.telephone_event_payloads
+    return isinstance(events, Known) and int(payload_type) in events.value
+
+
 def _sequence_metrics(
     frames: tuple[FrameRecord, ...],
     dialog: DialogRecord,
@@ -466,7 +483,10 @@ def _sequence_metrics(
     jumps = 0
     previous_rtp_timestamp: int | None = None
     previous_arrival: Decimal | None = None
-    for frame in frames:
+    timing_frames = tuple(
+        frame for frame in frames if not _is_telephone_event(frame, dialog)
+    ) or frames
+    for frame in timing_frames:
         assert frame.rtp is not None
         arrival = _evidence_time(frame.evidence)
         rtp_timestamp = _known(frame.rtp.timestamp)
@@ -496,8 +516,8 @@ def _sequence_metrics(
         previous_rtp_timestamp = int(rtp_timestamp)
         previous_arrival = arrival
     jitter_ms: Value[Decimal] = (
-        Known((jitter or Decimal(0)) * Decimal(1000) / _clock_rate(frames[0], dialog))
-        if jitter is not None and _clock_rate(frames[0], dialog)
+        Known((jitter or Decimal(0)) * Decimal(1000) / _clock_rate(timing_frames[0], dialog))
+        if jitter is not None and _clock_rate(timing_frames[0], dialog)
         else Unknown(UnknownReason.MISSING_FIELD, "RTP clock rate or timestamp")
     )
     return SequenceMetrics(

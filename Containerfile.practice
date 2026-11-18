@@ -78,6 +78,9 @@ RUN ./configure \
         --disable-category MENUSELECT_EXTRA_SOUNDS \
         --enable app_echo \
         --enable app_playback \
+        --enable app_playtones \
+        --enable app_read \
+        --enable app_senddtmf \
         --enable chan_pjsip \
         --enable codec_alaw \
         --enable codec_ulaw \

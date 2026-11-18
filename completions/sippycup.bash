@@ -63,7 +63,7 @@ _sippycup() {
         call)
             COMPREPLY=(
                 $(compgen -W \
-                    "--dial --duration --answer-timeout --play --codec --username --realm --no-register --secret-env --secret-file --run-root --engagement --no-media-required --format --dry-run --help" \
+                    "--dial --duration --answer-timeout --play --codec --username --realm --no-register --secret-env --secret-file --run-root --engagement --no-media-required --dtmf --dtmf-after --srtp --format --dry-run --help" \
                     -- "${current}")
             )
             ;;
