@@ -359,7 +359,7 @@ def h_preflight(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     tls = run.transport == "tls" and ("tls" in lowered)
     d.evidence("preflight", f"OPTIONS preflight failed: {detail or 'no detail recorded'}")
     if tls:
-        h_tls_preflight(d, run, detail)
+        h_tls_preflight(d, run, detail, ladder)
         return
     d.stage("preflight", "the single OPTIONS request got no usable reply, so no call was placed")
     where = f"{run.transport.upper()} {run.host}:{run.target.get('port')}"
@@ -415,7 +415,26 @@ def _status_in(text: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-def h_tls_preflight(d: Diagnosis, run: CallRun, detail: str) -> None:
+def tls_alerts(ladder: Lazy) -> list:
+    """(sender role, previous record) for each TLS alert the ladder drew."""
+    document = ladder.document()
+    out: list = []
+    for section in (document or {}).get("sections") or []:
+        columns = section.get("columns") or []
+        previous = None
+        for event in section.get("events") or []:
+            label = str(event.get("label", ""))
+            if "alert" in label.lower() and event.get("type") != "media":
+                try:
+                    role = (columns[event["from"]].get("roles") or ["?"])[0]
+                except (IndexError, KeyError, TypeError):
+                    role = "?"
+                out.append((role, previous))
+            previous = label
+    return out
+
+
+def h_tls_preflight(d: Diagnosis, run: CallRun, detail: str, ladder: Optional[Lazy] = None) -> None:
     tls = run.result.get("tls") or {}
     name = tls.get("serverName")
     trust = tls.get("trust")
@@ -426,6 +445,10 @@ def h_tls_preflight(d: Diagnosis, run: CallRun, detail: str) -> None:
     side, confidence = UNKNOWN, LOW
     reasoning: list = []
     distinguish: list = []
+    alerts = tls_alerts(ladder) if ladder is not None else []
+    for role, previous in alerts[:2]:
+        who = "us (the caller), which is how a client rejects a certificate it cannot verify" if role == "caller" else "the far end"
+        d.evidence("TLS alert", f"sent by {who}" + (f", right after: {previous}" if previous else ""))
     if "hostname mismatch" in lowered or "not valid for" in lowered:
         d.outcome(
             f"TLS verification failed: the server's certificate is not valid for the reviewed name {name}; no SIP was sent."
@@ -491,7 +514,7 @@ def h_tls_not_verified(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     tls = run.result.get("tls") or {}
     detail = str(tls.get("softphoneDetail") or "")
     d.evidence("PJSUA TLS", detail or "PJSUA reported TLS verification did not succeed")
-    h_tls_preflight(d, run, detail or "tls verification failed")
+    h_tls_preflight(d, run, detail or "tls verification failed", ladder)
 
 
 def h_tls_pinning(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:

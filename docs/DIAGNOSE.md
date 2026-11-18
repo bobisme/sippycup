@@ -76,7 +76,8 @@ oracle assertions with their numbers (received, expected, lost, duplicates,
 reordered, timestamp jumps, jitter against its limit), the RTP counts per
 direction and the payload types, the media peer and which scope rule admitted
 or refused it (approved address, owner-approved media network, or media port
-range), the TLS trust anchor, reviewed server name and verification error, the
+range), the TLS trust anchor, reviewed server name and verification error, and which
+side sent the TLS alert (read from the capture's handshake records), the
 SDP offer and answer addresses, and the stage timings.
 
 ## The attribution

@@ -212,7 +212,7 @@ class Diagnosis:
     _EVIDENCE_ORDER = {
         "registration": ("registration", "REGISTER authentication", "REGISTER requests", "failing step", "softphone step", "Reason", "Warning", "Retry-After", "INVITE"),
         "preflight": ("preflight", "OPTIONS", "failing step", "TLS trust", "PJSUA TLS"),
-        "TLS": ("preflight", "PJSUA TLS", "TLS trust"),
+        "TLS": ("preflight", "PJSUA TLS", "TLS alert", "TLS trust"),
         "INVITE": ("INVITE", "INVITE authentication", "failing step", "softphone step", "Reason", "Warning", "Retry-After", "SDP offer", "SDP answer", "SRTP", "codecs"),
         "answer": ("INVITE", "SDP answer", "codecs", "Reason", "Warning", "Retry-After"),
         "media": ("RTP per direction", "RTP", "recording", "softphone step", "SDP answer", "SDP offer", "media scope"),
