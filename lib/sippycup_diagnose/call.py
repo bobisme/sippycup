@@ -691,13 +691,13 @@ def h_488(d: Diagnosis, run: CallRun) -> None:
     else:
         reasoning.append(f"We offered SRTP ({srtp}); the far end refused the secure offer.")
         side, confidence = THEIR, MEDIUM
-    if run.srtp_approved and srtp != "mandatory":
+    if run.srtp_approved and srtp != "mandatory" and not exclusive:
         distinguish.append("Repeat with --srtp mandatory (the profile approves SRTP): success shows the account requires encryption.")
     d.attribute(side, confidence, reasoning, distinguish)
     if exclusive:
         for codec in run.alternative_codecs()[:2]:
             d.step(f"Offer {codec} alone (what the profile approves) to test whether the refusal was about the codec.", run.cmd_call(codec=[codec]))
-    if srtp == "off" and run.srtp_approved:
+    if srtp == "off" and run.srtp_approved and not exclusive:
         d.step("Offer SRTP (the profile approves it) in case the account requires encryption.", run.cmd_call(srtp="mandatory"))
     if not d.data["nextSteps"]:
         d.stop_and_ask("Ask the owner which media security and codec policy this account requires; the profile approves no variation of the offer to try.")
