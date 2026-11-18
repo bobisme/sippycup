@@ -10,7 +10,10 @@ with the real PJSUA and Asterisk, that:
 - an unsupported codec gets 488 and ``call-media-not-acceptable``, and an
   unknown name is refused (exit 2) before anything starts;
 - ``matrix run`` over the practice UDP and TLS profiles produces the grid
-  and ``matrix.json``, and stops at the first 429 instead of continuing.
+  and ``matrix.json``, and stops at the first 429 instead of continuing;
+- the matrix-ready profiles that ``practice-target up`` renders
+  (``target-profile-matrix*.yaml``, ``limits.max_calls`` 12) run a small grid
+  directly and through the proxy, as shipped.
 
 Evidence is kept under ``work/practice/codec-gate-<UTC>/``.
 """
@@ -120,9 +123,9 @@ class CodecGate(practice_gate.Gate):
             paths.append(self.work_path(target))
         return paths
 
-    def matrix(self, label: str, *arguments: str) -> tuple[int, dict[str, Any], str]:
+    def matrix(self, label: str, *arguments: str, profiles: list[str] | None = None) -> tuple[int, dict[str, Any], str]:
         result = self.run(
-            "--practice", "matrix", "run", *self.matrix_profiles(), "--username", "practice",
+            "--practice", "matrix", "run", *(profiles or self.matrix_profiles()), "--username", "practice",
             "--secret-file", "work/practice/account.password", "--duration", "3",
             "--run-root", self.work_path(f"matrix-calls-{label}"),
             "--matrix-root", self.work_path(f"matrix-{label}"), "--format", "json", *arguments,
@@ -162,6 +165,7 @@ class CodecGate(practice_gate.Gate):
             and [cell.get("status") for cell in value.get("cells") or []] == ["run", "not-run"],
             {"exit": code, "stop": value.get("stopReason")},
         )
+        self.check_shipped_matrix_profiles()
         password = self.password()
         leaked = [
             str(path) for path in self.gate_dir.rglob("*")
@@ -169,6 +173,30 @@ class CodecGate(practice_gate.Gate):
             and password in path.read_text(encoding="utf-8", errors="replace")
         ]
         self.record("the practice password appears nowhere in the codec gate evidence", not leaked, leaked or None)
+
+    def check_shipped_matrix_profiles(self) -> None:
+        """The matrix-ready profiles `up` renders work as shipped, directly and through the proxy."""
+        direct = [f"work/practice/{name}" for name in ("target-profile-matrix.yaml", "target-profile-matrix-tls.yaml")]
+        code, value, stderr = self.matrix(
+            "shipped", "--dial", "echo", "--codecs", "PCMU", "--srtp", "off,mandatory", profiles=direct
+        )
+        statuses = [(cell.get("transport"), cell.get("srtp"), cell.get("verdict")) for cell in value.get("cells") or []]
+        self.record(
+            "matrix run over the shipped practice matrix profiles (udp, tls) x PCMU x (off, mandatory): "
+            "all four pass, exit 0",
+            code == 0 and len(statuses) == 4 and all(item[2] == "pass" for item in statuses),
+            {"exit": code, "cells": statuses, "stderr": stderr.strip()[-300:] or None},
+        )
+        proxy = [f"work/practice/{name}" for name in ("target-profile-matrix-proxy.yaml", "target-profile-matrix-proxy-tls.yaml")]
+        code, value, stderr = self.matrix(
+            "shipped-proxy", "--dial", "echo", "--codecs", "PCMU", "--transports", "udp", profiles=proxy
+        )
+        statuses = [cell.get("verdict") for cell in value.get("cells") or []]
+        self.record(
+            "matrix run over the shipped proxy matrix profile (udp) x PCMU: passes, exit 0",
+            code == 0 and statuses == ["pass"],
+            {"exit": code, "cells": statuses, "stderr": stderr.strip()[-300:] or None},
+        )
 
     def execute(self) -> dict[str, Any]:
         ok = False

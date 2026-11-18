@@ -88,6 +88,12 @@ from the `calls/` directories it already reads; the grid itself is in
 
 ## Practice target
 
+`./bin/sippycup practice-target up` renders ready-made matrix profiles
+(`work/practice/target-profile-matrix*.yaml`, `limits.max_calls: 12`, direct and
+through the proxy) and `practice-target info` prints the exact commands; see
+"Practice the call matrix" in `PRACTICE-TARGET.md`. The older example below
+uses hand-made copies of the one-call profiles.
+
 The practice Asterisk endpoints allow only PCMU and PCMA. A run over copies
 of the practice profiles with `limits.max_calls: 6`, `features.srtp: true`,
 and `media.codecs: [PCMU, PCMA, G722]`:

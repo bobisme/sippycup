@@ -235,10 +235,46 @@ All files are under the ignored `work/practice/` directory (mode 0700):
 | `target-profile-proxy.yaml`, `target-profile-proxy-tls.yaml` | Approved profiles for the practice proxy: signaling to the proxy, approved addresses proxy and media address; the TLS one pins `sippycup-proxy` |
 | `campaign-proxy.yaml` | Campaign through the proxy: OPTIONS on UDP and TCP and one authenticated softphone call (407), both networks authorized |
 | `expectations-proxy.yaml` | Packet-oracle expectations for an echo call through the proxy |
+| `target-profile-matrix.yaml`, `target-profile-matrix-tls.yaml`, `target-profile-matrix-proxy.yaml`, `target-profile-matrix-proxy-tls.yaml` | Matrix-ready copies of the four profiles above (see "Practice the call matrix"); also archived in `approvals/` |
 
 The templates are in `examples/practice/`. The checked-in profile template
 uses placeholders that cannot pass `rehearse`, so there is no standing
 approval in the repository and nothing that expires in the future.
+
+## Practice the call matrix
+
+The one-call profiles above carry `limits.max_calls: 1`, so `matrix plan` and
+`matrix run` correctly refuse them. `up` therefore also renders a matrix-ready
+copy of each, as separate files, so the one-call profiles and everything that
+depends on them are unchanged. A copy differs in four things only: the profile
+name gets `-matrix`, `limits.max_calls` is 12 (concurrency and the 1 call per
+second limit stay at 1), `features.srtp` is true (so SDES-SRTP rows are
+allowed), and the capture file name. Target, approved addresses, approval id,
+and the four-hour window are identical, and the files are archived with the
+other approvals, so `summary` treats their runs as practice runs.
+
+A matrix takes one profile per transport, so each route is a pair: direct
+(`target-profile-matrix.yaml` + `target-profile-matrix-tls.yaml`) and through
+the proxy (`target-profile-matrix-proxy.yaml` +
+`target-profile-matrix-proxy-tls.yaml`). `practice-target info` prints the exact
+commands:
+
+```sh
+./bin/sippycup matrix plan work/practice/target-profile-matrix.yaml work/practice/target-profile-matrix-tls.yaml \
+  --dial echo --codecs PCMU,PCMA,G722 --srtp off,mandatory --max-calls 12
+./bin/sippycup --practice matrix run work/practice/target-profile-matrix.yaml work/practice/target-profile-matrix-tls.yaml \
+  --dial echo --codecs PCMU,PCMA,G722 --srtp off,mandatory --max-calls 12 \
+  --username practice --secret-file work/practice/account.password --duration 4
+```
+
+Use the `-proxy` pair for the same grid through the proxy. Twelve cells take
+about two minutes. G.722 is refused by the practice endpoints, so the G722
+cells fail by design (`call-media-not-acceptable`, or `srtp-not-negotiated`
+with `--srtp mandatory`); the other eight pass. `rehearse` on a matrix profile
+says "ready" and one warning that the profile approves up to 12 calls, which
+is expected for a matrix or a campaign. The owner report draws the finished
+grid (`summary`, see `ENGAGEMENT-REPORT.md`). `make codec-gate` runs a short
+matrix over these profiles.
 
 ## Rehearse the complete operator sequence
 
