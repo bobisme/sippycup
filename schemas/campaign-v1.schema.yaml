@@ -33,6 +33,17 @@ properties:
         minItems: 1
         uniqueItems: true
         items: {type: string}
+      mediaNetworks:
+        description: >-
+          Optional media-only networks (media servers behind a proxy or SBC).
+          Media may flow to and from them within mediaPorts; a target may never
+          resolve into them unless networks also contains it. At most 16
+          networks and 1024 addresses together.
+        type: array
+        minItems: 1
+        maxItems: 16
+        uniqueItems: true
+        items: {type: string}
       signalingPorts:
         type: array
         minItems: 1

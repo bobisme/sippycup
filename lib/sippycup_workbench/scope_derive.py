@@ -225,6 +225,40 @@ def _profile_media(doc: dict[str, Any]) -> dict[str, Any] | None:
     return section or None
 
 
+def _campaign_networks(doc: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """``(networks, mediaNetworks)`` for the campaign manifest.
+
+    Signaling networks become ``authorization.networks`` (signaling targets
+    and media). Media networks that no signaling network already contains
+    become the media-only ``authorization.mediaNetworks``, so a media server
+    pool never becomes an acceptable signaling destination in the planner.
+    When they do not meet the media breadth rule (more than 16 networks or
+    1024 addresses; ``scope check`` flags that), they are merged into
+    ``networks`` as before so the campaign still compiles.
+    """
+    from .media_scope import validate_networks
+
+    signaling = {canonical_network(text) for text in doc["signaling"]["networks"]}
+    media: list[Any] = []
+    for text in doc["media"]["networks"]:
+        network = canonical_network(text)
+        if network in media or any(
+            network.version == item.version and network.subnet_of(item) for item in signaling
+        ):
+            continue
+        media.append(network)
+
+    def ordered(items: Any) -> list[str]:
+        return [
+            str(item)
+            for item in sorted(items, key=lambda n: (n.version, int(n.network_address), n.prefixlen))
+        ]
+
+    if media and validate_networks(ordered(media), []) is None:
+        return sorted({str(item) for item in signaling | set(media)}), []
+    return sorted({str(item) for item in signaling}), ordered(media)
+
+
 def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str]]:
     limits = doc["limits"]
     targets = normalized_targets(doc)
@@ -238,12 +272,7 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
     )
     if isinstance(budget, list):
         return budget
-    networks = sorted(
-        {
-            str(canonical_network(text))
-            for text in [*doc["signaling"]["networks"], *doc["media"]["networks"]]
-        }
-    )
+    networks, media_networks = _campaign_networks(doc)
     account = doc["account"]
     credential = account.get("credential_ref") if account.get("required") else None
     stops = doc["stop_conditions"]
@@ -318,8 +347,10 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
             }
             call_case["expectations"] = expectations
             cases.append(call_case)
-    authorization: dict[str, Any] = {
-        "networks": networks,
+    authorization: dict[str, Any] = {"networks": networks}
+    if media_networks:
+        authorization["mediaNetworks"] = media_networks
+    authorization |= {
         "signalingPorts": list(doc["signaling"]["ports"]),
         "mediaPorts": {"start": media["start"], "end": media["end"]},
         "transports": list(doc["signaling"]["transports"]),

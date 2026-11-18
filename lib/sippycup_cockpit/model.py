@@ -584,6 +584,8 @@ def _plan_facts(path: Path) -> dict[str, Any] | None:
         "plannedTotals": plan.get("plannedTotals"),
         "hardMaxima": authorization.get("hardMaxima"),
         "credentialRefs": authorization.get("credentialRefs") or [],
+        "mediaNetworks": [item for item in authorization.get("mediaNetworks") or [] if isinstance(item, str)]
+        if isinstance(authorization.get("mediaNetworks"), list) else [],
         "destinations": [
             f"{item.get('address')}:{item.get('port')}/{item.get('transport')}"
             for item in plan.get("resolvedDestinations") or []

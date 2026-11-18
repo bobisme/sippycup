@@ -68,10 +68,72 @@ silently dropping steps.
 
 ## Authorization fields
 
-`authorization.networks` is the complete destination-address allowlist.
-`signalingPorts`, `mediaPorts`, `transports`, and `credentialRefs` constrain
-how those destinations may be used. Credential references are opaque names;
-never put passwords, tokens, or private keys in a manifest.
+`authorization.networks` is the complete signaling-destination allowlist;
+media may also flow anywhere in it. The optional
+`authorization.mediaNetworks` adds media-only networks (see "Media on other
+addresses"). `signalingPorts`, `mediaPorts`, `transports`, and
+`credentialRefs` constrain how those destinations may be used. Credential
+references are opaque names; never put passwords, tokens, or private keys in
+a manifest.
+
+### Media on other addresses
+
+Behind a proxy or SBC, signaling goes to one address and the SDP answer
+names a media server elsewhere. Authorize the media servers as media only:
+
+```yaml
+authorization:
+  networks: [203.0.113.10/32]          # the proxy: signaling (and media)
+  mediaNetworks: [198.51.100.0/27]     # the media-server pool: media ONLY
+  mediaPorts: {start: 10000, end: 20000}
+```
+
+- A target must resolve inside `networks`; an address only inside
+  `mediaNetworks` is refused at plan time (`... outside approved networks
+  (it is inside authorization.mediaNetworks, which admits media only, never
+  a signaling destination)`) and by the runtime validator.
+- `mediaNetworks` follows the target-profile media breadth rule: 1-16
+  networks in CIDR form without host bits, at most 1024 addresses together,
+  none containing unspecified, multicast, reserved, or broadcast addresses,
+  and no documentation range. It is frozen sorted into
+  `plan.authorization.mediaNetworks` and covered by the manifest lock.
+- The softphone runner accepts a media peer that is one of the step's frozen
+  addresses or lies inside `networks` or `mediaNetworks`, with a port inside
+  `mediaPorts`; any other peer stops the call (`media_peer_outside_scope`).
+- `scope compile` writes `mediaNetworks` from the scope's `media.networks`
+  answers that no signaling network contains.
+
+Capture rule (one implementation, `lib/sippycup/capture_scope.py`, used by
+the planner, the runtime validator, and execution):
+
+- signaling: for every address a step uses, its signaling transport and port,
+  plus UDP in `mediaPorts` (`(host A and (udp port 5060 or udp portrange
+  S-E))`), exactly as before;
+- media: UDP with an endpoint port inside `mediaPorts` and an endpoint inside
+  an authorized network (`networks` and `mediaNetworks`) that the signaling
+  terms do not already cover (`(udp portrange S-E and (host M or net N))`).
+
+Nothing else is captured: no UDP outside `mediaPorts`, no address outside the
+authorization, so the capture never becomes "all UDP". A plan with
+`mediaNetworks` freezes the full filter in `captureFilter`. A manifest
+without it compiles to exactly the same plan bytes as before (golden digests
+in `tests/test_softphone_runner.py`), and its frozen `captureFilter` keeps
+the original form; when it authorizes media on an address the steps do not
+use (an older proxy manifest that lists the media server in `networks`),
+execution appends the same media term over its own `networks` before
+starting tcpdump. `result.json` records what was used:
+
+```json
+"capture": {"filter": "...", "filterSource": "plan",
+            "watchdog": {"packets": 1450, "bytes": 301234, "calls": 1, "mediaPackets": 1302}}
+```
+
+`filterSource` is `plan` or `plan+authorized-media` (the older-plan
+extension). The watchdog counts every captured packet against the ceilings,
+media included, and reports how many were media (UDP with a port in
+`mediaPorts` and no signaling port, the same rule payload stripping uses);
+after capture stops it reads every remaining record, so its counts equal the
+capture's.
 
 All seven ceilings are mandatory:
 
@@ -294,8 +356,9 @@ assumptions. Review and archive it before an executor is allowed to run.
 `resolutionPins` records the exact hostname-to-address map used for the later
 source-manifest recompile; active execution never calls DNS.
 The capture filter contains only addresses, signaling transports, and ports
-referenced by generated steps, plus the authorized media range; unused
-authorized targets and signaling ports are deliberately excluded.
+referenced by generated steps, plus the authorized media range, and with
+`mediaNetworks` the media term described in "Media on other addresses";
+unused authorized targets and signaling ports are deliberately excluded.
 
 ## Finite coverage model
 
@@ -578,10 +641,14 @@ range and networks, global expectations, `retainPayload`, and a mode-0700
   `retainPayload: true`, in which case `heard.wav` is kept in the step
   directory;
 - hangs up and fails when the negotiated media peer is neither one of the
-  step's frozen addresses nor inside `authorization.networks` (a proxy or SBC
-  usually answers with a media server's address, which must be authorized
-  there), or its port is outside `authorization.mediaPorts`, so all media
-  stays inside the capture filter and its watchdog;
+  step's frozen addresses nor inside `authorization.networks` or
+  `authorization.mediaNetworks` (a proxy or SBC usually answers with a media
+  server's address, which must be authorized there), or its port is outside
+  `authorization.mediaPorts`, so all media stays inside the capture filter
+  and its watchdog; the result line's `mediaScope` records `peer`,
+  `admittedBy` (`approved-address` or `media-network`), `network`,
+  `authorization` (`destination`, `networks`, or `mediaNetworks`: the plan
+  field that admitted it), `portAdmitted`, and `inScope`;
 - treats `durationSecondsPerRun` as a hard limit: the call lasts the generated
   `duration` factor (5 seconds otherwise), clamped to the budget minus 3.5
   seconds of setup and teardown (4.5 with registration). It hangs up when 1.5
@@ -737,6 +804,9 @@ descendants triggers whole-group termination.
 When `evidence.retainPayload` is false, the finalized classic PCAP keeps link,
 IP, UDP, and the fixed 12-byte RTP header (payload type, sequence, timestamp,
 and SSRC), but removes RTP extensions, CSRC data, and encoded media bytes.
+This works for the link types tcpdump writes on Linux: Ethernet (`--interface
+lo`), Linux cooked SLL and SLL2 (`--interface any`, the default), and raw IP;
+a capture of any other link type is refused rather than kept with payload.
 SIP signaling payload remains available for dialog analysis. Set
 `retainPayload: true` only when written authorization and evidence handling
 permit storage of voice payload.
@@ -929,9 +999,10 @@ SIPp's built-in `uac` scenario, one unauthenticated INVITE to the user
 `service` with no audio; add `dial` (and an account with a credential
 reference when the target requires one) to use the softphone runner instead.
 The softphone runner dials only the first frozen address of a multi-address
-target, accepts media only from the step's frozen addresses within the
-authorized RTP range (a separate media server address is refused, because
-the capture filter and watchdog would not see it), sends DTMF only as RFC
+target, accepts media only from the step's frozen addresses and the
+authorized `networks` and `mediaNetworks` within the authorized RTP range
+(the capture and watchdog cover exactly that; see "Media on other
+addresses"), sends DTMF only as RFC
 4733 events and SRTP only with SDES keying, sends no hold or re-INVITE, and
 does not set ptime. A server that answers a correct response with a
 genuinely stale nonce is not retried (one attempt per transaction is the

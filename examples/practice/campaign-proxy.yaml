@@ -1,8 +1,10 @@
 # Campaign through the practice proxy (bn-2g0). `practice-target up` renders it
 # into work/practice/campaign-proxy.yaml. Signaling goes to the Kamailio proxy
 # on '@PROXY_ADDRESS@'; the proxy forwards calls to Asterisk on '@ADDRESS@',
-# whose SDP answer names '@ADDRESS@' as the media address, so both networks
-# are authorized.
+# whose SDP answer names '@ADDRESS@' as the media address. The proxy is the
+# only signaling network; the media address is a media-only network
+# (mediaNetworks): media may flow there, and the capture and its watchdog
+# include it, but it can never be a signaling target.
 #
 # The call case registers (401 from the proxy) and is challenged with 407 on
 # the INVITE. The password is supplied at run time, never here:
@@ -12,7 +14,8 @@ kind: Campaign
 metadata:
   name: local-practice-proxy
 authorization:
-  networks: ['@PROXY_ADDRESS@/32', '@ADDRESS@/32']
+  networks: ['@PROXY_ADDRESS@/32']
+  mediaNetworks: ['@ADDRESS@/32']
   signalingPorts: [5060]
   mediaPorts: {start: 20000, end: 20019}
   transports: [udp, tcp]

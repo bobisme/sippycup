@@ -107,6 +107,8 @@ def resolve(path_text: str) -> Inputs:
         if isinstance(authorization, dict):
             approved += _networks(authorization.get("networks"))
             approved += _networks(authorization.get("media_networks"))
+            # A campaign plan's media-only networks (authorization.mediaNetworks).
+            approved += _networks(authorization.get("mediaNetworks"))
         profile = _read_json(source / "profile.json")
         target = profile.get("target")
         if isinstance(target, dict):

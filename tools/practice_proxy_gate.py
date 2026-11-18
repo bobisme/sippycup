@@ -19,7 +19,10 @@ runs, through the unified launcher and only inside the practice namespace:
 - the media-scope stop when only the proxy is approved, within a bounded
   number of RTP packets;
 - a campaign with the softphone runner (one call ceiling: the 407 re-send is
-  not a second call), and the SIPp runner's handling of a 407;
+  not a second call), whose capture holds the RTP to and from the media-only
+  network both ways and whose watchdog counted every packet, the same for an
+  older manifest without ``mediaNetworks``, a planner refusal of a target on
+  a media-only network, and the SIPp runner's handling of a 407;
 - ``checks run`` against the proxy over UDP and TLS.
 
 Evidence is kept in ``work/practice/proxy-gate-<UTC>-<PID>/``.
@@ -392,13 +395,7 @@ class ProxyGate(practice_gate.Gate):
 
     def check_campaign(self) -> None:
         code, result, events, run_dir = self.campaign("work/practice/campaign-proxy.yaml", "proxy")
-        lines = []
-        for event in events:
-            if event.get("event") == "step.output" and event.get("stream") == "stdout":
-                with contextlib.suppress(ValueError):
-                    lines.append(json.loads(event.get("text", "")))
-        calls = [line for line in lines if line.get("runner") == "campaign-softphone-runner"]
-        call = calls[0] if calls else {}
+        call = self.softphone_line(events)
         self.record(
             "campaign through the proxy (OPTIONS UDP/TCP, softphone call with 407) succeeds "
             "under a one-call ceiling",
@@ -414,6 +411,109 @@ class ProxyGate(practice_gate.Gate):
                 for path in run_dir.rglob("*") if path.is_file()
             ),
         )
+        plan = json.loads((run_dir / "plan.json").read_text(encoding="utf-8")) if run_dir else {}
+        authorization = plan.get("authorization") or {}
+        self.record(
+            "the plan keeps the media address media only (mediaNetworks) and freezes its capture term",
+            authorization.get("networks") == [f"{self.proxy}/32"]
+            and authorization.get("mediaNetworks") == [f"{self.address}/32"]
+            and f"(udp portrange 20000-20019 and (host {self.address}))" in str(plan.get("captureFilter")),
+            {"networks": authorization.get("networks"), "mediaNetworks": authorization.get("mediaNetworks"),
+             "captureFilter": plan.get("captureFilter")},
+        )
+        self.campaign_media(run_dir, result, call, "plan", "mediaNetworks", "proxy campaign")
+        capture = "/" + str(run_dir.relative_to(self.project) / "capture.pcap") if run_dir else ""
+        asserted = self.run("--practice", "--", "sippycup-assert", capture, "--expect",
+                            "/work/practice/expectations-proxy.yaml", "--format", "json", timeout=120)
+        try:
+            oracle = json.loads(asserted.stdout or "{}")
+        except ValueError:
+            oracle = {}
+        self.record(
+            "the oracle passes on the proxy campaign's own capture (media now inside it)",
+            oracle.get("verdict") == "pass",
+            {"exit": asserted.returncode, "verdict": oracle.get("verdict"), "summary": oracle.get("summary"),
+             "stderr": asserted.stderr.strip()[-200:]},
+        )
+        self.check_media_network_never_signaling()
+        self.check_legacy_campaign()
+
+    def softphone_line(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+        lines = []
+        for event in events:
+            if event.get("event") == "step.output" and event.get("stream") == "stdout":
+                with contextlib.suppress(ValueError):
+                    lines.append(json.loads(event.get("text", "")))
+        calls = [line for line in lines if line.get("runner") == "campaign-softphone-runner"]
+        return calls[0] if calls else {}
+
+    def campaign_media(self, run_dir: Path | None, result: dict[str, Any], call: dict[str, Any],
+                       source: str, admitted: str, label: str) -> None:
+        """The campaign capture holds the RTP both ways and the watchdog counted every packet."""
+        capture = "/" + str(run_dir.relative_to(self.project) / "capture.pcap") if run_dir else ""
+        caller = practice.CALLER_ADDRESS
+        rtp = "udp.port in {20000..20019} && !(udp.port == 5060)"
+        to_media = self.tshark_count(capture, f"ip.src == {caller} && ip.dst == {self.address} && {rtp}")
+        from_media = self.tshark_count(capture, f"ip.src == {self.address} && ip.dst == {caller} && {rtp}")
+        media = self.tshark_count(capture, rtp)
+        frames = self.tshark_count(capture, "frame")
+        recorded = result.get("capture") or {}
+        watchdog = recorded.get("watchdog") or {}
+        self.record(
+            f"{label}: the capture holds the call's RTP both ways between the caller and the media address",
+            to_media > 50 and from_media > 50,
+            {"to_media": to_media, "from_media": from_media},
+        )
+        self.record(
+            f"{label}: the watchdog counted every captured packet, media included "
+            f"(capture filter from {source})",
+            recorded.get("filterSource") == source and watchdog.get("packets") == frames
+            and watchdog.get("mediaPackets") == media and media >= to_media + from_media,
+            {"filterSource": recorded.get("filterSource"), "watchdog": watchdog,
+             "tshark_frames": frames, "tshark_media": media},
+        )
+        scope = call.get("mediaScope") or {}
+        self.record(
+            f"{label}: the call step records the media peer and the authorization that admitted it",
+            str(scope.get("peer") or "").startswith(self.address + ":") and scope.get("inScope") is True
+            and scope.get("admittedBy") == "media-network" and scope.get("authorization") == admitted,
+            scope,
+        )
+
+    def check_media_network_never_signaling(self) -> None:
+        """A target inside a media-only network is refused by the planner."""
+        source = practice.state_dir(self.project) / "campaign-proxy.yaml"
+        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+        document["metadata"]["name"] = "proxy-gate-media-as-signaling"
+        document["targets"][0]["address"] = self.address
+        practice.write_private(self.host_path("campaign-media-as-signaling.yaml"),
+                               yaml.safe_dump(document, sort_keys=False))
+        planned = self.run("campaign", "plan", self.work_path("campaign-media-as-signaling.yaml"))
+        self.record(
+            "a media-only network never admits signaling: a target on the media address is refused at plan time",
+            planned.returncode != 0 and "mediaNetworks" in planned.stderr and not planned.stdout.strip(),
+            {"exit": planned.returncode, "stderr": planned.stderr.strip()[-240:]},
+        )
+
+    def check_legacy_campaign(self) -> None:
+        """An older manifest (media address merged into networks) is captured the same way."""
+        source = practice.state_dir(self.project) / "campaign-proxy.yaml"
+        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+        document["metadata"]["name"] = "proxy-gate-legacy-networks"
+        authorization = document["authorization"]
+        authorization["networks"] = [*authorization["networks"], *authorization.pop("mediaNetworks")]
+        practice.write_private(self.host_path("campaign-legacy.yaml"), yaml.safe_dump(document, sort_keys=False))
+        code, result, events, run_dir = self.campaign(self.work_path("campaign-legacy.yaml"), "legacy")
+        plan = json.loads((run_dir / "plan.json").read_text(encoding="utf-8")) if run_dir else {}
+        self.record(
+            "legacy campaign (no mediaNetworks) succeeds; its frozen filter is the original one",
+            code == 0 and result.get("state") == "succeeded"
+            and "mediaNetworks" not in (plan.get("authorization") or {})
+            and f"host {self.address}" not in str(plan.get("captureFilter")),
+            {"exit": code, "state": result.get("state"), "captureFilter": plan.get("captureFilter")},
+        )
+        self.campaign_media(run_dir, result, self.softphone_line(events), "plan+authorized-media",
+                            "networks", "legacy campaign")
 
     def check_sipp(self) -> None:
         manifest = SIPP_MANIFEST.replace("@PROXY@", self.proxy).replace("@ADDRESS@", self.address)

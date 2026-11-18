@@ -178,8 +178,14 @@ owners approve media. `scope compile` writes them so:
 | a range (`198.51.100.0/27`) | `media.networks` | media ONLY: never a signaling target |
 | `media.port_range` | `media.port_range` | the far end's RTP ports; a media port outside it stops the call |
 
-The campaign authorizes every network, the expectations list every address
-(up to 1024), and the guided call, the call matrix, and `srtp-policy` accept
+The campaign manifest puts the signaling networks in
+`authorization.networks` and every media network no signaling network
+already contains in the media-only `authorization.mediaNetworks`, so the
+campaign planner never accepts a media server as a signaling target; its
+capture and watchdog include the media (see `CAMPAIGN-MANIFEST.md`, "Media
+on other addresses"). Media networks beyond the breadth rule below are
+merged into `authorization.networks` as before. The expectations list every
+address (up to 1024), and the guided call, the call matrix, and `srtp-policy` accept
 a media peer that is a literal approved address or lies inside a
 `media.networks` range. Signaling is never widened: `target.host` must still
 be one of the literal `approved_addresses`, so a call whose host lies inside

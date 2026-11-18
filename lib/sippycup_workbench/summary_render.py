@@ -87,6 +87,36 @@ def _matrix_cell(cell: dict[str, Any] | None) -> tuple[str, str]:
     return text, "ok" if verdict == "pass" else "bad"
 
 
+def _campaign_media_peer(case: dict[str, Any]) -> str | None:
+    """``peer:port (rule)`` for a campaign call step's recorded media peer."""
+    peer = case.get("mediaPeer")
+    if not peer:
+        return None
+    text = f"{peer}:{case['mediaPeerPort']}" if case.get("mediaPeerPort") else str(peer)
+    rule = {
+        "destination": "the step's destination address",
+        "networks": "authorization.networks",
+        "mediaNetworks": "authorization.mediaNetworks, media only",
+    }.get(case.get("mediaPeerAuthorization") or "")
+    if case.get("mediaPeerApproved") is False:
+        return f"{text} (NOT approved)"
+    return f"{text} ({rule})" if rule else text
+
+
+def _campaign_capture(details: dict[str, Any]) -> str | None:
+    """What the campaign's capture watchdog counted, media included."""
+    capture = details.get("capture") or {}
+    packets = capture.get("watchdogPackets")
+    if not isinstance(packets, int):
+        return None
+    media = capture.get("watchdogMediaPackets")
+    return (
+        f"The capture watchdog counted {packets} packets against the ceilings"
+        + (f", {media} of them media (RTP/RTCP)" if isinstance(media, int) else "")
+        + "."
+    )
+
+
 def _matrix_heading(matrix: dict[str, Any]) -> str:
     text = (
         f"{matrix['label']} (destination {_value(matrix['destination'])}): {_value(matrix['state'])}, "
@@ -345,10 +375,11 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
             f"{md(d.get('completedSteps'))} of {md(d.get('plannedSteps'))} steps completed"
             + (f"; stop reason {code(d['stopReason'])}" if d.get("stopReason") else "")
             + "."
+            + (f" {md(_campaign_capture(d))}" if _campaign_capture(d) else "")
         )
         out.append("")
         out += _md_table(
-            ["Step", "Case", "Type", "Target", "Destination", "Outcome", "Status", "Expected", "RTP to/from", "Setup s", "TLS", "Reasons"],
+            ["Step", "Case", "Type", "Target", "Destination", "Outcome", "Status", "Expected", "RTP to/from", "Media peer", "Setup s", "TLS", "Reasons"],
             (
                 [
                     md(c["step"]),
@@ -360,6 +391,7 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
                     md(c.get("statusCode")),
                     md(c.get("expectedStatus")),
                     md(f"{_value(c.get('rtpToPeer'))} / {_value(c.get('rtpFromPeer'))}" if c["type"] == "call" else None),
+                    md(_campaign_media_peer(c)),
                     md(_seconds(c.get("setupSeconds"))),
                     md(None if c.get("tlsVerified") is None else ("verified" if c["tlsVerified"] else "NOT verified")),
                     md(", ".join(c.get("reasons") or [])),
@@ -908,17 +940,20 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             f"<p>{_c(run['id'])} ({h(run.get('campaign'))}): {h(run.get('state') or run['readable'])}, "
             f"{h(d.get('completedSteps'))} of {h(d.get('plannedSteps'))} steps completed"
             + (f"; stop reason {_c(d['stopReason'])}" if d.get("stopReason") else "")
-            + ".</p>"
+            + "."
+            + (f" {h(_campaign_capture(d))}" if _campaign_capture(d) else "")
+            + "</p>"
         )
         out.append(
             _html_table(
                 f"Cases in {run['id']}",
-                ["Step", "Case", "Type", "Target", "Destination", "Outcome", "Status", "Expected", "RTP to / from", "Setup s", "TLS", "Reasons"],
+                ["Step", "Case", "Type", "Target", "Destination", "Outcome", "Status", "Expected", "RTP to / from", "Media peer", "Setup s", "TLS", "Reasons"],
                 (
                     [
                         h(c["step"]), _c(c["case"]), h(c["type"]), h(_target(c.get("target"))), h(c.get("destination")), h(c["outcome"]),
                         h(c.get("statusCode")), h(c.get("expectedStatus")),
                         h(f"{_value(c.get('rtpToPeer'))} / {_value(c.get('rtpFromPeer'))}" if c["type"] == "call" else None),
+                        h(_campaign_media_peer(c)),
                         h(_seconds(c.get("setupSeconds"))),
                         h(None if c.get("tlsVerified") is None else ("verified" if c["tlsVerified"] else "NOT verified")),
                         h(", ".join(c.get("reasons") or [])),

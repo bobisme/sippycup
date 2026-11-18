@@ -222,16 +222,64 @@ def parse_envelope(raw: bytes) -> tuple[dict[str, Any], str | None, dict[str, An
 
 
 def media_networks(context: Mapping[str, Any]) -> tuple[str, ...] | None:
-    """The frozen authorization networks, which also bound the media peer."""
-    networks = context["authorization"].get("networks")
-    if networks is None:
+    """The frozen networks that bound the media peer.
+
+    ``authorization.networks`` (which also admit signaling) and, when the plan
+    has them, the media-only ``authorization.mediaNetworks``. The capture
+    filter covers UDP in the media port range with every one of them, so all
+    admitted media is captured and counted by the watchdog.
+    """
+    authorization = context["authorization"]
+    combined: list[str] = []
+    for key in ("networks", "mediaNetworks"):
+        networks = authorization.get(key)
+        if networks is None:
+            continue
+        if not isinstance(networks, list) or not all(isinstance(item, str) for item in networks):
+            raise EnvelopeError(f"context authorization {key} are invalid")
+        try:
+            for item in networks:
+                text = str(ipaddress.ip_network(item))
+                if text not in combined:
+                    combined.append(text)
+        except ValueError as error:
+            raise EnvelopeError(f"context authorization {key} are invalid") from error
+    if authorization.get("networks") is None and authorization.get("mediaNetworks") is None:
         return None
-    if not isinstance(networks, list) or not all(isinstance(item, str) for item in networks):
-        raise EnvelopeError("context authorization networks are invalid")
-    try:
-        return tuple(str(ipaddress.ip_network(item)) for item in networks)
-    except ValueError as error:
-        raise EnvelopeError("context authorization networks are invalid") from error
+    return tuple(combined)
+
+
+def media_scope_record(
+    decision: Mapping[str, Any] | None, context: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """Which frozen authorization admitted the media peer (compact, secret-free).
+
+    ``admittedBy`` is the driver's rule (``approved-address``: one of the
+    step's frozen destination addresses; ``media-network``: inside
+    ``network``; ``None``: refused). ``authorization`` names the plan field
+    that holds the rule: ``destination``, ``networks``, or ``mediaNetworks``
+    (media only). The rule lists themselves are in the frozen plan.
+    """
+    if decision is None:
+        return None
+    rule = decision.get("admittedBy")
+    network = decision.get("network")
+    source = None
+    if rule == "approved-address":
+        source = "destination"
+    elif rule == "media-network":
+        authorization = context["authorization"]
+        source = "networks" if network in (authorization.get("networks") or []) else (
+            "mediaNetworks" if network in (authorization.get("mediaNetworks") or []) else None
+        )
+    return {
+        "peer": decision.get("peer"),
+        "admittedBy": rule,
+        "network": network,
+        "authorization": source,
+        "portAdmitted": decision.get("portAdmitted"),
+        "inScope": decision.get("inScope"),
+    }
 
 
 def call_duration(step: Mapping[str, Any]) -> dict[str, Any]:
@@ -674,8 +722,9 @@ def run(
             allowed_media_addresses=tuple(
                 str(ipaddress.ip_address(item)) for item in destination["addresses"]
             ),
-            # bn-2g0: the frozen authorization networks also scope media, so a
-            # proxy's media servers on another approved address are allowed.
+            # bn-2g0: the frozen authorization networks (and the media-only
+            # mediaNetworks) also scope media, so a proxy's media servers on
+            # another approved address are allowed; the capture covers them.
             allowed_media_networks=media_networks(context),
             allowed_media_ports=(media["start"], media["end"]),
             pin_signaling=True,
@@ -724,6 +773,7 @@ def run(
             authentication=attempts,
             setup=result.setup,
             localRtpPort=result.local_rtp_port,
+            mediaScope=media_scope_record(result.media_scope, context),
             srtp={
                 key: (result.srtp or {}).get(key)
                 for key in ("requested", "active", "suite", "answerProfile")

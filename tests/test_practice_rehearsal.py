@@ -140,7 +140,9 @@ class CompileTests(unittest.TestCase):
         self.assertEqual("127.0.0.3", profile["target"]["host"])
         self.assertEqual(["127.0.0.3", "127.0.0.2"], profile["target"]["approved_addresses"])
         self.assertEqual([*rehearsal.UDP_CHECKS, "srtp-policy"], profile["security_checks"]["approved"])
-        self.assertEqual(["127.0.0.2/32", "127.0.0.3/32"], campaign["authorization"]["networks"])
+        # Signaling networks only; the media address is media only (bn-24x).
+        self.assertEqual(["127.0.0.3/32"], campaign["authorization"]["networks"])
+        self.assertEqual(["127.0.0.2/32"], campaign["authorization"]["mediaNetworks"])
         tls = next(item for item in campaign["targets"] if item["signaling"]["transport"] == "tls")
         self.assertEqual("sippycup-proxy", tls["signaling"]["tlsServerName"])
         self.assertEqual({"username": "practice", "realm": "sippycup-proxy", "register": True}, tls["account"])
@@ -152,6 +154,7 @@ class CompileTests(unittest.TestCase):
         self.assertNotIn("security_checks", text)
         self.assertEqual(["127.0.0.3"], profile["target"]["approved_addresses"])
         self.assertEqual(["127.0.0.3/32"], campaign["authorization"]["networks"])
+        self.assertNotIn("mediaNetworks", campaign["authorization"])
         self.assertNotIn("127.0.0.2", expectations["capture"]["allowed_endpoints"])
 
 
