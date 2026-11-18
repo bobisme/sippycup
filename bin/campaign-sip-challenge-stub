@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Loopback SIP stub that rejects every credential, for lockout self-tests.
+
+It answers OPTIONS with 200, ignores ACK, and answers every REGISTER with 401
+and every INVITE with 407, including requests that already carry digest
+credentials, exactly like a server that is given a wrong password (a fresh,
+non-stale nonce each time). It never checks a password and never accepts one.
+
+Usage: campaign-sip-challenge-stub ADDRESS PORT REALM
+"""
+
+import secrets
+import socket
+import sys
+
+
+def headers(message):
+    values = []
+    for line in message.split("\r\n")[1:]:
+        if not line:
+            break
+        if ":" in line:
+            name, value = line.split(":", 1)
+            values.append((name.strip(), value.strip()))
+    return values
+
+
+def first(values, *names):
+    wanted = {name.lower() for name in names}
+    for name, value in values:
+        if name.lower() in wanted:
+            return value
+    return ""
+
+
+def response(status, request_headers, extra=()):
+    to = first(request_headers, "To", "t")
+    if ";tag=" not in to:
+        to += ";tag=challenge-stub"
+    lines = [f"SIP/2.0 {status}"]
+    lines.extend(
+        f"Via: {value}" for name, value in request_headers if name.lower() in ("via", "v")
+    )
+    lines.extend(
+        [
+            f"From: {first(request_headers, 'From', 'f')}",
+            f"To: {to}",
+            f"Call-ID: {first(request_headers, 'Call-ID', 'i')}",
+            f"CSeq: {first(request_headers, 'CSeq')}",
+            *extra,
+            "Content-Length: 0",
+        ]
+    )
+    return ("\r\n".join(lines) + "\r\n\r\n").encode()
+
+
+def main():
+    address, port, realm = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+    server = socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind((address, port))
+    while True:
+        packet, peer = server.recvfrom(65535)
+        message = packet.decode(errors="replace")
+        method = message.split(" ", 1)[0]
+        parsed = headers(message)
+        challenge = (
+            f'Digest realm="{realm}", nonce="{secrets.token_hex(16)}", '
+            'algorithm=MD5, qop="auth", stale=false'
+        )
+        if method == "OPTIONS":
+            server.sendto(response("200 OK", parsed), peer)
+        elif method == "REGISTER":
+            server.sendto(
+                response("401 Unauthorized", parsed, [f"WWW-Authenticate: {challenge}"]), peer
+            )
+        elif method == "INVITE":
+            server.sendto(response("100 Trying", parsed), peer)
+            server.sendto(
+                response(
+                    "407 Proxy Authentication Required",
+                    parsed,
+                    [f"Proxy-Authenticate: {challenge}"],
+                ),
+                peer,
+            )
+        elif method not in ("ACK", "SIP/2.0"):
+            server.sendto(response("405 Method Not Allowed", parsed), peer)
+
+
+if __name__ == "__main__":
+    main()

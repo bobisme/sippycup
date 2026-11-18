@@ -372,7 +372,11 @@ under `work/`, which the launcher maps to the container's `/work`. Without
 sipsak, tcpdump, and capture privileges.
 
 Execution is preflight-gated, deadline-bound, signal-safe, and records
-structured events without placing credential values in argv. See
+structured events without placing credential values in argv. A `call` case
+that names a `dial` destination or uses a target account and credential
+reference runs on a PJSUA softphone runner that dials that user with audio
+and costs at most one credentialed attempt per wrong password; other calls
+keep SIPp's unauthenticated `uac` scenario. See
 `docs/CAMPAIGN-MANIFEST.md` for the schema, secret-source contracts, artifact
 layout, and isolated integration self-test.
 

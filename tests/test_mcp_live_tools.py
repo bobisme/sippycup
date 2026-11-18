@@ -447,6 +447,30 @@ class LivePreparationToolTests(unittest.TestCase):
                 _require_one_call(candidate)
         _require_one_call(plan)
 
+    def test_one_call_dial_destination_runs_but_an_account_is_refused(self) -> None:
+        """A dial destination only changes the Request-URI user of the one
+        credential-free call, so it is accepted and executed by the
+        softphone runner. An account always carries a credential reference,
+        so a plan with one is refused like any other credentialed plan."""
+        from sippycup.integration import SOFTPHONE_RUNNER, select_runner
+
+        manifest = yaml.safe_load(self.one_manifest_bytes)
+        manifest["cases"][0]["dial"] = {"user": "1001"}
+        raw = yaml.safe_dump(manifest, sort_keys=False).encode()
+        dial_plan = compile_plan(manifest, hashlib.sha256(raw).hexdigest())
+        self.assertEqual(dial_plan["steps"][0]["dial"], {"user": "1001"})
+        _require_one_call(dial_plan)
+        self.assertEqual(select_runner(dial_plan["steps"][0]), SOFTPHONE_RUNNER)
+
+        manifest["authorization"]["credentialRefs"] = ["sip-user"]
+        manifest["targets"][0]["credentialRef"] = "sip-user"
+        manifest["targets"][0]["account"] = {"username": "alice", "register": True}
+        raw = yaml.safe_dump(manifest, sort_keys=False).encode()
+        account_plan = compile_plan(manifest, hashlib.sha256(raw).hexdigest())
+        self.assertIn("account", account_plan["steps"][0])
+        with self.assertRaisesRegex(MCPPolicyError, "credentials"):
+            _require_one_call(account_plan)
+
 
 if __name__ == "__main__":
     unittest.main()

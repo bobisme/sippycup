@@ -4,7 +4,11 @@
 It reads ``--config-file``, records what it was given in the witness file
 named by FAKE_PJSUA_WITNESS, prints the console lines the driver parses, and
 obeys the ``m``/``dq``/``h``/``q`` commands. FAKE_PJSUA_MODE selects
-``answer`` (default), ``noanswer``, ``regfail``, ``reject``, or ``outside``.
+``answer`` (default), ``noanswer``, ``regfail``, ``reject``, ``outside``
+(media peer address out of scope), ``badport`` (media peer port out of
+scope), ``oneway`` (no received RTP), ``authfail`` (one rejected digest
+re-send), or ``authretry`` (two rejected re-sends). FAKE_PJSUA_CODEC names
+the negotiated codec (default PCMU).
 """
 
 import json
@@ -38,7 +42,9 @@ def main():
         "config_mode": oct(os.stat(config_path).st_mode & 0o777),
         "config_dir_mode": oct(os.stat(os.path.dirname(config_path)).st_mode & 0o777),
         "commands": [],
+        "pid": os.getpid(),
     }
+    codec = os.environ.get("FAKE_PJSUA_CODEC", "PCMU")
     log_path = options["--log-file"][0]
     duration = int(options["--duration"][0])
     password = options.get("--password", [""])[0]
@@ -71,11 +77,15 @@ def main():
     lock = threading.Lock()
 
     def media_dump():
-        peer = "198.51.100.77:4000" if mode == "outside" else "192.0.2.10:4000"
-        say("  [CONFIRMED] To: sip:echo@192.0.2.10")
-        say(f"    #0 audio PCMU @8kHz, sendrecv, peer={peer}")
+        host = os.environ.get("FAKE_PJSUA_PEER", "192.0.2.10")
+        peer = "198.51.100.77:4000" if mode == "outside" else f"{host}:4000"
+        say(f"  [CONFIRMED] To: sip:echo@{host}")
+        if mode == "badport":
+            peer = f"{host}:9"
+        say(f"    #0 audio {codec} @8kHz, sendrecv, peer={peer}")
         say("       RX pt=0, last update:00h:00m:01.008s ago")
-        say("          total 42pkt 6.7KB (8.4KB +IP hdr) @avg=64.0Kbps/80.0Kbps")
+        received = 0 if mode == "oneway" else 42
+        say(f"          total {received}pkt 6.7KB (8.4KB +IP hdr) @avg=64.0Kbps/80.0Kbps")
         say("       TX pt=0, ptime=20, last update:00h:00m:00.601s ago")
         say("          total 43pkt 6.8KB (8.6KB +IP hdr) @avg=64.0Kbps/80.0Kbps")
 
@@ -106,7 +116,25 @@ def main():
             pending_uri = False
             state["dialed"] = True
             say("pjsua_app.c  .......Call 0 state changed to CALLING")
-            if mode in ("answer", "outside"):
+            if mode in ("authfail", "authretry"):
+                # A Digest-challenging server that rejects the credentials:
+                # one unauthenticated INVITE, then authenticated re-sends.
+                def request(cseq, authorized):
+                    log_line(f"TX 512 bytes Request msg INVITE/cseq={cseq} (tdta0x{cseq}) to UDP 192.0.2.10:5060:")
+                    log_line(f"INVITE {command} SIP/2.0")
+                    if authorized:
+                        log_line('Proxy-Authorization: Digest username="alice", response="feedface"')
+                    log_line("Content-Length: 0")
+                    log_line("--end msg--")
+                    log_line(f"Incoming Response msg 407/INVITE/cseq={cseq} (rdata0x{cseq}) in state Calling")
+
+                request(1, False)
+                request(2, True)
+                if mode == "authretry":
+                    request(3, True)
+                disconnect("407 (Proxy Authentication Required)")
+                continue
+            if mode in ("answer", "outside", "badport", "oneway"):
                 log_line("Incoming Response msg 200/INVITE/cseq=1 (rdata0x1) in state Proceeding")
                 say("pjsua_app.c  .....Call 0 state changed to CONNECTING")
                 say("pjsua_app.c  .....Call 0 state changed to CONFIRMED")

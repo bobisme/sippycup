@@ -96,6 +96,8 @@ class SoftphoneCall:
     answer_timeout_seconds: float = 30.0
     registration_timeout_seconds: float = 10.0
     allowed_media_addresses: tuple[str, ...] | None = None
+    # Inclusive (start, end) range the negotiated remote RTP port must lie in.
+    allowed_media_ports: tuple[int, int] | None = None
     pin_signaling: bool = True
     bound_address: str | None = None
     advertised_address: str | None = None
@@ -196,6 +198,15 @@ def _validate(call: SoftphoneCall, password: str | None) -> str:
     if call.allowed_media_addresses is not None:
         for address in call.allowed_media_addresses:
             _literal_address(address)
+    if call.allowed_media_ports is not None:
+        ports = call.allowed_media_ports
+        if (
+            not isinstance(ports, tuple)
+            or len(ports) != 2
+            or any(type(port) is not int or not 1 <= port <= 65535 for port in ports)
+            or ports[0] > ports[1]
+        ):
+            raise SoftphoneError("allowed media ports must be an ordered (start, end) port range")
     if call.account is None:
         if password is not None:
             raise SoftphoneError("a password requires an account")
@@ -277,7 +288,12 @@ def build_config(call: SoftphoneCall, *, password: str | None = None, log_file: 
             ]
         )
         if account.registrar is not None:
-            lines.extend([f"--registrar={account.registrar}", "--reg-timeout=300"])
+            # --rereg-delay=0 disables PJSUA's automatic retry after a failed
+            # registration, so a wrong password costs one challenged attempt
+            # (lockout safety); the driver quits on the first failure.
+            lines.extend(
+                [f"--registrar={account.registrar}", "--reg-timeout=300", "--rereg-delay=0"]
+            )
         if password is not None:
             lines.append(f"--password={password}")
     return "\n".join(lines) + "\n"
@@ -300,6 +316,41 @@ def _peer_address(peer: str) -> str | None:
         return str(ipaddress.ip_address(candidate))
     except ValueError:
         return None
+
+
+def _peer_port(peer: str) -> int | None:
+    if peer.startswith("["):
+        tail = peer.split("]", 1)[1] if "]" in peer else ""
+        text = tail[1:] if tail.startswith(":") else ""
+    else:
+        text = peer.rsplit(":", 1)[1] if peer.count(":") == 1 else ""
+    return int(text) if text.isdigit() and 1 <= int(text) <= 65535 else None
+
+
+def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
+    if peer is None:
+        return False
+    if (
+        call.allowed_media_addresses is not None
+        and _peer_address(peer) not in call.allowed_media_addresses
+    ):
+        return True
+    if call.allowed_media_ports is not None:
+        port = _peer_port(peer)
+        start, end = call.allowed_media_ports
+        return port is None or not start <= port <= end
+    return False
+
+
+def _parent_death_signal() -> None:  # pragma: no cover - runs in the child
+    """Ask Linux to SIGKILL PJSUA if the process that started it dies."""
+    import ctypes
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
+    except (OSError, AttributeError):
+        pass
 
 
 def parse_pjsua_log(text: str) -> dict[str, Any]:
@@ -449,6 +500,7 @@ def place_call(
     private_root: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
     poll_interval: float = 0.02,
+    kill_with_parent: bool = False,
 ) -> SoftphoneResult:
     """Place exactly one call and return what PJSUA reported.
 
@@ -456,7 +508,9 @@ def place_call(
     string, for example when packet capture died) both hang up an
     established call with BYE, or cancel a ringing one, before PJSUA quits.
     ``environment`` is passed to PJSUA unchanged; callers must already have
-    removed secret variables from it.
+    removed secret variables from it. ``kill_with_parent`` asks Linux to
+    SIGKILL PJSUA if the calling process dies first; PJSUA runs in its own
+    session, so a supervisor's process-group kill would not reach it.
     """
     uri = _validate(call, password)
     result = SoftphoneResult(destination_uri=uri)
@@ -485,6 +539,7 @@ def place_call(
                 start_new_session=True,
                 env=dict(environment) if environment is not None else None,
                 close_fds=True,
+                preexec_fn=_parent_death_signal if kill_with_parent else None,
             )
         except OSError as error:
             result.error = f"softphone_start_failed: {type(error).__name__}"
@@ -580,12 +635,7 @@ def place_call(
                     result.error = result.error or reason
                     hang_up(reason)
                     continue
-            if (
-                call.allowed_media_addresses is not None
-                and result.media_peer is not None
-                and _peer_address(result.media_peer) not in call.allowed_media_addresses
-                and not stopping
-            ):
+            if not stopping and _media_outside_scope(call, result.media_peer):
                 stopping = True
                 result.error = "media_peer_outside_scope"
                 hang_up("scope")
@@ -702,12 +752,7 @@ def place_call(
         result.codec = facts["codec"] or result.codec
         result.media_direction = facts["media_direction"]
         result.media_peer = facts["media_peer"] or result.media_peer
-        if (
-            call.allowed_media_addresses is not None
-            and result.media_peer is not None
-            and _peer_address(result.media_peer) not in call.allowed_media_addresses
-            and result.error is None
-        ):
+        if result.error is None and _media_outside_scope(call, result.media_peer):
             result.error = "media_peer_outside_scope"
         if result.final_status is None and result.disconnect_status is not None and not result.answered:
             result.final_status = result.disconnect_status

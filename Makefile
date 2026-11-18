@@ -24,6 +24,13 @@ campaign-selftest:
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated -- \
 		campaign-integration-selftest /work/campaign-selftest
 
+# Echo peer (127.0.0.2) and credential-rejecting stub (127.0.0.3) run inside
+# the same isolated container as the real `campaign run`; loopback only.
+.PHONY: campaign-softphone-selftest
+campaign-softphone-selftest:
+	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated -- \
+		campaign-softphone-selftest /work/campaign-softphone-selftest
+
 # The echo peer lives inside the same isolated container on 127.0.0.2, so the
 # in-image entrypoint is driven directly; only loopback traffic is sent.
 call-selftest:
@@ -71,6 +78,7 @@ campaign-gate:
 	$(MAKE) smoke
 	$(MAKE) selftest
 	$(MAKE) campaign-selftest
+	$(MAKE) campaign-softphone-selftest
 	$(MAKE) call-selftest
 
 # Includes the real rootless Podman host-isolation matrix and therefore needs

@@ -209,3 +209,16 @@ command. Build a `SoftphoneCall`, optionally with a `SoftphoneAccount`, and
 call `place_call(call, password=..., cancel=..., abort=...)`. It returns a
 `SoftphoneResult` with the registration result, final SIP status, call-state
 timeline, connected time, PJSUA RTP counters, and any error.
+
+`allowed_media_ports=(start, end)` additionally hangs up when the negotiated
+remote RTP port is outside that range, and `place_call(...,
+kill_with_parent=True)` makes Linux kill PJSUA if the calling process dies.
+PJSUA registration runs with `--rereg-delay=0`, and the image's PJSIP is
+built with `PJSIP_MAX_STALE_COUNT 1`, so a wrong password costs one
+credentialed attempt for this command too.
+
+Campaigns use the same driver: a campaign `call` case with `dial` or a
+credential reference runs on `campaign-softphone-runner`, which places this
+call for each reviewed plan step under the campaign supervisor, capture
+watchdog, and evidence lifecycle. See "Dial destinations and accounts" and
+"Softphone runner" in [`CAMPAIGN-MANIFEST.md`](CAMPAIGN-MANIFEST.md).
