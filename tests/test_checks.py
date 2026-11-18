@@ -846,8 +846,10 @@ def check_findings_schema(test: unittest.TestCase, document: dict[str, Any]) -> 
 
 class ExecuteTests(unittest.TestCase):
     def run_profile(self, stub: SipStub, section: dict[str, Any], *, password: bool, fail_on: str = "medium",
-                    continue_after: bool = False) -> tuple[int, dict[str, Any], Path]:
+                    continue_after: bool = False, engagement: bool = False) -> tuple[int, dict[str, Any], Path]:
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        if engagement:
+            (root / "engagement.json").write_text("{}", encoding="utf-8")
         profile = write_profile(root, profile_document("127.0.0.1", stub.port, stub.transport, section))
         secret = root / "account.password"
         secret.write_text(PASSWORD + "\n", encoding="utf-8")
@@ -882,6 +884,16 @@ class ExecuteTests(unittest.TestCase):
             self.assertNotIn(PASSWORD, path.read_text(encoding="utf-8", errors="replace"), path)
         human = runner.render_result(value)
         self.assertTrue(human.rstrip().endswith(f"Network activity: {received} requests to 127.0.0.1"))
+        self.assertNotIn("Record it:", human)
+
+    def test_run_in_an_engagement_prints_the_journal_command(self) -> None:
+        with SipStub("udp", Behaviour(weak=False)) as stub:
+            _code, value, run_dir = self.run_profile(stub, self.section(), password=True, engagement=True)
+        human = runner.render_result(value)
+        relative = f"checks/{run_dir.name}"
+        self.assertIn(f"--evidence {relative}/findings.json --evidence {relative}/result.json", human)
+        self.assertIn("Record it: ./bin/sippycup journal add ", human)
+        self.assertNotIn(PASSWORD, human)
 
     def test_weak_run_stops_after_progression_and_exit_one(self) -> None:
         with SipStub("udp", Behaviour(weak=True, register_unauthenticated="challenge")) as stub:

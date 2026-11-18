@@ -544,6 +544,17 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         value["evidencePrivacy"] = manifest["privacy"]["status"]
     except Exception as error:  # evidence failure must not hide the verdict
         value["evidencePrivacy"] = f"manifest-error: {type(error).__name__}"
+    engagement = run_dir.parent.parent
+    if (engagement / "engagement.json").is_file():
+        # Like the guided call: the exact journal command that links this run.
+        relative = f"{run_dir.parent.name}/{run_dir.name}"
+        value["journalCommand"] = [
+            "./bin/sippycup", "journal", "add", _display(engagement, work_root), "--kind", "action",
+            "--summary", f"Security checks ({document.get('name')}): {state}, "
+            f"{len(findings_document.get('findings', []))} finding(s)",
+            "--evidence", f"{relative}/findings.json", "--evidence", f"{relative}/result.json",
+            "--evidence", f"{relative}/evidence-manifest.json",
+        ]
     return exit_code, value
 
 
@@ -580,6 +591,10 @@ def render_result(value: dict[str, Any]) -> str:
     if value.get("problem"):
         lines.append(f"PROBLEM: {value['problem']}")
     lines.append(f"Run directory: {value['runDirectory']}")
+    if value.get("journalCommand"):
+        import shlex
+
+        lines.append(f"Record it: {shlex.join(value['journalCommand'])}")
     lines.append(f"Network activity: {value['requestsSent']} requests to {target['address']}"
                  if value["requestsSent"] else "Network activity: none")
     return "\n".join(lines) + "\n"

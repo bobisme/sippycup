@@ -1433,7 +1433,7 @@ def verify_frozen_plan(plan: dict[str, Any], manifest_bytes: bytes) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="campaign")
+    parser = argparse.ArgumentParser(prog="sippycup campaign")
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser(
         "plan", help="validate, resolve, and print a side-effect-free frozen plan"
@@ -1484,22 +1484,30 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser(
         "run", help="execute a reviewed plan with capture and traffic watchdogs"
     )
-    run.add_argument("plan", type=Path)
-    run.add_argument("--manifest", type=Path, required=True)
-    run.add_argument("--run-root", type=Path, default=Path("work/runs"))
-    run.add_argument("--interface", default="any")
-    run.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME")
+    run.add_argument("plan", type=Path, help="the frozen plan from campaign plan --output")
+    run.add_argument("--manifest", type=Path, required=True,
+                        help="the exact manifest the plan was frozen from")
+    run.add_argument("--run-root", type=Path, default=Path("work/runs"),
+                        help="directory for the new run directory (default work/runs; use work/ENGAGEMENT/runs)")
+    run.add_argument("--interface", default="any",
+                        help="capture interface (default any; lo with --practice)")
+    run.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME",
+                        help="read credential REF from environment variable NAME (repeatable)")
     run.add_argument("--secret-fd", action="append", default=[], metavar="REF=FD")
     run.add_argument("--secret-provider")
     run.add_argument("--error-format", choices=("human", "json"), default="human")
     execute = commands.add_parser(
         "execute", help="run a frozen plan with capture, preflight, evidence, and SIP tools"
     )
-    execute.add_argument("plan", type=Path)
-    execute.add_argument("--manifest", type=Path, required=True)
-    execute.add_argument("--run-root", type=Path, default=Path("work/runs"))
-    execute.add_argument("--interface", default="any")
-    execute.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME")
+    execute.add_argument("plan", type=Path, help="the frozen plan from campaign plan --output")
+    execute.add_argument("--manifest", type=Path, required=True,
+                        help="the exact manifest the plan was frozen from")
+    execute.add_argument("--run-root", type=Path, default=Path("work/runs"),
+                        help="directory for the new run directory (default work/runs; use work/ENGAGEMENT/runs)")
+    execute.add_argument("--interface", default="any",
+                        help="capture interface (default any; lo with --practice)")
+    execute.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME",
+                        help="read credential REF from environment variable NAME (repeatable)")
     execute.add_argument("--secret-fd", action="append", default=[], metavar="REF=FD")
     execute.add_argument("--secret-provider")
     execute.add_argument(
@@ -1612,6 +1620,30 @@ def operator_path(path: Path | str) -> str:
         return "work" + text[len("/work"):]
     return text
 
+def _print_run_summary(args: argparse.Namespace, result: Any, run_directory: Path, plan: dict[str, Any]) -> None:
+    """Tell the operator, on stderr, what happened and what to do next.
+
+    Standard output stays exactly the run directory, which scripts read.
+    """
+    if getattr(args, "error_format", "human") == "json":
+        return
+    shown = operator_path(run_directory)
+    engagement = operator_path(Path(run_directory).parent.parent)
+    relative = f"{Path(run_directory).parent.name}/{Path(run_directory).name}"
+    lines = [
+        f"Campaign: {str(result.state).upper()} ({result.completed_steps} of "
+        f"{len(plan.get('steps', []))} step(s) completed; exit {result.exit_code})",
+        f"Run directory: {shown} (result.json, events.jsonl, capture.pcap, report.txt)",
+    ]
+    if (Path(run_directory).parent.parent / "engagement.json").is_file():
+        lines.append(
+            f"Record it: ./bin/sippycup journal add {engagement} --kind action "
+            f"--summary 'Campaign run: {result.state}' --evidence {relative}/result.json "
+            f"--evidence {relative}/evidence-manifest.json"
+        )
+    print("\n".join(lines), file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -1696,6 +1728,7 @@ def main(argv: list[str] | None = None) -> int:
             _emit_error(args, "invalid_plan_or_runtime", str(error))
             return 2
         print(operator_path(run_directory))
+        _print_run_summary(args, result, run_directory, plan)
         if result.exit_code:
             _emit_error(
                 args,
@@ -1746,6 +1779,7 @@ def main(argv: list[str] | None = None) -> int:
             _emit_error(args, "invalid_plan_or_runtime", str(error))
             return 2
         print(operator_path(run_directory))
+        _print_run_summary(args, result, run_directory, plan)
         if result.exit_code:
             _emit_error(
                 args,
@@ -1789,6 +1823,19 @@ def main(argv: list[str] | None = None) -> int:
         except (ManifestError, OSError) as error:
             _emit_error(args, "plan_write_failed", str(error))
             return 2
+        credentials = plan.get("authorization", {}).get("credentialRefs") or []
+        secret_hint = "".join(f" --secret-env {ref}=VARIABLE" for ref in credentials)
+        print(
+            f"Wrote frozen plan: {operator_path(args.output)} "
+            f"({len(plan.get('steps', []))} step(s); review it before running)\n"
+            f"Next: ./bin/sippycup campaign run {operator_path(args.output)} "
+            f"--manifest {operator_path(args.manifest)} --run-root {operator_path(args.manifest.parent / 'runs')} "
+            f"--interface any{secret_hint}\n"
+            "(VARIABLE: an environment variable that holds the password; against the practice target "
+            "add --practice before campaign and use --interface lo)\n"
+            "Network activity: none",
+            file=sys.stderr,
+        )
     else:
         json.dump(plan, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")

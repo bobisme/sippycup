@@ -96,7 +96,7 @@ class ProfileTests(unittest.TestCase):
             profile, now=datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)
         )
         self.assertFalse(result.ready)
-        self.assertIn("authorization has expired", result.errors)
+        self.assertTrue(any(error.startswith("authorization has expired (valid_until ") and "scope compile" in error for error in result.errors), result.errors)
 
     def test_bad_feature_dependency_is_blocked(self) -> None:
         profile = default_profile(name="stage", host="192.0.2.20")

@@ -273,6 +273,17 @@ class CheckTests(ScopeTestCase):
                 document = mutate(complete_scope(), path, value)
                 self.assertIn(code, self.codes(document, severity="error"))
 
+    def test_window_messages_say_when_and_what_to_do(self) -> None:
+        messages = {}
+        for path, value in (("authorization.valid_until", "2026-11-19T00:00:00Z"),
+                            ("authorization.valid_from", "2026-11-25T00:00:00+01:00")):
+            self.write_scope(mutate(complete_scope(), path, value))
+            for item in inspect(self.root / "scope.yaml", now=NOW).findings:
+                messages[item.code] = item.message
+        self.assertIn("(it ended 2026-11-19T00:00:00Z); send no traffic and ask the owner for a new written window",
+                      messages["scope.window_expired"])
+        self.assertIn("(it starts 2026-11-24T23:00:00Z); wait for it", messages["scope.window_not_started"])
+
     def test_ceilings_that_cannot_hold_one_call(self) -> None:
         for path, value in (
             ("limits.call_duration_seconds", 4),
@@ -932,6 +943,13 @@ class CommandWiringTests(unittest.TestCase):
 
 
 class SchemaAndExampleTests(ScopeTestCase):
+    def test_schema_security_check_ids_match_the_runnable_catalog(self) -> None:
+        from sippycup_checks.catalog import CHECKS
+
+        schema = json.loads((ROOT / "schemas" / "scope-v1.schema.json").read_text())
+        enum = schema["properties"]["security_checks"]["properties"]["approved"]["items"]["enum"]
+        self.assertEqual(sorted(enum), sorted(item.id for item in CHECKS if item.state == "runnable"))
+
     def test_schema_properties_match_the_validator_spec(self) -> None:
         schema = json.loads((ROOT / "schemas" / "scope-v1.schema.json").read_text())
         self.assertFalse(schema["additionalProperties"])

@@ -576,7 +576,15 @@ overwrite an existing plan, and removes its temporary file if planning is
 interrupted. Its parent directory must already exist. Omitting it prints JSON
 to stdout for inspection, but shell
 redirection itself can create an empty destination before `campaign` starts;
-use `--output` for an executable frozen plan.
+use `--output` for an executable frozen plan. With `--output`, standard error
+says which file was written, how many steps it holds, and the `campaign run`
+command to use next (with a `--secret-env REF=VARIABLE` for every credential
+reference).
+
+`campaign run` prints the run directory on standard output (scripts read it)
+and, on standard error, the final state, the steps completed, and, when the
+run root is directly inside an engagement directory, the `journal add`
+command that links the run.
 
 ## Supervised execution
 
@@ -596,7 +604,8 @@ Before any secret provider, directory, process, resolver, or packet is created,
 the command hashes the supplied manifest bytes, recompiles them using only the
 plan's frozen DNS pins and reduced maxima, and compares the entire canonical
 plan. A coherent hand-written plan cannot authorize itself. `campaign execute`
-is an alias with the same authorization lock and evidence lifecycle.
+is an alias with the same authorization lock and evidence lifecycle; use
+`campaign run`.
 
 A bundled runner is started once per step in a new process group and receives
 that step as a single JSON line on standard input. Active CLI execution does

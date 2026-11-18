@@ -286,6 +286,35 @@ class GatingTests(GuidedCallCase):
         self.assertNotIn("softphone", fakes.events)
         self.assertEqual(fakes.events.count("preflight"), 1)
         self.assertIn("no call placed", value["networkActivity"])
+        # The fixture target is not loopback: no practice hint.
+        self.assertFalse(any("--practice" in note for note in value["notes"]))
+
+    def test_codec_note_is_silent_without_captured_rtp_and_readable_with_it(self):
+        empty = {"negotiated": "PCMU", "negotiatedPayloadType": 0,
+                 "wire": {"mediaUsesNegotiated": False, "rtpPayloadTypes": {"outbound": {}, "inbound": {}}}}
+        self.assertEqual([], guided._codec_notes(empty, "media-outside-scope"))
+        mixed = {"negotiated": "PCMU", "negotiatedPayloadType": 0,
+                 "wire": {"mediaUsesNegotiated": False,
+                          "rtpPayloadTypes": {"outbound": {"0": 10, "8": 2}, "inbound": {}}}}
+        (note,) = guided._codec_notes(mixed, "fail")
+        self.assertIn("(outbound: pt 0 x10, pt 8 x2)", note)
+        self.assertNotIn("{", note)
+
+    def test_journal_command_names_capture_only_when_it_exists(self):
+        engagement = self.engagement
+        run_dir = engagement / "calls" / "run-1"
+        run_dir.mkdir(parents=True)
+        argv = guided._journal_command(engagement, run_dir, self.work, "cancelled", "p")
+        self.assertNotIn("calls/run-1/capture.pcap", argv)
+        self.assertIn("calls/run-1/result.json", argv)
+        (run_dir / "capture.pcap").write_bytes(b"")
+        argv = guided._journal_command(engagement, run_dir, self.work, "pass", "p")
+        self.assertIn("calls/run-1/capture.pcap", argv)
+
+    def test_loopback_preflight_note_points_at_practice(self):
+        self.assertIn("./bin/sippycup --practice", guided._loopback_preflight_note("127.0.0.3"))
+        self.assertTrue(guided._is_loopback("127.0.0.3"))
+        self.assertFalse(guided._is_loopback("192.0.2.10"))
 
     def test_capture_death_during_preflight_is_a_hard_failure(self):
         fakes = Fakes()
@@ -817,6 +846,17 @@ class SecretTests(GuidedCallCase):
         self.assertIsNone(fakes.softphone_call.account.registrar)
         secret_file.unlink()
         self.assert_no_secret_in_tree(self.work, SECRET)
+
+    def test_username_without_a_password_source_is_refused_before_any_side_effect(self):
+        # A REGISTER without a password can only fail and costs one credentialed
+        # attempt on the owner's account; refuse it before anything starts.
+        fakes = Fakes()
+        with self.assertRaisesRegex(guided.CallError, "--username needs the account password"):
+            self.run_call(fakes, username="alice")
+        self.assertEqual(fakes.events, [])
+        self.assertEqual(self.run_directories(), [])
+        code, _value = self.run_call(fakes, username="alice", register=False)
+        self.assertEqual(code, 0)
 
     def test_unsafe_password_is_refused_before_any_side_effect(self):
         environ = {"PASS": "has space"}

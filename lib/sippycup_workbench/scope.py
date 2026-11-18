@@ -27,6 +27,11 @@ from sippycup.tls_trust import TrustError, read_ca, validate_ca_reference, valid
 
 from .profile import ProfileError, _parse_time
 
+
+def _utc_text(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 SCOPE_VERSION = "sippycup.dev/scope/v1"
 CHECK_VERSION = "sippycup.dev/scope-check/v1"
 SCOPE_FILE = "scope.yaml"
@@ -309,6 +314,12 @@ contact:
 evidence:
   retention_days: null
   disclosure: null       # private | coordinated | public-after-remediation
+# Optional (question 24): only when the owner approves posture checks. Uncomment,
+# list the approved ids (./bin/sippycup checks list), and add security-checks to
+# test_scope.allowed_classes. scope check says what max_requests must cover.
+# security_checks:
+#   approved: [banner-disclosure, options-methods]
+#   max_requests: 2
 """
 
 
@@ -778,10 +789,13 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
     else:
         if start and v.now < start:
             v.add("scope.window_not_started", "expired", "authorization.valid_from",
-                  "validity window has not started yet", (CAMPAIGN,))
+                  f"validity window has not started yet (it starts {_utc_text(start)}); "
+                  "wait for it, then run scope compile again, or ask the owner for a corrected window",
+                  (CAMPAIGN,))
         if end and v.now >= end:
             v.add("scope.window_expired", "expired", "authorization.valid_until",
-                  "validity window has expired", (CAMPAIGN,))
+                  f"validity window has expired (it ended {_utc_text(end)}); send no traffic and ask "
+                  "the owner for a new written window, then record it here and compile again", (CAMPAIGN,))
 
     # signaling envelope
     signaling = v.section("signaling")

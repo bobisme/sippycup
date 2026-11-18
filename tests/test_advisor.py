@@ -57,6 +57,16 @@ class AdvisorTests(unittest.TestCase):
         self.assertIn("complete-target-authorization", identifiers)
         self.assertIn("create-torture-defaults-review", identifiers)
 
+    def test_advice_names_the_recorded_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "assessment"
+            initialize(root, title="Assessment", owner="Acme Voice")
+            result = assess(root, now=datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc))
+        review = next(a for a in result["nextActions"] if a["id"] == "create-torture-defaults-review")
+        self.assertEqual("Generate Acme Voice's torture-defaults review packet", review["title"])
+        self.assertIn("Acme Voice", review["argv"])
+        self.assertNotIn("Quad", json.dumps(result))
+
     def test_approved_inputs_stop_at_human_review_and_never_execute(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "assessment"

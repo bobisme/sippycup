@@ -226,7 +226,7 @@ class PortablePackTests(unittest.TestCase):
         base, run, pack = self.build()
         create_evidence_pack(run, pack, image_digest=IMAGE)
         reports = base / "ci-reports"
-        with self.assertRaisesRegex(EvidencePackError, "privacy findings block"):
+        with self.assertRaisesRegex(EvidencePackError, "privacy findings block.*--allow-privacy-findings"):
             export_ci(pack, reports)
         exported = export_ci(pack, reports, allow_privacy_findings=True)
         self.assertEqual(CI_VERSION, exported["apiVersion"])

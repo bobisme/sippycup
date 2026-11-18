@@ -340,6 +340,8 @@ class MatrixDependencies:
     environ: MutableMapping[str, str] = dataclasses.field(default_factory=lambda: os.environ)
     work_root: Path | None = None
     install_signal_handlers: bool = True
+    # One line per cell as it starts and ends, so a long grid shows progress.
+    progress: Callable[[str], None] | None = None
 
 
 def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple[int, dict[str, Any]]:
@@ -350,6 +352,11 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
     if not plan["ready"]:
         plan["state"] = "blocked"
         return EXIT_REFUSED, plan
+    if options.username and options.register and not (options.secret_env or options.secret_file):
+        raise MatrixError(
+            "--username needs the account password: add --secret-env NAME or "
+            "--secret-file work/PATH (or --no-register for an account that is not registered)"
+        )
     # Resolve the secret once: the variable leaves this process's
     # environment, and each call receives it only in its private mapping.
     secret: tuple[str, str] | None = None
@@ -407,13 +414,20 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
             call_options = _cell_options(
                 options, profile_paths[cell["transport"]], cell["codec"], cell["srtp"]
             )
+            label = f"cell {cell['index']}/{len(plan['cells'])} {cell['transport']}/{cell['codec']}/srtp {cell['srtp']}"
+            if deps.progress is not None:
+                deps.progress(f"Matrix: {label}: calling ...")
             try:
                 code, value = deps.execute(call_options, deps.call_dependencies(environ))
             except (guided.CallError, ProfileError) as error:
                 cell.update(status="refused", verdict="refused", exitCode=EXIT_REFUSED, reason=str(error))
                 stop = f"refused: {error}"
+                if deps.progress is not None:
+                    deps.progress(f"Matrix: {label}: refused: {error}")
                 continue
             cell.update(_cell_result(value, code))
+            if deps.progress is not None:
+                deps.progress(f"Matrix: {label}: {cell.get('verdict')}")
             if code in (130, 143):
                 cancelled.append(code)
             stop = _stop_reason(value)
@@ -603,6 +617,8 @@ def main(argv: Sequence[str] | None = None, deps: MatrixDependencies | None = No
             )
             code = EXIT_PASS if value["ready"] else EXIT_REFUSED
         else:
+            if deps is None:
+                deps = MatrixDependencies(progress=lambda line: print(line, file=sys.stderr, flush=True))
             code, value = run(options, deps)
     except (MatrixError, guided.CallError, ProfileError) as error:
         print(f"error: {error}", file=sys.stderr)

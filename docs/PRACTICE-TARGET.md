@@ -540,7 +540,7 @@ dress-rehearsal-proxy-cidr` runs it.
 
 ### The safety stop (stage 12)
 
-Both variants end with one deliberately failing leg, so you see the stop
+Every variant ends with one deliberately failing leg, so you see the stop
 once before it happens on the real engagement. It uses a separate throwaway
 engagement, `DIR-stop`, so the main engagement's owner report stays clean.
 Its answers make the most likely owner mistake: media "on the same address
@@ -776,7 +776,8 @@ gate) for every path through the practice proxy. Evidence is kept in
   resolver could not leave it either; the gate also requires the name not to
   resolve outside PJSUA's pinned namespace.
 - Only IPv4 loopback is supported. IPv6, NAT behavior, DTLS-SRTP, WebRTC,
-  video, DTMF verification, hold, and transfer are not exercised. Hold is
+  video, SIP INFO and in-band DTMF, hold, and transfer are not exercised
+  (RFC 4733 DTMF is, through the `dtmf` destination). Hold is
   not available as a fault destination; a codec mismatch is made with
   `--codec` instead (see "Rehearse failures").
 - The target answers one realistic shape of SIP edge (Asterisk with

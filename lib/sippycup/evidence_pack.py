@@ -684,7 +684,9 @@ def export_ci(
     privacy_status = _embedded_privacy_status(pack)
     if privacy_status == "blocked" and not allow_privacy_findings:
         raise EvidencePackError(
-            "privacy findings block default CI export; explicit acknowledgement required"
+            "privacy findings block default CI export; review them with "
+            "./bin/sippycup evidence lint RUN_DIR, then acknowledge them with "
+            "--allow-privacy-findings (no evidence artifact is exported unless named with --include-artifact)"
         )
     manifest, errors = _verify_content(pack)
     if manifest is None or errors:

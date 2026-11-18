@@ -573,7 +573,7 @@ class LauncherPreflightArgumentTests(unittest.TestCase):
             "--tls-server-name", "sippycup-practice", "--dry-run",
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
-        self.assertIn("verify as sippycup-practice with extra CA /work/practice/ca.crt",
+        self.assertIn("verify as sippycup-practice with extra CA work/practice/ca.crt",
                       verified.stdout)
         self.assertIn("Network activity: none", verified.stdout)
         unverified = self.preflight("127.0.0.2", "5061", "tls", "--tls-unverified", "--dry-run")
