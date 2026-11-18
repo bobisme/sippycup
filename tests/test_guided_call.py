@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import unittest
+import wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -469,9 +470,246 @@ class ExecutionTests(GuidedCallCase):
             return result
 
         code, value = self.run_call(Fakes(softphone=rejected))
-        self.assertEqual((code, value["verdict"]), (1, "call-not-answered"))
+        self.assertEqual((code, value["verdict"]), (1, "call-busy"))
         self.assertIsNone(value["softphone"]["rtp_rx_packets"])
         self.assertTrue(any("486" in note for note in value["notes"]))
+
+
+class FailureVerdictTests(GuidedCallCase):
+    """Verdicts the practice-target drill rehearses (bn-20l), with fake softphones."""
+
+    def softphone(self, **values):
+        def behavior(call, cancel):
+            for name, value in values.pop("files", {}).items():
+                getattr(call, name).write_text(value)
+            result = SoftphoneResult(destination_uri="sip:x")
+            result.started = result.dialed = True
+            for key, value in values.items():
+                setattr(result, key, value)
+            return result
+
+        return behavior
+
+    def answered(self, **values):
+        base = {
+            "answered": True, "final_status": 200, "rtp_tx_packets": 200, "rtp_rx_packets": 199,
+            "connected_seconds": 5.0, "hangup": "duration",
+            "timeline": [{"state": "CALLING", "at": 0.04}, {"state": "CONFIRMED", "at": 0.1}],
+        }
+        base.update(values)
+        return self.softphone(**base)
+
+    def test_every_rejection_status_gets_its_own_verdict(self):
+        expected = {
+            486: "call-busy", 600: "call-busy", 603: "call-declined", 401: "call-auth-failed",
+            407: "call-auth-failed", 403: "call-forbidden", 404: "call-not-found",
+            410: "call-not-found", 480: "call-unavailable", 503: "call-unavailable",
+            429: "call-rate-limited", 488: "call-media-not-acceptable",
+            606: "call-media-not-acceptable", 302: "call-redirected", 400: "call-rejected-4xx",
+            500: "call-rejected-5xx", 504: "call-rejected-5xx", 600 + 4: "call-not-found",
+            608: "call-rejected-6xx",
+        }
+        for status, verdict in expected.items():
+            with self.subTest(status=status):
+                code, value = self.run_call(Fakes(softphone=self.softphone(final_status=status)))
+                self.assertEqual((code, value["verdict"]), (1, verdict))
+                self.assertTrue(any(str(status) in note for note in value["notes"]), value["notes"])
+                self.assertIn(f"call.{verdict}", guided_explanations())
+
+    def test_answer_timeout_stays_call_not_answered_and_names_ringing(self):
+        timed_out = self.softphone(
+            final_status=487, error="no_answer_before_timeout", hangup="answer_timeout",
+            files={"console_file": "x state changed to EARLY (180 Ringing)\n"},
+        )
+        fakes = Fakes(softphone=timed_out)
+        deps = fakes.dependencies(self.work)
+        code, value = guided.execute(self.options(), deps)
+        self.assertEqual((code, value["verdict"]), (1, "call-not-answered"))
+        self.assertEqual(value["setup"]["provisional"], [180])
+        self.assertTrue(any("180" in note and "487" in note for note in value["notes"]), value["notes"])
+        rendered = guided.render_human(value)
+        self.assertIn("Explain: ./bin/sippycup explain call.call-not-answered", rendered)
+
+    def test_peer_bye_before_the_planned_duration_is_its_own_verdict(self):
+        code, value = self.run_call(
+            Fakes(softphone=self.answered(hangup="remote", connected_seconds=3.0)), duration=10
+        )
+        self.assertEqual((code, value["verdict"]), (1, "peer-hung-up-early"))
+        self.assertTrue(any("BYE after 3.0s of a planned 10s" in note for note in value["notes"]))
+        # A BYE within the tolerance of the planned end, or a hang-up by us, is still a pass.
+        code, value = self.run_call(
+            Fakes(softphone=self.answered(hangup="remote", connected_seconds=9.0)), duration=10
+        )
+        self.assertEqual((code, value["verdict"]), (0, "pass"))
+        code, value = self.run_call(
+            Fakes(softphone=self.answered(hangup="duration", connected_seconds=3.0)), duration=10
+        )
+        self.assertEqual(value["verdict"], "pass")
+
+    def test_digital_silence_with_packets_is_not_a_pass(self):
+        silence = self.answered()
+
+        def behavior(call, cancel):
+            result = silence(call, cancel)
+            with wave.open(str(call.record_file), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(8000)
+                output.writeframes(bytes(16000))
+            return result
+
+        code, value = self.run_call(Fakes(softphone=behavior))
+        self.assertEqual((code, value["verdict"]), (1, "silent-audio"))
+        self.assertTrue(any("digital silence" in note and "199" in note for note in value["notes"]))
+        code, value = self.run_call(Fakes(softphone=behavior), media_required=False)
+        self.assertEqual((code, value["verdict"]), (0, "pass"))
+
+    def test_setup_only_oracle_failure_is_slow_setup(self):
+        fakes = Fakes(softphone=self.answered(timeline=[
+            {"state": "CALLING", "at": 0.04}, {"state": "EARLY", "at": 0.05},
+            {"state": "CONFIRMED", "at": 12.05},
+        ]), oracle="fail")
+        original = fakes.run_offline
+
+        def run_offline(argv, stdout, stderr, environment):
+            code = original(argv, stdout, stderr, environment)
+            if "--expect" in argv:
+                document = json.loads(stdout.read_text())
+                document["assertions"] = [{
+                    "id": "dialog[0].media.timing", "verdict": "fail",
+                    "message": "setup exceeded timing window",
+                    "observed": {"state": "known", "value": "12013.043"},
+                }]
+                stdout.write_text(json.dumps(document))
+            return code
+
+        fakes.run_offline = run_offline
+        code, value = self.run_call(fakes)
+        self.assertEqual((code, value["verdict"]), (1, "slow-setup"))
+        self.assertEqual(value["setup"]["seconds"], 12.01)
+        self.assertEqual(value["oracle"]["failedDetails"][0]["observed"], "12013.043")
+        self.assertTrue(any("after 12.01s" in note for note in value["notes"]))
+        self.assertIn("Setup:        answered after 12.01s", guided.render_human(value))
+
+    def test_other_oracle_failures_stay_fail_with_the_cause_in_the_notes(self):
+        fakes = Fakes(softphone=self.answered(), oracle="fail")
+        original = fakes.run_offline
+
+        def run_offline(argv, stdout, stderr, environment):
+            code = original(argv, stdout, stderr, environment)
+            if "--expect" in argv:
+                document = json.loads(stdout.read_text())
+                document["assertions"] = [
+                    {"id": "dialog[0].media.sequence", "verdict": "fail",
+                     "message": "loss, duplication, reordering, or timestamp jump exceeded limits"},
+                    {"id": "dialog[0].media.timing", "verdict": "fail", "message": "setup"},
+                ]
+                stdout.write_text(json.dumps(document))
+            return code
+
+        fakes.run_offline = run_offline
+        code, value = self.run_call(fakes)
+        self.assertEqual((code, value["verdict"]), (1, "fail"))
+        self.assertTrue(any("timestamp jump" in note for note in value["notes"]))
+
+    def test_media_before_answer_is_not_mistaken_for_slow_setup(self):
+        fakes = Fakes(softphone=self.answered(files={
+            "console_file": "Call 0 state changed to EARLY (183 Session Progress)\n"}), oracle="fail")
+        original = fakes.run_offline
+
+        def run_offline(argv, stdout, stderr, environment):
+            code = original(argv, stdout, stderr, environment)
+            if "--expect" in argv:
+                document = json.loads(stdout.read_text())
+                document["assertions"] = [{
+                    "id": "dialog[0].media.timing", "verdict": "fail",
+                    "message": "media occurred before answer or after teardown",
+                }]
+                stdout.write_text(json.dumps(document))
+            return code
+
+        fakes.run_offline = run_offline
+        code, value = self.run_call(fakes)
+        self.assertEqual((code, value["verdict"]), (1, "fail"))
+        self.assertTrue(any("early media" in note for note in value["notes"]), value["notes"])
+
+    def test_183_is_reported_as_early_media_and_counts_stay_pjsua_counts(self):
+        files = {"console_file": "Call 0 state changed to EARLY (183 Session Progress)\n"}
+        code, value = self.run_call(Fakes(softphone=self.answered(files=files)))
+        self.assertTrue(value["setup"]["earlyMedia"])
+        self.assertEqual(value["setup"]["provisional"], [183])
+        self.assertIn("early media offered", guided.render_human(value))
+
+    def silent_peer(self, sdp_address):
+        log = (
+            "RX 300 bytes Response msg 200/INVITE/cseq=1 (rdata0x1) from UDP 127.0.0.2:5060:\n"
+            "SIP/2.0 200 OK\n\nv=0\nc=IN IP4 " + sdp_address + "\nm=audio 20002 RTP/AVP 0\n"
+            "--end msg--\n"
+        )
+        return self.softphone(
+            answered=True, final_status=200, rtp_tx_packets=27, rtp_rx_packets=0,
+            media_peer="-", error="media_peer_outside_scope", hangup="scope",
+            connected_seconds=0.5, files={"log_file": log},
+        )
+
+    def test_a_silent_far_end_is_not_reported_as_a_scope_breach(self):
+        # The driver treats PJSUA's "peer=-" placeholder as out of scope; the far end's
+        # own SDP, read from the PJSUA log, shows nothing arrived from an approved peer.
+        self.write_profile(profile_document(**{
+            "target.host": "127.0.0.2", "target.approved_addresses": ["127.0.0.2"],
+        }))
+        code, value = self.run_call(
+            Fakes(softphone=self.silent_peer("127.0.0.2"), oracle="fail", directions=("caller_to_callee",))
+        )
+        self.assertEqual((code, value["verdict"]), (1, "one-way-media"))
+        self.assertTrue(any("never learned a media address" in note for note in value["notes"]))
+
+    def test_an_unapproved_sdp_address_is_still_a_scope_breach(self):
+        self.write_profile(profile_document(**{
+            "target.host": "127.0.0.2", "target.approved_addresses": ["127.0.0.2"],
+        }))
+        code, value = self.run_call(Fakes(softphone=self.silent_peer("203.0.113.9")))
+        self.assertEqual((code, value["verdict"]), (1, "media-outside-scope"))
+        # No readable SDP at all stays fail-closed.
+        code, value = self.run_call(Fakes(softphone=self.softphone(
+            answered=True, final_status=200, media_peer="-", error="media_peer_outside_scope",
+        )))
+        self.assertEqual(value["verdict"], "media-outside-scope")
+        # A parseable peer outside the approved list is never reinterpreted.
+        code, value = self.run_call(Fakes(softphone=self.softphone(
+            answered=True, final_status=200, media_peer="203.0.113.9:4000",
+            error="media_peer_outside_scope", files={"log_file": (
+                "RX 3 bytes Response msg 200/INVITE/cseq=1 (r) from UDP x:1:\nc=IN IP4 127.0.0.2\n--end msg--\n"
+            )},
+        )))
+        self.assertEqual(value["verdict"], "media-outside-scope")
+
+
+def guided_explanations():
+    from sippycup_workbench.cli import EXPLANATIONS
+
+    return EXPLANATIONS
+
+
+class ExplainCoverageTests(unittest.TestCase):
+    def test_every_verdict_in_the_schema_has_an_explain_entry(self):
+        schema = json.loads((ROOT / "schemas" / "call-result-v1.schema.json").read_text())
+        verdicts = schema["properties"]["verdict"]["enum"]
+        explanations = guided_explanations()
+        for verdict in verdicts:
+            with self.subTest(verdict=verdict):
+                self.assertIn(f"call.{verdict}", explanations)
+                title, detail = explanations[f"call.{verdict}"]
+                self.assertTrue(title and detail)
+        known = {key for key in explanations if key.startswith("call.")}
+        self.assertEqual(known, {f"call.{item}" for item in verdicts})
+
+    def test_rejection_verdicts_are_all_in_the_schema(self):
+        schema = json.loads((ROOT / "schemas" / "call-result-v1.schema.json").read_text())
+        verdicts = set(schema["properties"]["verdict"]["enum"])
+        for status in range(300, 700):
+            with self.subTest(status=status):
+                self.assertIn(guided.rejection_verdict(status)[0], verdicts)
 
 
 class SecretTests(GuidedCallCase):

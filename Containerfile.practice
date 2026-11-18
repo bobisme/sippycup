@@ -83,6 +83,7 @@ RUN ./configure \
         --enable codec_ulaw \
         --enable format_pcm \
         --enable format_wav \
+        --enable func_timeout \
         --enable pbx_config \
         --enable res_pjproject \
         --enable res_pjsip \
@@ -152,6 +153,8 @@ COPY media/canary-v1/callee_to_caller.pcmu /var/lib/asterisk/sounds/sippycup/can
 COPY media/canary-v1/callee_to_caller.pcma /var/lib/asterisk/sounds/sippycup/canary.alaw
 
 RUN chmod 0755 /usr/local/bin/sippycup-practice-entrypoint \
+    && head -c 160000 /dev/zero | tr '\000' '\377' > /var/lib/asterisk/sounds/sippycup/silence.ulaw \
+    && head -c 160000 /dev/zero | tr '\000' '\325' > /var/lib/asterisk/sounds/sippycup/silence.alaw \
     && ldconfig \
     && if ldd /usr/sbin/asterisk /usr/lib/asterisk/modules/*.so | grep -q 'not found'; then \
         ldd /usr/sbin/asterisk /usr/lib/asterisk/modules/*.so | grep 'not found'; exit 1; \

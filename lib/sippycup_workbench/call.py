@@ -635,6 +635,13 @@ def _journal_command(
     return argv
 
 
+def _scalar_observed(item: dict[str, Any]) -> Any:
+    """The assertion's observed value when it is a plain number or string."""
+    observed = item.get("observed")
+    value = observed.get("value") if isinstance(observed, dict) else None
+    return value if isinstance(value, (int, float, str)) else None
+
+
 def _oracle_summary(path: Path, exit_code: int | None) -> dict[str, Any] | None:
     if exit_code is None:
         return None
@@ -648,6 +655,11 @@ def _oracle_summary(path: Path, exit_code: int | None) -> dict[str, Any] | None:
         "exit_code": exit_code,
         "summary": document.get("summary"),
         "failed": [item["id"] for item in document.get("assertions", []) if item.get("verdict") == "fail"],
+        "failedDetails": [
+            {"id": item["id"], "message": item.get("message"), "observed": _scalar_observed(item)}
+            for item in document.get("assertions", [])
+            if item.get("verdict") == "fail"
+        ],
         "unknown": [item["id"] for item in document.get("assertions", []) if item.get("verdict") == "unknown"],
         "stream_directions": sorted({item.get("direction") for item in streams if item.get("direction")}),
         "dialogs": len(document.get("dialogs", [])),
@@ -672,6 +684,171 @@ def _triage_summary(path: Path, exit_code: int | None) -> dict[str, Any] | None:
     }
 
 
+# A far end that sends BYE this much earlier than the planned duration (seconds)
+# is reported as having hung up early; smaller gaps are clock and timer slack.
+EARLY_HANGUP_TOLERANCE_SECONDS = 1.5
+_EARLY_STATE = re.compile(r"state changed to EARLY \((\d{3})")
+_SDP_RESPONSE = re.compile(
+    r"RX \d+ bytes Response msg (?:18\d|2\d\d)/INVITE[^\n]*\n(.*?)--end msg--", re.S
+)
+_SDP_CONNECTION = re.compile(r"^c=IN IP[46] (\S+)", re.M)
+
+
+def rejection_verdict(status: int) -> tuple[str, str]:
+    """Map a final SIP status of an unanswered call to (verdict, note).
+
+    The verdict names the cause for the statuses an operator meets most, and
+    otherwise the status class, so ``call-rejected-5xx`` is never mistaken for
+    a timeout.
+    """
+    if status in (486, 600):
+        return "call-busy", f"The far end answered {status}: the callee is busy."
+    if status == 603:
+        return "call-declined", "The far end answered 603 Decline: the callee refused the call."
+    if status in (401, 407):
+        return "call-auth-failed", (
+            f"The far end answered {status} and the credentials were not accepted, or none were "
+            "given (pass --username with --secret-env or --secret-file)."
+        )
+    if status == 403:
+        return "call-forbidden", "The far end answered 403 Forbidden: authenticated or not, the policy refuses this call."
+    if status in (404, 410, 604):
+        return "call-not-found", f"The far end answered {status}: no such destination."
+    if status in (480, 503):
+        return "call-unavailable", f"The far end answered {status}: the service or callee is temporarily unavailable."
+    if status == 429:
+        return "call-rate-limited", "The far end answered 429 Too Many Requests: back off before retrying."
+    if status in (488, 606):
+        return "call-media-not-acceptable", (
+            f"The far end answered {status}: it could not accept the offered media "
+            "(codec, encryption, or direction)."
+        )
+    if 300 <= status < 400:
+        return "call-redirected", f"The far end answered {status}; redirects are not followed."
+    group = f"{status // 100}xx"
+    return f"call-rejected-{group}", f"The far end rejected the call with final status {status}."
+
+
+def _provisional_text(statuses: Sequence[int]) -> str:
+    return ", ".join(str(item) for item in dict.fromkeys(statuses))
+
+
+def remote_sdp_addresses(log_text: str) -> list[str] | None:
+    """Connection addresses in the far end's SDP, from the PJSUA log, or None."""
+    found: list[str] = []
+    for block in _SDP_RESPONSE.finditer(log_text):
+        for address in _SDP_CONNECTION.findall(block.group(1)):
+            try:
+                rendered = str(ipaddress.ip_address(address))
+            except ValueError:
+                continue
+            if rendered not in found:
+                found.append(rendered)
+    return found or None
+
+
+def _peer_unknown_but_approved(
+    softphone: dict[str, Any], approved: Sequence[str], remote_media: Sequence[str] | None
+) -> bool:
+    """True when PJSUA had no media peer yet but the far end's SDP is wholly approved."""
+    from sippycup_softphone.driver import _peer_address
+
+    peer = softphone.get("media_peer")
+    if peer and _peer_address(str(peer)) is not None:
+        return False
+    if not remote_media or not approved:
+        return False
+    allowed = {str(ipaddress.ip_address(item)) for item in approved}
+    return all(item in allowed for item in remote_media)
+
+
+def derive_setup(softphone: dict[str, Any] | None, log_text: str = "") -> dict[str, Any] | None:
+    """Call setup facts: seconds to answer and the provisional responses seen.
+
+    ``seconds`` runs from the INVITE's dispatch to the call's confirmation, on
+    the softphone driver's clock. ``provisional`` lists the 18x statuses PJSUA
+    reported (180 Ringing, 183 Session Progress). RTP that arrives before the
+    answer (early media) is part of the PJSUA packet counts.
+    """
+    if softphone is None or not softphone.get("dialed"):
+        return None
+    timeline = softphone.get("timeline") or []
+    at = {item.get("state"): item.get("at") for item in timeline if isinstance(item, dict)}
+    start = at.get("CALLING", at.get("DIALED"))
+    seconds = None
+    if softphone.get("answered") and start is not None and at.get("CONFIRMED") is not None:
+        seconds = round(max(0.0, at["CONFIRMED"] - start), 3)
+    provisional = [int(item) for item in _EARLY_STATE.findall(log_text)]
+    return {
+        "seconds": seconds,
+        "provisional": list(dict.fromkeys(provisional)),
+        "earlyMedia": 183 in provisional,
+    }
+
+
+def _refine(
+    state: str,
+    verdict: str,
+    code: int,
+    notes: list[str],
+    *,
+    softphone: dict[str, Any] | None,
+    oracle: dict[str, Any] | None,
+    media_required: bool,
+    recording: dict[str, Any] | None,
+    requested_seconds: int | None,
+    setup: dict[str, Any] | None,
+) -> tuple[str, str, int, list[str]]:
+    """Replace a bare ``pass`` or ``fail`` with the specific cause the evidence shows."""
+    if state != "completed" or softphone is None:
+        return state, verdict, code, notes
+    if verdict == "fail" and oracle:
+        details = oracle.get("failedDetails") or []
+        for item in details:
+            notes.append(f"Oracle failed {item.get('id')}: {item.get('message')}")
+        if details and all(
+            str(item.get("id", "")).endswith("media.timing") and "setup exceeded" in str(item.get("message"))
+            for item in details
+        ):
+            seconds = (setup or {}).get("seconds")
+            notes.append(
+                "The call was answered"
+                + (f" after {seconds}s" if seconds is not None else "")
+                + ", later than the oracle's setup window (5s); the media itself was not judged late."
+            )
+            return state, "slow-setup", EXIT_NOT_PASS, notes
+        if details and (setup or {}).get("earlyMedia"):
+            notes.append(
+                "The far end sent 183 Session Progress, so it offered early media. The oracle's "
+                "timing and sequence assertions count RTP before the 200 OK as media before answer "
+                "or as a timestamp discontinuity at the answer; read assert.json before treating "
+                "this as a media fault."
+            )
+        return state, verdict, code, notes
+    if verdict != "pass":
+        return state, verdict, code, notes
+    connected = softphone.get("connected_seconds")
+    if (
+        softphone.get("hangup") == "remote"
+        and requested_seconds is not None
+        and connected is not None
+        and connected < requested_seconds - EARLY_HANGUP_TOLERANCE_SECONDS
+    ):
+        notes.append(
+            f"The far end sent BYE after {connected:.1f}s of a planned {requested_seconds}s call "
+            "(hangup by the peer, not the caller)."
+        )
+        return state, "peer-hung-up-early", EXIT_NOT_PASS, notes
+    if media_required and recording and recording.get("silent") is True:
+        notes.append(
+            f"RTP flowed in both directions (PJSUA sent {softphone.get('rtp_tx_packets')}, "
+            f"received {softphone.get('rtp_rx_packets')} packets) but heard.wav is digital silence "
+            f"(peak {recording.get('peak')}): the far end sent packets that carry no audio."
+        )
+        return state, "silent-audio", EXIT_NOT_PASS, notes
+    return state, verdict, code, notes
+
+
 def classify(
     *,
     cancelled_signal: int | None,
@@ -683,6 +860,45 @@ def classify(
     network_mode: str,
     host: str,
     tls_media: dict[str, Any] | None = None,
+    recording: dict[str, Any] | None = None,
+    requested_seconds: int | None = None,
+    setup: dict[str, Any] | None = None,
+    approved: Sequence[str] = (),
+    remote_media: Sequence[str] | None = None,
+) -> tuple[str, str, int, list[str]]:
+    """Return (state, verdict, exit code, notes): the core verdict, then refinements.
+
+    The refinements (:func:`_refine`) split a bare ``fail`` or ``pass`` into
+    the specific cause the evidence shows: a slow setup, a far end that hung
+    up early, or audio that is digital silence.
+    """
+    state, verdict, code, notes = _classify_core(
+        cancelled_signal=cancelled_signal, stop_reason=stop_reason, preflight_ok=preflight_ok,
+        softphone=softphone, oracle=oracle, media_required=media_required,
+        network_mode=network_mode, host=host, tls_media=tls_media, setup=setup,
+        approved=approved, remote_media=remote_media,
+    )
+    return _refine(
+        state, verdict, code, notes, softphone=softphone, oracle=oracle,
+        media_required=media_required, recording=recording,
+        requested_seconds=requested_seconds, setup=setup,
+    )
+
+
+def _classify_core(
+    *,
+    cancelled_signal: int | None,
+    stop_reason: str | None,
+    preflight_ok: bool | None,
+    softphone: dict[str, Any] | None,
+    oracle: dict[str, Any] | None,
+    media_required: bool,
+    network_mode: str,
+    host: str,
+    tls_media: dict[str, Any] | None = None,
+    setup: dict[str, Any] | None = None,
+    approved: Sequence[str] = (),
+    remote_media: Sequence[str] | None = None,
 ) -> tuple[str, str, int, list[str]]:
     """Return (state, verdict, exit code, notes). Unknown stays unknown.
 
@@ -702,6 +918,19 @@ def classify(
     if softphone is None:
         return "failed", "call-not-placed", EXIT_NOT_PASS, notes
     error = softphone.get("error")
+    if error == "media_peer_outside_scope" and _peer_unknown_but_approved(
+        softphone, approved, remote_media
+    ):
+        # PJSUA prints ``peer=-`` until the first RTP packet arrives, and the
+        # softphone driver treats that placeholder as out of scope. The far
+        # end's own SDP (from the PJSUA log) names only approved addresses,
+        # so nothing arrived from it: a silent far end, not a scope breach.
+        notes.append(
+            "PJSUA never learned a media address for the far end because no RTP arrived from it, "
+            "and the softphone driver hung up the call early; the far end's SDP named only "
+            f"approved address(es): {', '.join(remote_media or ())}."
+        )
+        error = None
     if error == "media_peer_outside_scope":
         notes.append("The negotiated media peer is not an approved address; the call was hung up.")
         return "failed", "media-outside-scope", EXIT_NOT_PASS, notes
@@ -724,6 +953,18 @@ def classify(
         return "failed", "registration-failed", EXIT_NOT_PASS, notes
     if not softphone.get("answered"):
         status = softphone.get("final_status")
+        provisional = (setup or {}).get("provisional") or []
+        if error == "no_answer_before_timeout":
+            notes.append(
+                "No final response arrived before the answer timeout"
+                + (f" ({_provisional_text(provisional)} was received)" if provisional else " (no provisional response was received)")
+                + f"; the caller cancelled the call (final status {status})."
+            )
+            return "failed", "call-not-answered", EXIT_NOT_PASS, notes
+        if status is not None and status >= 300:
+            verdict, note = rejection_verdict(status)
+            notes.append(note)
+            return "failed", verdict, EXIT_NOT_PASS, notes
         if status is not None:
             notes.append(f"The call was not answered; final SIP status {status}.")
         return "failed", "call-not-answered", EXIT_NOT_PASS, notes
@@ -1238,6 +1479,14 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
         if transport == "tls"
         else None
     )
+    log_text = ""
+    if softphone_result:
+        for name in ("softphone-console.txt", "softphone.log"):
+            try:
+                log_text += (run_dir / name).read_text(encoding="utf-8", errors="replace") + "\n"
+            except OSError:
+                pass
+    setup = derive_setup(softphone_result, log_text)
     state, verdict, exit_code, notes = classify(
         cancelled_signal=cancel_signal[0] if cancel_signal else None,
         stop_reason=stop_reason,
@@ -1248,6 +1497,11 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
         network_mode=network_mode,
         host=host,
         tls_media=tls_media,
+        recording=recording,
+        requested_seconds=duration,
+        setup=setup,
+        approved=approved,
+        remote_media=remote_sdp_addresses(log_text),
     )
     notes.insert(0, _network_note(network_mode, host))
     if internal_error is not None:
@@ -1319,6 +1573,7 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
                 "hangup", "error", "cancelled", "tls_verified", "tls_server_name",
             )
         },
+        "setup": setup,
         "triage": triage,
         "oracle": oracle,
         "recording": recording,
@@ -1471,8 +1726,19 @@ def render_human(value: dict[str, Any]) -> str:
             f"  Oracle:       {oracle.get('verdict') or 'no result'}"
             + (f" (pass={summary.get('pass')} fail={summary.get('fail')} unknown={summary.get('unknown')})" if summary else "")
         )
+    setup = value.get("setup")
+    if setup:
+        seconds = setup.get("seconds")
+        lines.append(
+            "  Setup:        "
+            + (f"answered after {seconds}s" if seconds is not None else "not answered")
+            + (f", provisional {_provisional_text(setup['provisional'])}" if setup.get("provisional") else ", no provisional response")
+            + (" (early media offered)" if setup.get("earlyMedia") else "")
+        )
     for note in value.get("notes", []):
         lines.append(f"NOTE: {note}")
+    if value["verdict"] != "pass":
+        lines.append(f"Explain: ./bin/sippycup explain call.{value['verdict']}")
     lines.append(f"Run directory: {value['runDirectory']}")
     lines.append(f"Record it: {shlex.join(value['journalCommand'])}")
     lines.append(f"Network activity: {value['networkActivity']}")

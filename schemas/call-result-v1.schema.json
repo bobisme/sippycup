@@ -50,6 +50,21 @@
         "internal-error",
         "tls-not-verified",
         "tls-name-pinning-failed",
+        "call-busy",
+        "call-declined",
+        "call-auth-failed",
+        "call-forbidden",
+        "call-not-found",
+        "call-unavailable",
+        "call-rate-limited",
+        "call-media-not-acceptable",
+        "call-redirected",
+        "call-rejected-4xx",
+        "call-rejected-5xx",
+        "call-rejected-6xx",
+        "peer-hung-up-early",
+        "silent-audio",
+        "slow-setup",
         "cancelled",
         "blocked"
       ]
@@ -125,6 +140,15 @@
         "softphoneDetail": {"type": ["string", "null"]},
         "connectsTo": {"type": "string"},
         "media": {"type": ["object", "null"]}
+      }
+    },
+    "setup": {
+      "type": ["object", "null"],
+      "description": "Call setup facts: seconds from INVITE to answer on the softphone driver's clock, the 18x statuses PJSUA reported (180 Ringing, 183 Session Progress), and whether a 183 (early media offered) was seen. Early-media RTP is included in the softphone's packet counts. Null when no call was dialed.",
+      "properties": {
+        "seconds": {"type": ["number", "null"]},
+        "provisional": {"type": "array", "items": {"type": "integer"}},
+        "earlyMedia": {"type": "boolean"}
       }
     },
     "triage": {"type": ["object", "null"]},

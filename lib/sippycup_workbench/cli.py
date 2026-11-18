@@ -30,6 +30,7 @@ from .profile import (
     rehearse,
     write_profile,
 )
+from .call_explanations import CALL_EXPLANATIONS
 from .scope import ScopeError, create_scope, inspect as inspect_scope, scope_path_for
 from .scope_derive import compile_scope
 from .scope_questions import render_questions
@@ -61,6 +62,8 @@ EXPLANATIONS = {
         "The current environment is not the complete Sippycup image. Rebuild the image or run through bin/sippycup.",
     ),
 }
+
+EXPLANATIONS.update(CALL_EXPLANATIONS)
 
 
 def _emit(value: dict[str, Any], output_format: str) -> None:

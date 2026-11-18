@@ -155,14 +155,36 @@ identifiers; use the evidence privacy workflow before sharing anything.
 | `pass` | Call answered, oracle passed. | 0 |
 | `fail`, `inconclusive` | Call answered; oracle failed or could not decide. | 1 |
 | `possible-nat-one-way-media` | Signaling succeeded and RTP was sent, but no inbound RTP was observed in isolated mode. This is consistent with NAT and is not, by itself, a target defect. | 1 |
-| `one-way-media` | The same observation without NAT in the path. | 1 |
-| `preflight-failed`, `registration-failed`, `call-not-answered`, `call-error`, `media-outside-scope` | The run stopped at that step. | 1 |
+| `one-way-media` | The same observation without NAT in the path (loopback or host network). A far end that sends no RTP at all lands here: PJSUA never learns its media address, the softphone driver hangs the call up early, and `call` confirms from the far end's own SDP that the address was approved before it reports this instead of `media-outside-scope`. | 1 |
+| `slow-setup` | Answered, and the only failed assertion is the oracle's 5 s setup window. `setup.seconds` says how long ringing took. | 1 |
+| `peer-hung-up-early` | Answered and healthy, but the far end sent BYE more than 1.5 s before the planned duration. | 1 |
+| `silent-audio` | RTP flowed both ways but `heard.wav` is digital silence. Packet counts alone would have passed. Skipped with `--no-media-required`. | 1 |
+| `call-not-answered` | No final response before `--answer-timeout`; the caller cancelled. The notes say whether 180 or 183 was received. | 1 |
+| `call-busy` (486, 600), `call-declined` (603), `call-forbidden` (403), `call-not-found` (404, 410, 604), `call-unavailable` (480, 503), `call-rate-limited` (429), `call-media-not-acceptable` (488, 606), `call-auth-failed` (401, 407), `call-redirected` (3xx) | The far end refused the call with that final status; the status is in the notes. | 1 |
+| `call-rejected-4xx`, `call-rejected-5xx`, `call-rejected-6xx` | Any other final rejection; the status class is in the code. | 1 |
+| `preflight-failed`, `registration-failed`, `call-error`, `media-outside-scope` | The run stopped at that step. | 1 |
 | `capture-failed`, `capture-died`, `authorization-lapsed`, `internal-error` | The run stopped for safety; see `notes` in the result. | 1 |
 | `cancelled` | Ctrl-C or SIGTERM. | 130 / 143 |
 | `blocked` | Refused before anything started; no run directory. | 2 |
 
 | `tls-not-verified` | TLS verification failed or was not confirmed; PJSUA sent no SIP request on that connection. | 1 |
 | `tls-name-pinning-failed` | The reviewed name could not be pinned to the literal address; PJSUA was not started. | 1 |
+
+Every verdict has `./bin/sippycup explain call.VERDICT`. `result.json` also
+carries `setup` (seconds from INVITE to answer, the 18x statuses seen, and
+whether a 183 offered early media; early-media RTP is included in the PJSUA
+packet counts) and `oracle.failedDetails` (each failed assertion's id,
+message, and scalar observed value).
+
+### Rehearse failures
+
+The practice target has destinations that fail on purpose, and
+`./bin/sippycup practice-target drill` runs the guided call against each one
+and prints what the server did, the verdict, the expected verdict, and the
+`explain` text. Do this once before an engagement so the failure verdicts are
+familiar (`docs/PRACTICE-TARGET.md`, "Rehearse failures"). The oracle is strict
+by design: `earlymedia` reports `fail` because Asterisk re-bases the RTP
+timestamp when it answers an early-media call.
 
 ### TLS calls
 
