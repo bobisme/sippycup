@@ -273,7 +273,12 @@ class DiagnoseCallTests(unittest.TestCase):
         self.assertFalse(any("--srtp" in c for c in commands), "profile does not approve SRTP")
         fx2 = Fixture(self.root, "20260101T000000.000000Z-488b")
         fx2.call("call-media-not-acceptable", softphone={"final_status": 488}, profile_features={"srtp": True})
-        self.assertTrue(any("--srtp mandatory" in c for c in fx2.commands(fx2.diagnose())))
+        data2 = fx2.diagnose()
+        self.assertTrue(any("--srtp mandatory" in c for c in fx2.commands(data2)))
+        self.assertFalse(any("--codec" in c for c in fx2.commands(data2)), "the default offer already held both G.711 codecs")
+        fx3 = Fixture(self.root, "20260101T000000.000000Z-488c")
+        data3 = fx3.call("call-media-not-acceptable", softphone={"final_status": 488}).diagnose()
+        self.assertTrue(data3["stopAndAsk"], "no experiment the profile approves: ask the owner")
 
     def test_srtp_mandatory_failure_is_their_side_and_never_offers_plain_without_saying_so(self) -> None:
         self.fx.call("srtp-not-negotiated", state="completed", softphone={"final_status": 488, "answered": False},
