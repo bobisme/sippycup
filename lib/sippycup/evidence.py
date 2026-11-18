@@ -37,7 +37,9 @@ EXPECTED_ARTIFACTS = {
 }
 CAPTURE_SUFFIXES = {".pcap", ".pcapng"}
 AUDIO_SUFFIXES = {".wav", ".wave", ".flac", ".mp3", ".ogg", ".opus", ".pcm", ".raw", ".ulaw", ".alaw", ".au"}
-AUTHORIZATION = re.compile(br"(?im)^(?:proxy-)?authorization\s*:\s*\S.+$")
+# Horizontal whitespace only: \s would cross the line break and report a YAML
+# `authorization:` section (target profiles, manifests) as SIP credentials.
+AUTHORIZATION = re.compile(br"(?im)^(?:proxy-)?authorization[ \t]*:[ \t]*\S.+$")
 CALL_ID = re.compile(br"(?im)^call-id\s*:\s*[^\r\n]+")
 SIP_USER = re.compile(br"(?i)sips?:([^@;>\s]+)@")
 PHONE_IDENTIFIER = re.compile(br"(?<![0-9])\+[0-9][0-9() -]{5,}[0-9](?![0-9])")

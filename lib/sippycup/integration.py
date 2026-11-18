@@ -565,6 +565,10 @@ def execute_campaign(
                 "-U",
                 "--immediate-mode",
                 "-n",
+                # Keep the capture owned by the invoking user. Debian's
+                # tcpdump otherwise drops to its own account, which a rootless
+                # runtime maps to a subordinate UID the host user cannot manage.
+                *(("-Z", "root") if os.geteuid() == 0 else ()),
                 "-w",
                 str(capture_path),
                 plan["captureFilter"],

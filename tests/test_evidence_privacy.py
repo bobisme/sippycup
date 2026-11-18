@@ -296,5 +296,19 @@ class PrivacyLintTests(unittest.TestCase):
             self.assertFalse(json.loads(blocked.stdout)["passed"])
 
 
+class AuthorizationPatternTests(unittest.TestCase):
+    def test_yaml_authorization_section_is_not_sip_credential_material(self):
+        from sippycup.evidence import AUTHORIZATION
+
+        profile = b"name: stage\nauthorization:\n  status: approved\n  approval_id: x\n"
+        self.assertIsNone(AUTHORIZATION.search(profile))
+        self.assertIsNotNone(
+            AUTHORIZATION.search(b'Via: x\r\nAuthorization: Digest username="a"\r\n')
+        )
+        self.assertIsNotNone(
+            AUTHORIZATION.search(b'Proxy-Authorization : Digest nonce="n"\r\n')
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
