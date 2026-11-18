@@ -249,6 +249,10 @@ class SoftphoneResult:
     # The media-scope rules and which one admitted the media peer (see
     # media_scope_decision); ``None`` when the call had no media scope.
     media_scope: dict[str, Any] | None = None
+    # bn-2jg: the first destination outside the scope that PJSUA sent to
+    # (signaling) or that the far end's SDP named (media), from the message
+    # log watched during the call; ``None`` when there was none.
+    scope_violation: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -652,6 +656,197 @@ def media_scope_decision(call: SoftphoneCall, peer: str | None) -> dict[str, Any
 def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
     decision = media_scope_decision(call, peer)
     return decision is not None and decision["inScope"] is False
+
+
+# -- bn-2jg: watch PJSUA's message log while the call runs ----------------------
+#
+# PJSUA's "peer=" (above) is where RTP came FROM, so a far end that sends
+# from an approved address, or sends nothing, while its SDP points PJSUA's
+# RTP/RTCP elsewhere, was never caught; and PJSIP follows a far end's
+# Record-Route/Contact for ACK and BYE despite the global ``--outbound``
+# route. The driver therefore tails the level-5 message log (written as each
+# message is sent or received) and checks every destination PJSUA transmits
+# SIP to and every media destination the far end's SDP names.
+
+_LOG_MESSAGE = re.compile(r"\b(TX|RX) \d+ bytes (?:Request|Response) msg \S+")
+_TX_DESTINATION = re.compile(
+    r"\bTX \d+ bytes (?:Request|Response) msg \S+ \([^)]*\) to (?:UDP|TCP|TLS)6? "
+    r"(\[[^\]]*\]|[^\s:\[\]]+):\d+"
+)
+_SDP_LINE = re.compile(r"^([a-z])=(.*)$")
+
+
+def tx_destination(line: str) -> str | None:
+    """The host PJSUA logged it sent a SIP message to, or ``None``."""
+    match = _TX_DESTINATION.search(line)
+    if match is None:
+        return None
+    return match.group(1).strip("[]")
+
+
+def signaling_destination_allowed(call: SoftphoneCall, host: str) -> bool:
+    """Only the literal target, or the reviewed TLS name pinned to it."""
+    if call.tls_server_name is not None and host == call.tls_server_name:
+        return True
+    try:
+        return ipaddress.ip_address(host) == ipaddress.ip_address(_literal_address(call.host))
+    except (ValueError, SoftphoneError):
+        return False
+
+
+def sdp_media_destinations(lines: Sequence[str]) -> list[tuple[str, int, str]]:
+    """``(address, port, "RTP"|"RTCP")`` every active stream of an SDP sends to.
+
+    A media-level ``c=`` overrides the session-level one; ``a=rtcp`` with an
+    address moves RTCP; port 0 (a rejected stream) and the unspecified hold
+    address send nothing. Addresses are returned as written (a name stays a
+    name, so the caller refuses it).
+    """
+    session: str | None = None
+    streams: list[dict[str, Any]] = []
+    for raw in lines:
+        match = _SDP_LINE.match(raw.strip())
+        if match is None:
+            continue
+        kind, value = match.group(1), match.group(2).strip()
+        if kind == "m":
+            parts = value.split()
+            port_text = parts[1].split("/", 1)[0] if len(parts) > 1 else ""
+            port = int(port_text) if port_text.isdigit() else -1
+            streams.append({"port": port, "c": None, "rtcp": None})
+        elif kind == "c":
+            parts = value.split()
+            address = parts[2].split("/", 1)[0] if len(parts) >= 3 else value
+            if streams:
+                streams[-1]["c"] = address
+            else:
+                session = address
+        elif kind == "a" and value.startswith("rtcp:") and streams:
+            parts = value[len("rtcp:"):].split()
+            rtcp_port = int(parts[0]) if parts and parts[0].isdigit() else -1
+            rtcp_address = parts[3] if len(parts) >= 4 else None
+            streams[-1]["rtcp"] = (rtcp_address, rtcp_port)
+    found: list[tuple[str, int, str]] = []
+    for stream in streams:
+        if stream["port"] == 0:
+            continue
+        address = stream["c"] if stream["c"] is not None else session
+        if address is None:
+            continue
+        candidates = [(address, stream["port"], "RTP")]
+        if stream["rtcp"] is not None and stream["rtcp"][0] is not None:
+            candidates.append((stream["rtcp"][0], stream["rtcp"][1], "RTCP"))
+        for item in candidates:
+            try:
+                if ipaddress.ip_address(item[0]).is_unspecified:
+                    continue
+            except ValueError:
+                pass
+            if item not in found:
+                found.append(item)
+    return found
+
+
+def media_destination_refusal(call: SoftphoneCall, destination: tuple[str, int, str]) -> str | None:
+    """Why a media destination is outside the call's media scope, or ``None``."""
+    address, port, what = destination
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return f"{what} destination {address!r} is not a literal address"
+    if call.allowed_media_addresses is not None or call.allowed_media_networks is not None:
+        admitted = any(
+            ipaddress.ip_address(item) == parsed for item in call.allowed_media_addresses or ()
+        ) or any(
+            ipaddress.ip_network(item).version == parsed.version and parsed in ipaddress.ip_network(item)
+            for item in call.allowed_media_networks or ()
+        )
+        if not admitted:
+            return f"{what} destination {address} is not an approved address or media network"
+    if what == "RTP" and call.allowed_media_ports is not None:
+        start, end = call.allowed_media_ports
+        if not start <= port <= end:
+            return f"RTP port {port} at {address} is outside the approved media ports {start}-{end}"
+    return None
+
+
+class _ScopeWatch:
+    """Incrementally read PJSUA's message log and report the first violation."""
+
+    def __init__(self, path: Path, call: SoftphoneCall) -> None:
+        self._path = path
+        self._call = call
+        self._offset = 0
+        self._partial = ""
+        self._message: dict[str, Any] | None = None
+        self._media = (
+            call.allowed_media_addresses is not None
+            or call.allowed_media_networks is not None
+            or call.allowed_media_ports is not None
+        )
+
+    def poll(self) -> list[dict[str, Any]]:
+        """Every violation in the log lines written since the last poll."""
+        if self._offset >= MAX_LOG_BYTES:
+            return []
+        try:
+            descriptor = os.open(self._path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            return []
+        try:
+            os.lseek(descriptor, self._offset, os.SEEK_SET)
+            chunk = os.read(descriptor, min(1 << 20, MAX_LOG_BYTES - self._offset))
+        finally:
+            os.close(descriptor)
+        if not chunk:
+            return []
+        self._offset += len(chunk)
+        *complete, self._partial = (self._partial + chunk.decode("utf-8", "replace")).split("\n")
+        found: list[dict[str, Any]] = []
+        for line in complete:
+            violation = self._line(line.rstrip("\r"))
+            if violation is not None:
+                found.append(violation)
+        return found
+
+    def _line(self, line: str) -> dict[str, Any] | None:
+        start = _LOG_MESSAGE.search(line)
+        if start is not None:
+            self._message = {"direction": start.group(1), "header": line.strip(), "lines": []}
+            if start.group(1) == "TX" and self._call.pin_signaling:
+                host = tx_destination(line)
+                if host is not None and not signaling_destination_allowed(self._call, host):
+                    return {
+                        "kind": "signaling", "what": "SIP", "address": host,
+                        "detail": f"PJSUA sent SIP to {host}, which is not the approved target "
+                                  f"{self._call.host}",
+                    }
+            return None
+        if self._message is None:
+            return None
+        if "--end msg--" not in line:
+            if len(self._message["lines"]) < 400:
+                self._message["lines"].append(line)
+            return None
+        message, self._message = self._message, None
+        if message["direction"] != "RX" or not self._media:
+            return None
+        for destination in sdp_media_destinations(message["lines"]):
+            reason = media_destination_refusal(self._call, destination)
+            if reason is not None:
+                return {
+                    "kind": "media", "what": destination[2], "address": destination[0],
+                    "port": destination[1], "detail": f"the far end's SDP sends {reason}",
+                }
+        return None
+
+
+def _kill_now(process: subprocess.Popen[bytes]) -> None:
+    """SIGKILL PJSUA's process group: a graceful quit would hang up (BYE) along the bad route."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def codec_matches(entry: Mapping[str, Any], requested: str) -> bool:
@@ -1216,11 +1411,32 @@ def place_call(
                 if _DURATION_EXCEEDED.search(line):
                     hangup_by = hangup_by or "duration"
 
+        watch = _ScopeWatch(raw_log, call)
         while True:
             consume()
             now = clock()
             if process.poll() is not None:
                 break
+            violations = watch.poll()
+            signaling = next((item for item in violations if item["kind"] == "signaling"), None)
+            media = next((item for item in violations if item["kind"] == "media"), None)
+            if signaling is not None and result.error != "signaling_outside_scope":
+                # PJSIP already sent that one message; stop it before it
+                # sends anything else (a BYE or quit would follow the same
+                # route). The far end's dialog then times out by itself.
+                result.scope_violation = signaling
+                result.error = "signaling_outside_scope"
+                stopping = True
+                hangup_by = hangup_by or "scope"
+                _kill_now(process)
+                continue
+            if media is not None and result.scope_violation is None:
+                result.scope_violation = media
+                if not stopping:
+                    stopping = True
+                    result.error = "media_peer_outside_scope"
+                    hang_up("scope")
+                    continue
             if not stopping:
                 reason = None
                 if cancel is not None and cancel.is_set():
@@ -1327,6 +1543,15 @@ def place_call(
                 break
             time.sleep(poll_interval)
         process.wait(timeout=QUIT_TIMEOUT_SECONDS)
+        # Whatever PJSUA logged after the last poll (for example while it quit).
+        for violation in watch.poll():
+            if result.scope_violation is None or (
+                violation["kind"] == "signaling" and result.scope_violation["kind"] != "signaling"
+            ):
+                result.scope_violation = violation
+                result.error = (
+                    "signaling_outside_scope" if violation["kind"] == "signaling" else "media_peer_outside_scope"
+                )
         result.exit_code = process.returncode
         console.join(timeout=1.0)
         consume()
@@ -1383,6 +1608,10 @@ def place_call(
         if result.error is None and _media_outside_scope(call, result.media_peer):
             result.error = "media_peer_outside_scope"
         result.media_scope = media_scope_decision(call, result.media_peer)
+        if result.scope_violation is not None and result.scope_violation["kind"] == "media" and result.media_scope:
+            # The far end's SDP, not the received-RTP peer, decided this.
+            result.media_scope["inScope"] = False
+            result.media_scope["sdpRefused"] = dict(result.scope_violation)
         if result.final_status is None and result.disconnect_status is not None and not result.answered:
             result.final_status = result.disconnect_status
         _observe_media_facts(call, result, raw_text, raw_text + "\n" + console_text)

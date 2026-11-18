@@ -19,7 +19,7 @@ from typing import Any
 
 MAX_JSON_BYTES = 1024 * 1024
 # Call verdicts where Sippycup stopped the run itself to stay inside the scope.
-SAFETY_STOPS = frozenset({"media-outside-scope"})
+SAFETY_STOPS = frozenset({"media-outside-scope", "signaling-outside-scope"})
 MAX_CONTAINERS = 64
 MAX_RUNS_PER_CONTAINER = 500
 MAX_FILES_LISTED = 200

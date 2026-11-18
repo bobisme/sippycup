@@ -1010,6 +1010,41 @@ def h_scope_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     d.step("Read the reference text for this verdict.", run.cmd_explain())
 
 
+def h_signaling_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
+    violation = run.softphone.get("scope_violation") or {}
+    where = d.red.text(violation.get("destination") or violation.get("address") or "an address outside the approval")
+    d.stage("safety stop", "the far end steered our in-dialog signaling to an address outside the approved scope")
+    d.outcome(
+        f"Safety stop: after the answer, the route the far end supplied (Record-Route or Contact) pointed our next "
+        f"request at {where}, which is not the approved signaling address; the softphone was killed at once "
+        "instead of hanging up along that route."
+    )
+    d.attribute(
+        OUR, MEDIUM,
+        [
+            "Our approved scope is incomplete for this platform, not a platform failure: the toolbox's scope rule worked as designed. "
+            "The platform routes in-dialog requests (ACK, BYE) through an address the owner did not list.",
+            "Because the softphone was killed, no BYE was sent: the far end ends the call by its own timers.",
+        ],
+        [
+            "Only the owner can say whether that address is theirs; a proxy cluster or SBC often answers from one address and record-routes another.",
+        ],
+    )
+    d.stop_and_ask(
+        "Stop and ask the owner which signaling addresses may appear in Record-Route and Contact for this platform, "
+        "and tell them one call was left for their side to time out; do not edit the profile to admit the address yourself."
+    )
+    from .core import command
+
+    d.step("Print the question sheet for the owner.", command("scope", "questions"))
+    d.step(
+        "See the unredacted address (operator copy; do not paste it into the owner report).",
+        run.cmd_diagnose("--show-addresses"),
+    )
+    d.step("Draw the ladder to see the response that carried the route.", run.cmd_ladder())
+    d.step("Read the reference text for this verdict.", run.cmd_explain())
+
+
 def h_capture(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     died = run.verdict == "capture-died"
     d.stage("capture", "packet capture " + ("stopped during the run" if died else "did not start"))
@@ -1129,6 +1164,7 @@ HANDLERS = {
     "dtmf-not-negotiated": h_dtmf,
     "dtmf-mismatch": h_dtmf,
     "media-outside-scope": h_scope_stop,
+    "signaling-outside-scope": h_signaling_stop,
     "capture-failed": h_capture,
     "capture-died": h_capture,
     "authorization-lapsed": h_lapsed,

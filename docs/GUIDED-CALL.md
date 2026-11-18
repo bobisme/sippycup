@@ -115,16 +115,26 @@ grants no group or other access. A password that contains whitespace, quotes,
 or control characters is refused before anything starts, because PJSUA
 configuration files are whitespace-delimited.
 
-Registration and INVITE are always sent to the approved target. PJSUA is
-given a global outbound route to the target, so in-dialog requests do not
-follow a remote Contact elsewhere, and redirects (3xx) are refused. If the
-negotiated media peer is not an approved address, the call is hung up and
-the verdict is `media-outside-scope`. The driver asks PJSUA for the media
-peer as soon as the call is answered (and every 0.1 s, at most five times,
-until it is known), so only the first few RTP packets reach an unapproved
-peer before the hang-up. Behind a proxy or SBC the media address usually
-differs from the signaling address; approve both (see the practice proxy in
-`docs/PRACTICE-TARGET.md`).
+Registration and INVITE are always sent to the approved target, and
+redirects (3xx) are refused. PJSUA is given a global outbound route to the
+target, but PJSIP still sends in-dialog requests (ACK, BYE) along a route set
+or Contact that the far end names. So the driver reads PJSUA's message log
+while the call runs (bn-2jg, `docs/SAFETY-AUDIT.md`):
+
+- If PJSUA sends SIP to any address other than `target.host` (or the reviewed
+  TLS name), the driver kills PJSUA at once, without a BYE along that route,
+  and the verdict is `signaling-outside-scope`. The one message PJSIP already
+  sent (normally the ACK) is the only one.
+- If the far end's SDP (the answer, or a later re-INVITE or UPDATE) names a
+  media destination outside the scope, the call is hung up and the verdict is
+  `media-outside-scope`. A media-level `c=` overrides the session-level one,
+  `a=rtcp` with an address counts, and the RTP port must be in
+  `media.port_range`. The address PJSUA receives RTP from is checked too. Only
+  the first few RTP/RTCP packets reach the unapproved address before the
+  hang-up.
+
+Behind a proxy or SBC the media address usually differs from the signaling
+address; approve both (see the practice proxy in `docs/PRACTICE-TARGET.md`).
 
 ### Media networks and media ports
 
@@ -329,9 +339,9 @@ identifiers; use the evidence privacy workflow before sharing anything.
 | `call-not-answered` | No final response before `--answer-timeout`; the caller cancelled. The notes say whether 180 or 183 was received. | 1 |
 | `call-busy` (486, 600), `call-declined` (603), `call-forbidden` (403), `call-not-found` (404, 410, 604), `call-unavailable` (480, 503), `call-rate-limited` (429), `call-media-not-acceptable` (488, 606), `call-auth-failed` (401, 407), `call-redirected` (3xx) | The far end refused the call with that final status; the status is in the notes. | 1 |
 | `call-rejected-4xx`, `call-rejected-5xx`, `call-rejected-6xx` | Any other final rejection; the status class is in the code. | 1 |
-| `preflight-failed`, `registration-failed`, `call-error`, `media-outside-scope` | The run stopped at that step. | 1 |
+| `preflight-failed`, `registration-failed`, `call-error`, `media-outside-scope`, `signaling-outside-scope` | The run stopped at that step. | 1 |
 | `capture-failed`, `capture-died`, `authorization-lapsed`, `internal-error` | The run stopped for safety; see `notes` in the result. | 1 |
-| `cancelled` | Ctrl-C or SIGTERM. | 130 / 143 |
+| `cancelled` | Ctrl-C, SIGTERM, or SIGHUP (the terminal closed). | 130 / 143 |
 | `blocked` | Refused before anything started; no run directory. | 2 |
 
 | `tls-not-verified` | TLS verification failed or was not confirmed; PJSUA sent no SIP request on that connection. | 1 |
@@ -387,7 +397,7 @@ reports `possible-nat-one-way-media` instead of blaming the target.
 
 ## Emergency stop
 
-Ctrl-C or SIGTERM hangs up the call (BYE when established, CANCEL while
+Ctrl-C, SIGTERM, or SIGHUP (closing the terminal) hangs up the call (BYE when established, CANCEL while
 ringing), stops capture, keeps the evidence, writes a `cancelled` result and
 evidence manifest, and exits 130 or 143. The offline report, triage, and
 assertions are skipped after a cancel; run them later on the kept capture.

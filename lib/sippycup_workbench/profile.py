@@ -390,9 +390,27 @@ def rehearse(
     else:
         for address in approved_addresses:
             try:
-                ipaddress.ip_address(address)
+                parsed = ipaddress.ip_address(address)
             except (TypeError, ValueError):
                 errors.append("approved_addresses must contain only literal IP addresses")
+                break
+            # bn-2jg: exactly what the reviewer read. ipaddress also accepts a
+            # YAML integer (2130706433 is 127.0.0.1) and other spellings.
+            if not isinstance(address, str) or str(parsed) != address:
+                errors.append(
+                    f"approved_addresses must be written in canonical form ({parsed}), "
+                    f"not {address!r}"
+                )
+                break
+            if (
+                parsed.is_unspecified
+                or parsed.is_multicast
+                or (parsed.version == 4 and parsed == ipaddress.IPv4Address("255.255.255.255"))
+            ):
+                errors.append(
+                    f"approved address {address} is not a single unicast host "
+                    "(unspecified, multicast, and broadcast addresses are refused)"
+                )
                 break
         if len(set(approved_addresses)) != len(approved_addresses):
             errors.append("approved_addresses must be unique")

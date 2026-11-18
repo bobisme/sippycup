@@ -90,10 +90,25 @@ def main():
             lines.append("a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz")
         return lines
 
+    # Where the fake "sends" its requests, as PJSUA logs it: the outbound
+    # route the driver configured (the approved address or reviewed name).
+    outbound_hop = options.get("--outbound", ["sip:192.0.2.10:5060;lr"])[0][len("sip:"):].split(";", 1)[0]
+    transport_name = "TLS" if "--use-tls" in options else ("TCP" if "--no-udp" in options else "UDP")
+    sdp_host = os.environ.get("FAKE_PJSUA_PEER", "192.0.2.10")
+    # bn-2jg hostile far ends: "steer" answers with a Record-Route/Contact
+    # outside the scope (PJSIP then ACKs there at once); "sdpsteer" names an
+    # unapproved media-level connection address while RTP still arrives from
+    # the approved one; "rtcpsteer" moves only RTCP (a=rtcp) off scope.
+    steer_host = "198.51.100.66"
+
     def answer_sdp():
         profile = "RTP/SAVP" if srtp_active and use_srtp == 2 else "RTP/AVP"
-        lines = ["v=0", "c=IN IP4 192.0.2.10", f"m=audio 4000 {profile} 0" + (" 101" if dtmf_peer == "rfc4733" else ""),
+        lines = ["v=0", f"c=IN IP4 {sdp_host}", f"m=audio 4000 {profile} 0" + (" 101" if dtmf_peer == "rfc4733" else ""),
                  "a=rtpmap:0 PCMU/8000"]
+        if mode == "sdpsteer":
+            lines.insert(3, "c=IN IP4 198.51.100.88")
+        if mode == "rtcpsteer":
+            lines.append("a=rtcp:4001 IN IP4 198.51.100.99")
         if dtmf_peer == "rfc4733":
             lines.append("a=rtpmap:101 telephone-event/8000")
         if srtp_active:
@@ -135,7 +150,7 @@ def main():
             say("pjsua_acc.c  SIP registration failed, status=403 (Forbidden)")
         elif mode == "regfail401":
             for cseq in (1, 2):
-                log_message(f"TX 500 bytes Request msg REGISTER/cseq={cseq} (tdta{cseq}) to UDP 192.0.2.10:5060:",
+                log_message(f"TX 500 bytes Request msg REGISTER/cseq={cseq} (tdta{cseq}) to {transport_name} {outbound_hop}:",
                             ["REGISTER sip:192.0.2.10 SIP/2.0", "Content-Length: 0"])
                 log_message(f"RX 400 bytes Response msg 401/REGISTER/cseq={cseq} (rdata{cseq}) from UDP 192.0.2.10:5060:",
                             ["SIP/2.0 401 Unauthorized", "Content-Length: 0"])
@@ -195,7 +210,7 @@ def main():
                 # A Digest-challenging server that rejects the credentials:
                 # one unauthenticated INVITE, then authenticated re-sends.
                 def request(cseq, authorized):
-                    log_line(f"TX 512 bytes Request msg INVITE/cseq={cseq} (tdta0x{cseq}) to UDP 192.0.2.10:5060:")
+                    log_line(f"TX 512 bytes Request msg INVITE/cseq={cseq} (tdta0x{cseq}) to {transport_name} {outbound_hop}:")
                     log_line(f"INVITE {command} SIP/2.0")
                     if authorized:
                         log_line('Proxy-Authorization: Digest username="alice", response="feedface"')
@@ -209,8 +224,8 @@ def main():
                     request(3, True)
                 disconnect("407 (Proxy Authentication Required)")
                 continue
-            if mode in ("answer", "outside", "badport", "oneway", "silent"):
-                log_message("TX 900 bytes Request msg INVITE/cseq=1 (tdta0x1) to UDP 192.0.2.10:5060:",
+            if mode in ("answer", "outside", "badport", "oneway", "silent", "steer", "sdpsteer", "rtcpsteer"):
+                log_message(f"TX 900 bytes Request msg INVITE/cseq=1 (tdta0x1) to {transport_name} {outbound_hop}:",
                             [f"INVITE {command} SIP/2.0", "Content-Type: application/sdp", "", *offer_sdp()])
                 if use_srtp == 2 and srtp_peer == "plain":
                     log_message("RX 300 bytes Response msg 488/INVITE/cseq=1 (rdata0x1) from UDP 192.0.2.10:5060:",
@@ -220,8 +235,18 @@ def main():
                 log_message("RX 300 bytes Response msg 180/INVITE/cseq=1 (rdata0x2) from UDP 192.0.2.10:5060:",
                             ["SIP/2.0 180 Ringing", "Content-Length: 0"])
                 time.sleep(float(os.environ.get("FAKE_PJSUA_RING_SECONDS", "0")))
+                steering = (
+                    [f"Record-Route: <sip:{steer_host}:5060;lr>", "Contact: <sip:far@198.51.100.77:5060>"]
+                    if mode == "steer" else []
+                )
                 log_message("RX 900 bytes Response msg 200/INVITE/cseq=1 (rdata0x3) from UDP 192.0.2.10:5060:",
-                            ["SIP/2.0 200 OK", "Content-Type: application/sdp", "", *answer_sdp()])
+                            ["SIP/2.0 200 OK", *steering, "Content-Type: application/sdp", "", *answer_sdp()])
+                if mode == "steer":
+                    # PJSIP follows the far end's route set for the ACK at once.
+                    log_message(f"TX 360 bytes Request msg ACK/cseq=1 (tdta0x4) to UDP {steer_host}:5060:",
+                                ["ACK sip:far@198.51.100.77:5060 SIP/2.0", "Content-Length: 0"])
+                    record["ack_to"] = steer_host
+                    save()
                 if srtp_active:
                     log_line(f"{stamp()} srtp0x1  .SRTP started, keying=SDES, crypto=AES_CM_128_HMAC_SHA1_80")
                 log_line("Incoming Response msg 200/INVITE/cseq=1 (rdata0x1) in state Proceeding")

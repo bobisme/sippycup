@@ -65,6 +65,7 @@ STOP_VERDICTS = {
     "capture-failed": "packet capture did not start",
     "capture-died": "packet capture stopped",
     "media-outside-scope": "the far end negotiated media outside the approved addresses and media networks",
+    "signaling-outside-scope": "the far end routed in-dialog SIP to an address that is not the approved target",
     "internal-error": "an internal error stopped a call",
     "cancelled": "the operator cancelled the run",
 }
@@ -379,7 +380,7 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
             cancelled.append(signum)
 
     if deps.install_signal_handlers:
-        for signum in (signal.SIGINT, signal.SIGTERM):
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             previous[signum] = signal.signal(signum, handle)
     started = guided._utc(deps.now())
     stop: str | None = None

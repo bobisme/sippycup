@@ -24,6 +24,7 @@ STOP_AND_ASK = {
     "authorization-lapsed": "the authorization window ended",
     "blocked": "the profile gate refused",
     "media-outside-scope": "the far end's media peer is outside the approved scope",
+    "signaling-outside-scope": "the far end routed our signaling outside the approved scope",
     "capture-failed": "packet capture failed",
     "capture-died": "packet capture stopped",
 }
