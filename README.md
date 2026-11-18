@@ -183,6 +183,11 @@ you will actually use, not whichever utilities happen to be installed on the
 host. Use `./bin/sippycup doctor --host` only when you explicitly want a
 host-side inventory.
 
+`./bin/sippycup doctor --cleanup` lists leftovers from interrupted or killed runs
+(stale private temporary directories under `/dev/shm`, stopped Sippycup
+containers, dangling Sippycup image builds) and removes nothing; add `--apply`
+to remove them. It never touches `work/` evidence.
+
 `init` deliberately creates a pending profile with no invented addresses or
 approval. `rehearse` remains blocked until the profile contains the authorized
 service owner's approval identifier, validity window, literal approved

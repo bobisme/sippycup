@@ -139,16 +139,17 @@ class Gate:
     ) -> tuple[subprocess.Popen[str], str]:
         """Capture on lo; ``everything`` drops the host filter (for no-DNS proof)."""
         capture = self.container_path(name)
-        process = subprocess.Popen(
-            [
-                str(LAUNCHER), "--practice", "--", "timeout", str(seconds),
-                "tcpdump", "-Z", "root", "-i", "lo", "-U", "-s", "0",
-                "-w", capture, *([] if everything else ["host", self.address]),
-            ],
-            cwd=self.project, env=self.env, text=True,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=open(self.host_path(f"{name}.tcpdump.log"), "w", encoding="utf-8"),
-        )
+        # The child inherits its own copy of the log descriptor; close ours.
+        with open(self.host_path(f"{name}.tcpdump.log"), "w", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                [
+                    str(LAUNCHER), "--practice", "--", "timeout", str(seconds),
+                    "tcpdump", "-Z", "root", "-i", "lo", "-U", "-s", "0",
+                    "-w", capture, *([] if everything else ["host", self.address]),
+                ],
+                cwd=self.project, env=self.env, text=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
+            )
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             if self.host_path(name).exists() and self.host_path(name).stat().st_size > 0:
@@ -158,6 +159,7 @@ class Gate:
                 break
             time.sleep(0.1)
         process.kill()
+        process.wait()
         raise GateFailure(f"tcpdump did not start in the practice namespace ({name})")
 
     def stop_capture(self, process: subprocess.Popen[str]) -> None:

@@ -47,13 +47,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+stage=startup
+# Every non-zero exit says which stage failed and keeps the run directory
+# (including exits that come from `set -e` rather than from fail()).
+set -E
+trap 'status=$?; [[ $- == *e* ]] && printf "%s FAILED at stage %s (line %s, exit %s): %s\n  run directory kept: %s\n" \
+    "campaign softphone self-test" "${stage}" "${LINENO}" "${status}" "${BASH_COMMAND}" "${root}" >&2 || true' ERR
+
 fail() {
-    printf 'campaign softphone self-test FAILED: %s\n' "$*" >&2
+    printf 'campaign softphone self-test FAILED at stage %s: %s\n  run directory kept: %s\n' "${stage}" "$*" "${root}" >&2
     exit 1
 }
 
 # PJSUA quits when its standard input reaches EOF, so the peer reads from a
 # FIFO that a sleeping writer holds open.
+stage="start echo peer and challenge stub"
 mkfifo -m 0600 "${root}/peer.stdin"
 sleep 600 >"${root}/peer.stdin" &
 holder_pid=$!
@@ -179,6 +187,7 @@ step_result() {
     jq -r 'select(.event == "step.output" and .stream == "stdout") | .text' "$1/events.jsonl"
 }
 
+stage="authenticated call to the echo peer"
 # 1. Authenticated-account call to a real destination with bidirectional RTP.
 write_manifest softphone-echo "${peer}" "${peer_port}" echo true
 run_campaign softphone-echo
@@ -246,6 +255,7 @@ if ! jq -e '.verdict == "pass"' "${root}/assert.json" >/dev/null; then
     fail "oracle verdict is not pass (exit ${assert_status})"
 fi
 
+stage="wrong password, registration first"
 # 2. Wrong password, registration first: one credentialed REGISTER, no retry.
 write_manifest lockout-register "${stub}" "${stub_port}" echo true
 run_campaign lockout-register
@@ -265,6 +275,7 @@ step_result "${register_dir}" | jq -e '
     and .authentication.REGISTER == {"attempts": 1, "rejected": 1}' >/dev/null \
     || { step_result "${register_dir}" >&2; fail "runner did not report one rejected REGISTER"; }
 
+stage="wrong password on the INVITE challenge"
 # 3. Wrong password on the INVITE challenge, no registration.
 write_manifest lockout-invite "${stub}" "${stub_port}" echo false
 run_campaign lockout-invite
@@ -290,6 +301,7 @@ unset SIPPYCUP_SELFTEST_SECRET
 if grep -rqF -- "${secret}" "${root}"; then
     fail "the credential value appears in the self-test tree"
 fi
+stage="check private-directory leaks"
 if compgen -G '/dev/shm/sippycup-softphone-*' >/dev/null \
     || compgen -G '/dev/shm/sippycup-campaign-softphone-*' >/dev/null; then
     fail "a private softphone directory was not removed"

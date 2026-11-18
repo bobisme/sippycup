@@ -561,6 +561,14 @@ EOF
             shift
             exec "${project_dir}/bin/sippycup-workbench" doctor "$@"
         fi
+        if [[ "${1:-}" == "--cleanup" ]]; then
+            if (( isolated != 0 || admin != 0 || practice != 0 )); then
+                printf 'doctor --cleanup cannot be combined with container options.\n' >&2
+                exit 2
+            fi
+            shift
+            exec "${project_dir}/bin/sippycup-workbench" cleanup "$@"
+        fi
         run_container "${container_target}" doctor "$@"
         ;;
     workbench)

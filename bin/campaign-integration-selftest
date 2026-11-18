@@ -9,6 +9,12 @@ campaign-loopback-uas 5099 >"${root}/uas.log" 2>&1 &
 uas_pid=$!
 trap 'kill "${uas_pid}" 2>/dev/null || true' EXIT
 
+stage=startup
+set -E
+trap 'status=$?; printf "campaign self-test FAILED at stage %s (line %s, exit %s): %s\n  run directory kept: %s\n" \
+    "${stage}" "${LINENO}" "${status}" "${BASH_COMMAND}" "${root}" >&2
+    [[ -s "${root}/uas.log" ]] && tail -n 15 "${root}/uas.log" >&2; true' ERR
+
 sleep 0.2
 cat >"${root}/manifest.yaml" <<'YAML'
 apiVersion: sippycup.dev/v1
@@ -57,7 +63,9 @@ evidence:
   directory: evidence/loopback
 YAML
 
+stage="plan the campaign"
 campaign plan "${root}/manifest.yaml" --output "${root}/plan.json"
+stage="run the campaign"
 run_dir="$(
     campaign run "${root}/plan.json" \
         --manifest "${root}/manifest.yaml" \
@@ -65,6 +73,7 @@ run_dir="$(
         --interface lo
 )"
 
+stage="check the run result and capture"
 jq -e '.state == "succeeded" and .completedSteps == 1' \
     "${run_dir}/result.json" >/dev/null
 test -s "${run_dir}/capture.pcap"

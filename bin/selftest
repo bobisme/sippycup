@@ -27,6 +27,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The tool logs live in the container's /tmp and vanish with it, so a failure
+# prints what failed and the end of each log before the container goes away.
+stage=startup
+set -E
+trap 'status=$?; printf "selftest FAILED at stage %s (line %s, exit %s): %s\n" \
+    "${stage}" "${LINENO}" "${status}" "${BASH_COMMAND}" >&2
+    for log in /tmp/sippycup-tcpdump.log /tmp/sippycup-uas.log /tmp/sippycup-uac.log; do
+        [[ -s "${log}" ]] && { printf -- "--- %s\n" "${log}" >&2; tail -n 15 "${log}" >&2; }
+    done; true' ERR
+
+stage="start capture and UAS"
 tcpdump -U -ni lo -w "${output}" \
     "udp port 5098 or udp port 5099" >/tmp/sippycup-tcpdump.log 2>&1 &
 cap_pid=$!
@@ -41,6 +52,7 @@ uas_pid=$!
 
 sleep 1
 
+stage="run the UAC call"
 sipp 127.0.0.1:5099 \
     -sn uac \
     -i 127.0.0.1 \
@@ -50,6 +62,7 @@ sipp 127.0.0.1:5099 \
     -timeout 8s \
     -trace_err >/tmp/sippycup-uac.log 2>&1
 
+stage="wait for the UAS"
 wait "${uas_pid}"
 uas_pid=""
 sleep 1
@@ -58,6 +71,7 @@ kill -INT "${cap_pid}" 2>/dev/null || true
 wait "${cap_pid}" 2>/dev/null || true
 cap_pid=""
 
+stage="check the capture"
 test -s "${output}"
 
 printf 'Closed-loop SIP call succeeded. Captured SIP messages:\n'

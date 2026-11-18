@@ -36,13 +36,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+stage=startup
+# Every non-zero exit says which stage failed and keeps the run directory
+# (including exits that come from `set -e` rather than from fail()).
+set -E
+trap 'status=$?; [[ $- == *e* ]] && printf "%s FAILED at stage %s (line %s, exit %s): %s\n  run directory kept: %s\n" \
+    "call self-test" "${stage}" "${LINENO}" "${status}" "${BASH_COMMAND}" "${root}" >&2 || true' ERR
+
 fail() {
-    printf 'call self-test FAILED: %s\n' "$*" >&2
+    printf 'call self-test FAILED at stage %s: %s\n  run directory kept: %s\n' "${stage}" "$*" "${root}" >&2
     exit 1
 }
 
 # PJSUA quits when its standard input reaches EOF, so the peer reads from a
 # FIFO that a sleeping writer holds open.
+stage="start echo peer"
 mkfifo -m 0600 "${root}/peer.stdin"
 sleep 600 >"${root}/peer.stdin" &
 holder_pid=$!
@@ -73,6 +81,7 @@ for _ in $(seq 100); do
 done
 ss -Hlun "src ${peer_address}:${peer_port}" | grep -q . || fail "echo peer did not listen"
 
+stage="write profile"
 valid_from="$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
 valid_until="$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)"
 cat >"${root}/profile.yaml" <<YAML
@@ -106,6 +115,7 @@ chmod 0600 "${root}/profile.yaml"
 secret="selftest-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
 export SIPPYCUP_SELFTEST_SECRET="${secret}"
 
+stage="place call"
 set +e
 sippycup-call "${root}/profile.yaml" \
     --dial echo \
@@ -122,9 +132,12 @@ unset SIPPYCUP_SELFTEST_SECRET
 if (( status != 0 )); then
     cat "${root}/call.stderr" >&2 || true
     jq . "${root}/call.json" >&2 || cat "${root}/call.json" >&2 || true
+    jq -r '"  verdict=\(.verdict) state=\(.state) oracle_failed=\(.oracle.failed // [] | join(","))"' \
+        "${root}/call.json" >&2 2>/dev/null || true
     fail "sippycup-call exited ${status}"
 fi
 
+stage="check run directory and artifacts"
 mapfile -t runs < <(find "${root}/calls" -mindepth 1 -maxdepth 1 -type d)
 (( ${#runs[@]} == 1 )) || fail "expected exactly one run directory, found ${#runs[@]}"
 run_dir="${runs[0]}"
@@ -151,6 +164,7 @@ jq -e '.durationSeconds.effective == 4 and .durationSeconds.limit == 4' \
 jq -e '.captureFilter == "(host 127.0.0.2) and (udp port 5062 or udp)"' \
     "${run_dir}/result.json" >/dev/null || fail "capture filter is not target-scoped"
 
+stage="check capture"
 capture="${run_dir}/capture.pcap"
 count() {
     tshark -r "${capture}" -Y "$1" -T fields -e frame.number 2>/dev/null | wc -l
@@ -171,6 +185,7 @@ from_peer="$(count "rtp && ip.src == ${peer_address}")"
 outside="$(count "!(ip.addr == ${peer_address})")"
 (( outside == 0 )) || fail "capture contains ${outside} packets outside the approved address"
 
+stage="check credential and private-directory leaks"
 if grep -rqF -- "${secret}" "${root}"; then
     fail "the credential value appears in the self-test tree"
 fi
