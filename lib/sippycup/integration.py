@@ -10,8 +10,6 @@ import re
 import secrets as random
 import shutil
 import signal
-import socket
-import ssl
 import struct
 import subprocess
 import threading
@@ -349,6 +347,10 @@ def _identity(command: str) -> dict[str, Any]:
 SIPP_RUNNER = "campaign-sipp-runner"
 SOFTPHONE_RUNNER = "campaign-softphone-runner"
 SOFTPHONE_OUTPUT_LIMIT = 16 * 1024
+# An OPTIONS step never receives a credential (see runner_input) and its output
+# is redacted like every other step's, so its one-line JSON summary may be
+# kept even when the campaign holds secrets.
+OPTIONS_OUTPUT_LIMIT = 4 * 1024
 
 
 def _bundled_runner(name: str = SIPP_RUNNER) -> str:
@@ -831,7 +833,11 @@ def execute_campaign(
             # sends every credentialed call to the softphone runner, so the
             # SIPp runner sees credentials only on OPTIONS steps of a
             # credentialed target, which are sent unauthenticated anyway.
-            if reference is not None and step_runner_names[step["index"]] != SIPP_RUNNER:
+            if (
+                reference is not None
+                and step["type"] == "call"
+                and step_runner_names[step["index"]] != SIPP_RUNNER
+            ):
                 credentials[reference] = secret_values[reference]
             envelope: dict[str, Any] = {"step": step, "credentials": credentials}
             if step_runner_names[step["index"]] == SOFTPHONE_RUNNER:
@@ -860,6 +866,8 @@ def execute_campaign(
             # result line; other runners stay silent when secrets exist.
             if step_runner_names[step["index"]] == SOFTPHONE_RUNNER:
                 return SOFTPHONE_OUTPUT_LIMIT
+            if step["type"] == "options":
+                return OPTIONS_OUTPUT_LIMIT
             return 0
 
         result = run_plan(
