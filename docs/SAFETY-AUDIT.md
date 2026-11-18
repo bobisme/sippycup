@@ -23,7 +23,7 @@ which has no route off the host. No external host was contacted.
 | 4 | Low | `approved_addresses` accepted a YAML integer (`2130706433` is 127.0.0.1), non-canonical spellings, and unspecified, multicast or broadcast addresses. | Fixed |
 | 5 | High | `campaign run` has no approval window and no approval status. A frozen plan runs after `valid_until`, after revocation, and a long campaign can cross the window's end. | Reported |
 | 6 | Medium | Ceilings are per process and per invocation. Two commands at once (two terminals, or the cockpit and a shell) each get the full ceiling, and `max_calls` is not a budget across repeated `call` runs. | Reported |
-| 7 | Medium | Some senders are not bound to a profile at all: `preflight HOST`, `media send`, `shell` and `--`. They are documented that way. | Reported (procedure) |
+| 7 | Medium | Some senders are not bound to a profile at all: `preflight HOST`, `media send`, `shell` and `--`. `media send` took its destination from the session's remote SDP and would send its canary to any literal unicast address (bn-328). | Fixed for `media send`; `preflight` can be bound and says when it is not; `shell` and `--` say UNBOUND (bn-328, bn-3df) |
 | 8 | Medium | No kernel egress filter. Findings 1 and 2 are now caught within one poll interval, but a few packets still leave before the stop, and a host name in a far-end URI or SDP causes a DNS lookup first. | Reported (design) |
 | 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Reported |
 | 10 | Low | Campaign `authorization.networks` has no size limit (`0.0.0.0/0` is accepted); media networks are capped at 1024 addresses. | Reported |
@@ -90,6 +90,42 @@ evidence is complete. Tests: `tests.test_guided_call.SignalTests` and
 `tests.test_runtime.RuntimeSignalTests` (both failed on the old code: the
 test process died with exit 129).
 
+### 7: `media send` is bound to a profile; unbound senders say so (bn-328, bn-3df)
+
+Before: `./bin/sippycup media send SESSION --dry-run`, with a session whose
+remote SDP names `8.8.8.8:5353`, printed a 71-packet plan for that address and
+exited 0. The live path had the same checks (literal unicast, port 1024 or
+above), so it would have sent there. Only the dry run was tried.
+
+Now (`lib/sippycup_workbench/binding.py`, which composes `rehearse`,
+`host_is_approved_literal` and `media_scope.profile_scope`, and adds no rule of
+its own):
+
+- `media send --profile PROFILE` requires an approved profile whose window
+  covers the send. Every remote SDP endpoint must be an approved address or in
+  an approved media network, and within `media.port_range`. Without a profile
+  only loopback destinations are accepted, labelled `UNBOUND (loopback only)`.
+  The same session now exits 2 with no socket opened, live and with
+  `--dry-run`.
+- `preflight --profile PROFILE` takes host, port, transport, TLS name and CA
+  from the profile and refuses a mismatch before any packet. Without a profile
+  it still runs and prints `Scope: UNBOUND (operator-supplied target HOST)`.
+- `--require-profile` or `SIPPYCUP_REQUIRE_PROFILE=1` makes both refuse to run
+  unbound.
+- `shell` and `-- COMMAND` print a `Scope: UNBOUND` notice on stderr. They
+  enforce nothing, by design.
+
+| Command | Class |
+|---|---|
+| `call`, `matrix`, `checks`, `campaign`, `mcp-live`, `go` | Scope-bound |
+| `preflight`, `media` (`media send`) | Optionally bound (`--profile`; `--require-profile` makes it mandatory) |
+| `capture`, `chaos`, `chaos-exit-gate`, `webrtc` | Unbound (own scope inputs; see their pages) |
+| `media-echo`, `selftest`, `practice-target`, `ready`, `stop` | Unbound, local only |
+| `shell`, `-- COMMAND` | Unbound |
+
+The table with what each class checks is in `CLI.md`, "Scope binding".
+Tests: `tests/test_scope_binding.py`.
+
 ### 4: approved address spelling
 
 `rehearse` now accepts only canonical string literals
@@ -126,9 +162,12 @@ exactly the address that is used. Tests: `tests/test_safety_audit.py`.
    `max_calls` limits one matrix or campaign run, not the engagement.
    Recommended fix: a per-approval send ledger under `work/` with an exclusive
    lock.
-3. **Unbound senders (finding 7).** `preflight HOST`, `media send`, `shell` and
-   `-- COMMAND` send wherever they are told. Use them only with addresses
-   copied from the approved profile.
+3. **Unbound senders (finding 7).** `shell` and `-- COMMAND` send wherever they
+   are told, and so does `preflight HOST` without `--profile`. Each prints a
+   `Scope: UNBOUND` line. Use `preflight --profile PROFILE` and
+   `media send --profile PROFILE`, set `SIPPYCUP_REQUIRE_PROFILE=1` for the
+   engagement, and use `shell` and `--` only with addresses copied from the
+   approved profile.
 4. **Detection, not prevention (finding 8).** With a hostile or misconfigured far
    end, a few packets (one ACK, up to about 5 RTP/RTCP packets) can reach an
    address the far end named before Sippycup stops. A host name in a far-end
@@ -190,5 +229,5 @@ secrets sampler read `/proc/*/cmdline` and `/proc/*/environ` every 0.1 s during
 the rehearsal.
 
 The unit tests that pin the fixes are `tests/test_scope_watch.py`,
-`tests/test_safety_audit.py`, `tests/test_guided_call.py` (SignalTests) and
-`tests/test_runtime.py` (RuntimeSignalTests).
+`tests/test_safety_audit.py`, `tests/test_guided_call.py` (SignalTests),
+`tests/test_runtime.py` (RuntimeSignalTests) and `tests/test_scope_binding.py`.

@@ -344,7 +344,8 @@ class DiagnoseCallTests(unittest.TestCase):
                 self.assertTrue(data["stopAndAsk"])
                 text = json.dumps(data)
                 self.assertNotIn("--tls-unverified\"", text.replace("Never fall back to --tls-unverified", ""))
-                self.assertTrue(any("preflight 198.51.100.10 5060 tls --tls-ca work/eng/ca.crt --tls-server-name pbx.example.net" in c for c in fx.commands(data)))
+                self.assertTrue(any(c.endswith("preflight --profile work/eng/target-profile.yaml") for c in fx.commands(data)), "the repeat is bound to the profile, which carries the reviewed name and CA")
+                self.assertFalse(any("preflight 198.51.100.10" in c for c in fx.commands(data)))
 
     def test_preflight_timeout_is_cannot_tell_and_offers_other_approved_transport_only_when_one_exists(self) -> None:
         self.fx.call("preflight-failed", softphone=None, preflight={"ok": False, "detail": "no_response: timeout: no final response within 2s"}, result={"softphone": None})
@@ -355,11 +356,11 @@ class DiagnoseCallTests(unittest.TestCase):
             "schema_version: sippycup.dev/target-profile/v1\nname: eng-tcp\ntarget:\n  host: '198.51.100.10'\n  port: 5060\n  transport: tcp\n"
             "authorization:\n  status: approved\n  valid_until: '2999-01-01T00:00:00Z'\n", encoding="utf-8")
         data = self.fx.diagnose()
-        self.assertTrue(any("preflight 198.51.100.10 5060 tcp" in c for c in self.fx.commands(data)))
+        self.assertTrue(any(c.endswith("preflight --profile work/eng/target-profile-tcp.yaml") for c in self.fx.commands(data)))
         (self.fx.eng / "target-profile-tcp.yaml").write_text(
             "schema_version: sippycup.dev/target-profile/v1\nname: eng-tcp\ntarget:\n  host: '198.51.100.10'\n  port: 5060\n  transport: tcp\n"
             "authorization:\n  status: pending\n", encoding="utf-8")
-        self.assertFalse(any("preflight 198.51.100.10 5060 tcp" in c for c in self.fx.commands(self.fx.diagnose())), "an unapproved profile is never suggested")
+        self.assertFalse(any("target-profile-tcp.yaml" in c for c in self.fx.commands(self.fx.diagnose())), "an unapproved profile is never suggested")
 
     def test_practice_runs_get_the_practice_flag_and_real_runs_do_not(self) -> None:
         self.fx.call("call-busy", softphone={"final_status": 486}, practice=True)

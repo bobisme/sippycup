@@ -463,7 +463,7 @@ make dress-rehearsal-proxy                          # --proxy, with the make ima
 | 3 | Practice call from the cockpit (stage 2) | the cockpit's `--practice call work/practice/target-profile.yaml --dial echo ...`, then the `journal add` the call prints |
 | 4 | Scope | writes the answers file `DIR/scope.yaml` from the connection facts, copies the CA to `DIR/practice-ca.crt`, then `scope check DIR`, `scope compile DIR` |
 | 5 | Rehearse | `rehearse DIR/target-profile.yaml`, `checks plan DIR/target-profile.yaml` |
-| 6 | Preflight | `--practice preflight 127.0.0.2 5060 udp`; `--practice preflight 127.0.0.2 5061 tls --tls-ca DIR/practice-ca.crt --tls-server-name sippycup-practice` |
+| 6 | Preflight | `--practice preflight --profile DIR/target-profile.yaml` (bound: UDP target and approval from the profile); `--practice preflight 127.0.0.2 5061 tls --tls-ca DIR/practice-ca.crt --tls-server-name sippycup-practice` |
 | 7 | Guided call | the cockpit's `--practice call DIR/target-profile.yaml --dial echo --username practice` plus `--secret-file`, then `--dial dtmf --dtmf '159#'`; each with its `journal add` |
 | 8 | Campaign | the cockpit's `campaign plan` and `--practice campaign run ... --secret-env practice-password=SIPPYCUP_COCKPIT_SECRET` (UDP and TLS OPTIONS, UDP and TLS authenticated calls) |
 | 9 | Security checks | `checks plan`, then the cockpit's `--practice checks run DIR/target-profile.yaml` plus `--secret-file` (the seven UDP checks and `srtp-policy`) |

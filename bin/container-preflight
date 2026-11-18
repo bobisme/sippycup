@@ -4,6 +4,7 @@ set -uo pipefail
 usage() {
     cat <<'EOF'
 Usage: sippycup-preflight HOST [PORT] [udp|tcp|tls] [OPTIONS]
+       sippycup-preflight --profile PROFILE [OPTIONS]
 
 Performs DNS resolution, a transport reachability check, and one SIP OPTIONS
 transaction (the in-image sippycup-options client). It does not enumerate
@@ -11,6 +12,14 @@ users, attempt authentication, or generate load. UDP sends at most two
 datagrams (one retransmission).
 
 Options:
+  --profile PROFILE       Bind this preflight to an approved target profile.
+                          The approval and its window are checked first; host,
+                          port, transport, TLS name and CA come from the
+                          profile, and anything also typed must match it.
+  --require-profile       Refuse to run without --profile (also when the
+                          environment has SIPPYCUP_REQUIRE_PROFILE=1).
+  --format text|json      json prints one result object on stdout (with the
+                          scope) and the stage output on stderr.
   --tls-server-name NAME  Verify the certificate for NAME and send it as SNI.
                           Packets still go only to HOST.
   --tls-ca PATH           Also trust this PEM CA file (a path under /work,
@@ -30,6 +39,10 @@ failing stage decides the exit code:
   4 resolution failed, refused, or unreachable
   5 TLS handshake or certificate verification failed
 The openssl certificate summary is informational and never decides it.
+
+Every run prints one Scope: line. Without --profile it reads
+"Scope: UNBOUND (operator-supplied target HOST)": nothing checked HOST against
+an approval. A refused --profile run exits 2 before any resolution or packet.
 EOF
 }
 
@@ -46,6 +59,9 @@ usage_error() {
 }
 
 dry_run=0
+profile=""
+require_profile=0
+format=text
 tls_server_name=""
 tls_ca=""
 tls_unverified=0
@@ -56,6 +72,18 @@ while (( $# > 0 )); do
     case "$1" in
         --dry-run) dry_run=1 ;;
         --tls-unverified) tls_unverified=1 ;;
+        --require-profile) require_profile=1 ;;
+        --profile|--format)
+            (( $# >= 2 )) || usage_error "Missing value for $1"
+            case "$1" in
+                --profile) profile="$2" ;;
+                --format) format="$2" ;;
+            esac
+            [[ -n "$2" ]] || usage_error "Missing value for $1"
+            shift
+            ;;
+        --profile=*) profile="${1#*=}"; [[ -n "${profile}" ]] || usage_error "Missing value for --profile" ;;
+        --format=*) format="${1#*=}" ;;
         --tls-server-name|--tls-ca|--expect-status|--expect-class)
             (( $# >= 2 )) || usage_error "Missing value for $1"
             case "$1" in
@@ -79,13 +107,43 @@ while (( $# > 0 )); do
     shift
 done
 set -- "${arguments[@]}"
+given=$#
 
-if [[ $# -lt 1 || $# -gt 3 ]]; then
+if [[ "${format}" != text && "${format}" != json ]]; then
+    usage_error "--format must be text or json."
+fi
+if [[ $# -gt 3 ]] || [[ $# -lt 1 && -z "${profile}" ]]; then
     usage >&2
     exit 2
 fi
 
-host="$1"
+# The scope-binding helper lives beside this script: lib/ in a checkout,
+# /usr/local/lib in the image.
+binding_lib="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/lib"
+if [[ ! -d "${binding_lib}/sippycup_workbench" ]]; then
+    binding_lib=/usr/local/lib
+fi
+binding_helper() {
+    PYTHONPATH="${binding_lib}" PYTHONDONTWRITEBYTECODE=1 \
+        python3 -m sippycup_workbench.binding "$@"
+}
+
+if [[ -z "${profile}" ]]; then
+    case "${SIPPYCUP_REQUIRE_PROFILE:-}" in
+        ""|0) ;;
+        *) require_profile=1 ;;
+    esac
+    if (( require_profile != 0 )); then
+        printf 'preflight refused: a profile is required (--require-profile or SIPPYCUP_REQUIRE_PROFILE) and none was given.\n' >&2
+        printf 'Nothing was sent: no socket was opened and no name was resolved.\n' >&2
+        printf 'What to do: run ./bin/sippycup preflight --profile PROFILE (the approved target profile of this engagement).\n' >&2
+        exit 2
+    fi
+fi
+
+# With a profile, whatever is not typed here comes from the profile below
+# (these placeholders only pass the syntax checks and are then replaced).
+host="${1:-profile-target}"
 port="${2:-5060}"
 transport="${3:-udp}"
 
@@ -101,7 +159,7 @@ if [[ "${transport}" != udp && "${transport}" != tcp && "${transport}" != tls ]]
     printf 'Transport must be udp, tcp, or tls.\n' >&2
     exit 2
 fi
-if [[ "${transport}" != tls ]] \
+if [[ -z "${profile}" && "${transport}" != tls ]] \
     && [[ -n "${tls_server_name}" || -n "${tls_ca}" || ${tls_unverified} -ne 0 ]]
 then
     usage_error "--tls-server-name, --tls-ca, and --tls-unverified need the tls transport."
@@ -131,6 +189,53 @@ if [[ -n "${expect_class}" && ! "${expect_class}" =~ ^([2-6]xx|any)$ ]]; then
     usage_error "--expect-class must be 2xx, 3xx, 4xx, 5xx, 6xx, or any."
 fi
 
+# Scope decision, before anything is printed, resolved, or sent.
+scope_json=""
+if [[ -n "${profile}" ]]; then
+    resolve_args=(--profile "${profile}")
+    (( given >= 1 )) && resolve_args+=(--host "${host}")
+    (( given >= 2 )) && resolve_args+=(--port "${port}")
+    (( given >= 3 )) && resolve_args+=(--transport "${transport}")
+    [[ -n "${tls_server_name}" ]] && resolve_args+=(--tls-server-name "${tls_server_name}")
+    [[ -n "${tls_ca}" ]] && resolve_args+=(--tls-ca "${tls_ca}")
+    (( tls_unverified != 0 )) && resolve_args+=(--tls-unverified)
+    resolved="$(binding_helper preflight-resolve "${resolve_args[@]}")" || exit 2
+    scope_text=""
+    while IFS= read -r line; do
+        case "${line%%=*}" in
+            host) host="${line#*=}" ;;
+            port) port="${line#*=}" ;;
+            transport) transport="${line#*=}" ;;
+            tls_server_name) tls_server_name="${line#*=}" ;;
+            tls_ca) tls_ca="${line#*=}" ;;
+            scope_line) scope_text="${line#*=}" ;;
+            scope_json) scope_json="${line#*=}" ;;
+        esac
+    done <<<"${resolved}"
+    if [[ -z "${scope_text}" || -z "${scope_json}" ]]; then
+        printf 'preflight refused: the scope decision for %s could not be read. Nothing was sent.\n' "${profile}" >&2
+        exit 2
+    fi
+else
+    scope_text="Scope: UNBOUND (operator-supplied target ${host})"
+fi
+
+# --format json: one result object on stdout; the stage output goes to stderr.
+if [[ "${format}" == json ]]; then
+    exec 3>&1 1>&2
+fi
+finish() {
+    local status="$1" options_json="${2:-}"
+    if [[ "${format}" == json ]]; then
+        report_args=(--host "${host}" --port "${port}" --transport "${transport}"
+            --scope-json "${scope_json}" --options-json "${options_json}"
+            --exit-status "${status}")
+        (( dry_run != 0 )) && report_args+=(--dry-run)
+        binding_helper preflight-report "${report_args[@]}" >&3 || exit 5
+    fi
+    exit "${status}"
+}
+
 verify_name="${tls_server_name:-${host}}"
 printf 'Sippycup network preflight\n'
 printf 'Target:    %s:%s\n' "${host}" "${port}"
@@ -144,6 +249,7 @@ if [[ "${transport}" == tls ]]; then
             "${tls_ca:+ with extra CA ${tls_ca/#\/work\//work/}}"
     fi
 fi
+printf '%s\n' "${scope_text}"
 printf '\n'
 
 if (( dry_run != 0 )); then
@@ -160,7 +266,7 @@ if (( dry_run != 0 )); then
     fi
     printf '.\n'
     printf 'Network activity: none\n'
-    exit 0
+    finish 0
 fi
 
 if [[ -n "${tls_ca}" && ! -f "${tls_ca}" ]]; then
@@ -170,7 +276,7 @@ fi
 printf '== DNS/address resolution ==\n'
 if ! getent ahosts "${host}" | sort -u; then
     printf 'Resolution failed; stopping before network traffic is sent.\n' >&2
-    exit 4
+    finish 4
 fi
 
 nc_status=0
@@ -222,8 +328,15 @@ fi
 if [[ -n "${expect_class}" ]]; then
     options_args+=(--expect-class "${expect_class}")
 fi
-timeout 15 sippycup-options "${options_args[@]}"
-sip_status=$?
+options_json=""
+if [[ "${format}" == json ]]; then
+    options_json="$(timeout 15 sippycup-options "${options_args[@]}" --format json)"
+    sip_status=$?
+    printf '%s\n' "${options_json}"
+else
+    timeout 15 sippycup-options "${options_args[@]}"
+    sip_status=$?
+fi
 if (( sip_status == 124 )); then
     sip_status=3
 fi
@@ -233,7 +346,7 @@ printf 'SIP OPTIONS exit status: %s\n' "${sip_status}"
 # SIP service is not mistaken for a successful preflight.
 for stage_status in "${nc_status}" "${sip_status}"; do
     if (( stage_status != 0 )); then
-        exit "${stage_status}"
+        finish "${stage_status}" "${options_json}"
     fi
 done
-exit 0
+finish 0 "${options_json}"

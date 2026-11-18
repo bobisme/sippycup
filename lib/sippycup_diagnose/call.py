@@ -13,7 +13,7 @@ from typing import Any, Optional
 from .callrun import CallRun, MAX_ANSWER_TIMEOUT
 from .core import (
     HIGH, LOW, MEDIUM, NETWORK, NONE, OUR, THEIR, UNKNOWN, Diagnosis, Redaction,
-    is_loopback, is_private,
+    is_loopback, is_private, work_relative,
 )
 from .files import unwrap
 from .ladder_bridge import Lazy
@@ -397,9 +397,10 @@ def h_preflight(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     for item in sibling:
         d.step(
             f"Preflight over the other approved {item['transport'].upper()} profile (a reply tells you the host is up and this transport is the problem).",
-            run.cmd_preflight(item["host"], item["port"], item["transport"], item["tlsServerName"], item["tlsCaFile"]),
+            run.cmd_preflight(item["host"], item["port"], item["transport"], item["tlsServerName"], item["tlsCaFile"],
+                              profile=work_relative(item["path"])),
         )
-    d.step("Repeat the same single preflight to see whether the failure is stable.", run.cmd_preflight(run.host, run.target.get("port"), run.transport))
+    d.step("Repeat the same single preflight to see whether the failure is stable.", run.cmd_preflight(run.host, run.target.get("port"), run.transport, profile=run.profile_path()))
     if not sibling:
         d.stop_and_ask(
             "If a repeat gets the same result, stop and ask the owner to confirm the signaling address, port, and transport and that our source address is allowed; this profile approves no other transport to try."
@@ -492,12 +493,13 @@ def h_tls_preflight(d: Diagnosis, run: CallRun, detail: str, ladder: Optional[La
     d.attribute(side, confidence, reasoning, distinguish)
     d.step(
         "Repeat only the TLS preflight with the profile's reviewed name and CA to see the exact error again.",
-        run.cmd_preflight(run.host, run.target.get("port"), "tls", name, ca),
+        run.cmd_preflight(run.host, run.target.get("port"), "tls", name, ca, profile=run.profile_path()),
     )
     for item in run.siblings_other_transport():
         d.step(
             f"Preflight the other approved {item['transport'].upper()} profile to see whether the host answers at all.",
-            run.cmd_preflight(item["host"], item["port"], item["transport"], item["tlsServerName"], item["tlsCaFile"]),
+            run.cmd_preflight(item["host"], item["port"], item["transport"], item["tlsServerName"], item["tlsCaFile"],
+                              profile=work_relative(item["path"])),
         )
     d.stop_and_ask(
         "Do not retry the call until the name and CA are confirmed: ask the owner for the endpoint's certificate server name and issuing CA."

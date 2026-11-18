@@ -120,7 +120,8 @@ the system trust store is used. Both fields are valid only with transport
 the certificate must carry the literal address as an IP SAN. `rehearse` and
 `one-call` print the name, the trust source (and the CA file's SHA-256 in
 JSON), and that every connection goes only to the literal address;
-`one-call` passes `--tls-server-name` and `--tls-ca-file` to its preflight.
+the `one-call` preflight step is `preflight --profile PROFILE`, which takes
+the name and the CA from the profile (see "Scope binding" in `CLI.md`).
 
 The plan now has an executor. `./bin/sippycup call PROFILE --dial
 DESTINATION` runs the same sequence in one terminal and one isolated

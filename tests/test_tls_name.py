@@ -216,10 +216,11 @@ class ProfileTests(WorkTree):
             plan = cli._one_call_plan(str(path))
         self.assertTrue(plan["ready"], plan["blocking_errors"])
         preflight = next(step for step in plan["steps"] if step["name"] == "single_options_preflight")
-        self.assertEqual(
-            preflight["argv"][-4:],
-            ["--tls-server-name", NAME, "--tls-ca-file", "work/eng/owner-ca.crt"],
-        )
+        # The preflight step is bound to the profile, which carries the
+        # reviewed name and CA (the launcher refuses anything that differs).
+        self.assertEqual(preflight["argv"], ["./bin/sippycup", "preflight", "--profile", str(path)])
+        self.assertEqual(plan["tls"]["server_name"], NAME)
+        self.assertEqual(plan["tls"]["ca_file"], "work/eng/owner-ca.crt")
         self.assertEqual(plan["tls"]["connects_to"], "192.0.2.10")
 
 

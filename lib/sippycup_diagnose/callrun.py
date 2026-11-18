@@ -263,7 +263,12 @@ class CallRun:
         words = self.call_words(**override)
         return command(*words, practice=self.practice) if words else None
 
-    def cmd_preflight(self, host: str, port: Any, transport: str, tls_name: Any = None, tls_ca: Any = None) -> Optional[str]:
+    def cmd_preflight(self, host: str, port: Any, transport: str, tls_name: Any = None, tls_ca: Any = None,
+                      profile: Any = None) -> Optional[str]:
+        # Bound to the profile whenever its file is known: the target, TLS
+        # name and CA then come from the approval (docs/CLI.md, Scope binding).
+        if profile:
+            return command("preflight", "--profile", str(profile), practice=self.practice)
         words = ["preflight", host, str(port), transport]
         if transport == "tls":
             if tls_ca:
