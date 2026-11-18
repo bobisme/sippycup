@@ -72,6 +72,9 @@ run_dir="$(
         --run-root "${root}/runs" \
         --interface lo
 )"
+# campaign run prints the run directory as the operator sees it on the host
+# (work/...); inside the image the same tree is /work/...
+[[ "${run_dir}" == work/* ]] && run_dir="/${run_dir}"
 
 stage="check the run result and capture"
 jq -e '.state == "succeeded" and .completedSteps == 1' \

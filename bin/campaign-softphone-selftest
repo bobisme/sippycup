@@ -169,6 +169,9 @@ run_campaign() {
     )"
     run_status=$?
     set -e
+    # campaign run prints the run directory as the operator sees it on the host
+    # (work/...); inside the image the same tree is /work/...
+    [[ "${run_dir}" == work/* ]] && run_dir="/${run_dir}"
     [[ -n "${run_dir}" && -d "${run_dir}" ]] || {
         cat "${root}/${name}.stderr" >&2 || true
         fail "${name}: campaign run produced no run directory (exit ${run_status})"
