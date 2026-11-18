@@ -201,11 +201,35 @@ class Columns:
             if message.sdp is not None:
                 owner = self.sig(message.src)
                 for media in message.sdp.media:
-                    if media.address and media.port:
-                        self.sdp_owner[(media.address, media.port)] = owner
-                        self.sdp_owner[(media.address, media.port + 1)] = owner
+                    if media.address and media.port and media.address not in ("0.0.0.0", "::"):
+                        home = self._media_home(media.address, owner)
+                        self._add_port(home, media.port)
+                        self.sdp_owner[(media.address, media.port)] = home
+                        self.sdp_owner[(media.address, media.port + 1)] = home
         for endpoint in extra_endpoints:
             self.media(endpoint)
+
+    def _media_home(self, address: str, owner: int) -> int:
+        """Column for an SDP media address: the signaling endpoint that has the
+        same address, else a column of its own (media on another host)."""
+        if self.cols[owner]["address"] == address and not self.cols[owner]["media"]:
+            return owner
+        for index, col in enumerate(self.cols):
+            if not col["media"] and col["address"] == address:
+                return index
+        return self._media_column(address)
+
+    def _media_column(self, address: Optional[str]) -> int:
+        key = ("media", address, None)
+        if key not in self._index:
+            self._index[key] = len(self.cols)
+            self.cols.append({"address": address, "ports": [], "roles": ["media"], "media": True})
+        return self._index[key]
+
+    def _add_port(self, index: int, port: int) -> None:
+        col = self.cols[index]
+        if col["media"] and not col["ports"]:
+            col["ports"].append(port)
 
     def _key(self, endpoint: Endpoint) -> Any:
         return endpoint.key() if self.collide else endpoint.address
@@ -228,11 +252,10 @@ class Columns:
             existing = self._index.get(endpoint.address)
             if existing is not None:
                 return existing
-        key = ("media", endpoint.address, endpoint.port if self.collide else None)
-        if key not in self._index:
-            self._index[key] = len(self.cols)
-            self.cols.append({"address": endpoint.address, "ports": [], "roles": ["media"], "media": True})
-        return self._index[key]
+        index = self._media_column(endpoint.address)
+        if endpoint.port is not None:
+            self._add_port(index, endpoint.port)
+        return index
 
     def _role(self, index: int, role: str) -> None:
         roles = self.cols[index]["roles"]

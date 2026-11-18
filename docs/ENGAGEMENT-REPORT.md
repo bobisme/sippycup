@@ -46,6 +46,7 @@ place, so an interrupted run leaves no partial report.
 | `--title TEXT` | Report title (default: the title in `engagement.json`) |
 | `--generated-at TIME` | Fixed generation time, for reproducible output |
 | `--run-root DIR` | Another directory of run directories; repeatable |
+| `--matrix-root DIR` | Another directory of matrix run directories (each holds `matrix.json`); repeatable. `DIR/matrix` and `matrix/` next to each profile are read without it |
 | `--profile PATH`, `--manifest PATH` | Another target profile or campaign manifest to treat as an authorization record |
 | `--include-journal-notes` | Include journal entry detail text (sanitized) in an owner report |
 | `--forbid-file PATH` | A file whose value (for example the account password file) must appear nowhere in the report. The value is only compared, never stored or printed |
@@ -89,6 +90,10 @@ stops the report.
   campaign `plan.json` is a campaign, and one with a call `result.json` is a
   guided call.
 
+- **Matrices**: the `matrix.json` of each directory under `DIR/matrix`,
+  `matrix/` next to each profile found (where `matrix run` writes by default),
+  and each `--matrix-root`.
+
 Numbers are the ones the runs recorded: the call result, `softphone.json`,
 `triage.json` capture metadata, the campaign's `step.output` summaries and
 `preflight.json`, the `Number of packets` line of `report.txt`, the capture
@@ -126,7 +131,23 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
    from the softphone timeline, RTP both ways, codec, TLS verification facts,
    oracle pass/fail/unknown with the failing assertion names), campaigns
    (per-case outcomes, status against the expectation, stop reason, preflight
-   warnings), and security checks (every check and its status).
+   warnings), call matrices (below), and security checks (every check and its
+   status).
+   **Call matrices** draw one grid per `matrix.json`
+   (`schemas/call-matrix-v1.schema.json`): a row per transport and SRTP mode,
+   a column per codec, and in each cell the verdict, the setup time of a
+   passing call, the run label (R#) of the call that produced it, and a mark
+   when SDES keys went over cleartext signaling. A cell the matrix did not run
+   says "not run", the heading gives the state and stop reason, and a stopped
+   matrix adds a limitation. The grid is not trusted as written: it must
+   validate against the schema, its counts must match its cells, and every
+   cell that ran must name a run directory the report found, with the verdict
+   and transport that run recorded. Otherwise the report carries an integrity
+   exception (`matrix-invalid`, `matrix-run-missing`, `matrix-verdict-mismatch`,
+   `matrix-run-mismatch`, `matrix-count-mismatch`, `matrix-unreadable`) and a
+   document that fails the schema is not drawn. Free text goes through the
+   same sanitizer and privacy lint as the rest of the report; paths are never
+   printed. A matrix whose runs were all practice-target runs is labelled so.
 6. **Findings**: merged across check runs by check id, title, and target,
    with first and last seen and the runs that evidence each one, ordered by
    severity; then observations derived from run results, labelled as derived.

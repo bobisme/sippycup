@@ -416,7 +416,13 @@ def rehearse(
     ):
         errors.append("max_concurrency cannot exceed max_calls")
     if limits.get("max_calls") != 1 or limits.get("max_concurrency") != 1:
-        warnings.append("this is not a one-call profile")
+        calls = limits.get("max_calls")
+        concurrency = limits.get("max_concurrency")
+        warnings.append(
+            f"limits allow up to {calls} call(s) at concurrency {concurrency}, not one; "
+            "this is expected for a call matrix or a campaign (they stay within these limits "
+            "and the approval window); `call` still places one call and `rehearse` sends nothing"
+        )
 
     interface = capture.get("interface")
     if (

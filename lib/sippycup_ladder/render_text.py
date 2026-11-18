@@ -5,6 +5,8 @@ from __future__ import annotations
 import textwrap
 from typing import Any
 
+from .layout import fit_label, label_slot, pick_caps, trim_words
+
 MARGIN = 14
 
 
@@ -26,13 +28,43 @@ def _clip(text: str, room: int) -> str:
     return text[: room - 3] + "..."
 
 
-def _positions(count: int, gutter: int, width: int) -> list:
+def _positions(count: int, gutter: int, width: int, gaps: Any = None) -> list:
     body = width - gutter
     if count == 1:
         return [gutter + body // 2]
     margin = min(MARGIN, max(4, body // (count * 3)))
-    span = body - 2 * margin
-    return [gutter + margin + (span * i) // (count - 1) for i in range(count)]
+    if gaps is None:
+        span = body - 2 * margin
+        return [gutter + margin + (span * i) // (count - 1) for i in range(count)]
+    xs = [gutter + margin]
+    for gap in gaps:
+        xs.append(xs[-1] + int(gap))
+    return xs
+
+
+def _layout(columns: list, events: list, gutter: int, width: int) -> tuple:
+    """Return (xs, reason_cap). Gaps are sized from the labels; if they do not
+    fit the width, reason phrases are shortened (never the tags)."""
+    count = len(columns)
+    if count == 1:
+        return _positions(1, gutter, width), None
+    body = width - gutter
+    margin = min(MARGIN, max(4, body // (count * 3)))
+    avail = body - 2 * margin
+    mins = []
+    for i in range(count - 1):
+        head = (len(_head(columns[i])) + len(_head(columns[i + 1]))) // 2 + 2
+        mins.append(max(10, head))
+
+    def need(event: dict, label: str) -> int:
+        return len(label) + len(_tag_text(event)) + 8
+
+    cap, gaps = pick_caps(count, events, avail, need, mins)
+    return _positions(count, gutter, width, gaps), cap
+
+
+def _head(column: dict) -> str:
+    return max(column["label"], "(" + "/".join(column["roles"]) + ")", key=len)
 
 
 def _put(canvas: list, x: int, text: str) -> None:
@@ -48,7 +80,7 @@ def _bars(canvas: list, xs: list) -> None:
             canvas[x] = "|"
 
 
-def _arrow_line(canvas: list, xs: list, event: dict, label: str) -> None:
+def _arrow_line(canvas: list, xs: list, event: dict, label: str, bar_xs: list) -> None:
     a, b = xs[event["from"]], xs[event["to"]]
     if event["type"] == "media":
         fill = "="
@@ -61,14 +93,16 @@ def _arrow_line(canvas: list, xs: list, event: dict, label: str) -> None:
         return
     lo, hi = (a, b) if a < b else (b, a)
     for x in range(lo + 1, hi):
-        canvas[x] = fill
+        if x not in bar_xs:  # an arrow passing over a lifeline leaves it drawn
+            canvas[x] = fill
     if a < b:
         canvas[hi - 1] = ">"
     else:
         canvas[lo + 1] = "<"
-    room = hi - lo - 6
-    text = " " + _clip(label, room) + " "
-    start = lo + 1 + ((hi - lo - 1) - len(text)) // 2
+    text = " " + label + " "
+    bars = sorted(set(bar_xs))
+    left, right = label_slot(bars, bars.index(lo), bars.index(hi), len(text), 1)
+    start = left + 1 + ((right - left - 1) - len(text)) // 2
     _put(canvas, max(lo + 3, start), text)
 
 
@@ -78,7 +112,7 @@ def render_section(section: dict, width: int) -> list:
     time_w = max([8] + [len(_fmt_t(e["t"])) for e in events])
     gap_w = max([9] + [len(_fmt_gap(e.get("gap"))) for e in events])
     gutter = 1 + time_w + 2 + gap_w + 2
-    xs = _positions(len(columns), gutter, width)
+    xs, cap = _layout(columns, events, gutter, width)
     lines = []
     title = f"[{section['index']}] {section['title']}"
     if section.get("callIdHash"):
@@ -105,13 +139,24 @@ def render_section(section: dict, width: int) -> list:
         if event.get("gap") is not None:
             _put(canvas, 1 + time_w + 2, _fmt_gap(event["gap"]))
         _bars(canvas, xs)
-        label = event["label"]
+        label = fit_label(event, cap)
         tag_text = _tag_text(event)
-        _arrow_line(canvas, xs, event, label + tag_text)
-        lines.append("".join(canvas).rstrip())
         lo = min(xs[event["from"]], xs[event["to"]])
         hi = max(xs[event["from"]], xs[event["to"]])
-        for detail in event.get("details", []):
+        extra_details = []
+        if hi > lo and len(label) + len(tag_text) + 8 > hi - lo:
+            # Even the shortest label does not fit: keep the tags whole by
+            # moving them to a line under the arrow instead of cutting them.
+            if tag_text:
+                extra_details.append("tags:" + tag_text)
+            tag_text = ""
+            room = hi - lo - 8
+            if len(label) > room:
+                extra_details.insert(0, "full label: " + label)
+                label = trim_words(label, room)
+        _arrow_line(canvas, xs, event, label + tag_text, xs)
+        lines.append("".join(canvas).rstrip())
+        for detail in extra_details + list(event.get("details", [])):
             start = lo + 2
             room = max(24, (hi - start - 2) if hi > lo else width - start - 1)
             wrapped = textwrap.wrap(detail, room, subsequent_indent="  ") or [""]

@@ -83,10 +83,17 @@ and negotiated codec with its payload type, whether the codec was verified on
 the wire, whether SRTP was active, and the call's run directory.
 
 `./bin/sippycup summary ENGAGEMENT` picks the calls up as ordinary call runs
-from the `calls/` directories it already reads; the grid itself is in
-`matrix.json`, which the owner report does not render yet.
+from the `calls/` directories it already reads, and draws the grid from
+`matrix.json` (it finds `matrix/` next to the profiles, or use
+`summary --matrix-root DIR`); see `ENGAGEMENT-REPORT.md`.
 
 ## Practice target
+
+`./bin/sippycup practice-target up` renders ready-made matrix profiles
+(`work/practice/target-profile-matrix*.yaml`, `limits.max_calls: 12`, direct and
+through the proxy) and `practice-target info` prints the exact commands; see
+"Practice the call matrix" in `PRACTICE-TARGET.md`. The older example below
+uses hand-made copies of the one-call profiles.
 
 The practice Asterisk endpoints allow only PCMU and PCMA. A run over copies
 of the practice profiles with `limits.max_calls: 6`, `features.srtp: true`,
