@@ -119,6 +119,10 @@ def classify(probe: dict[str, Any], port: int, result: Any) -> dict[str, Any]:
         "hangup": result.hangup,
         "secureSignaling": probe["transport"] == "tls",
         "warnings": list(result.warnings),
+        # Which media-scope rule admitted the media peer (driver
+        # media_scope_decision): approved-address or media-network.
+        "mediaAdmittedBy": (getattr(result, "media_scope", None) or {}).get("admittedBy"),
+        "mediaNetwork": (getattr(result, "media_scope", None) or {}).get("network"),
     }
 
 
@@ -274,6 +278,8 @@ def run(ctx: Context) -> CheckResult:
                 account=SoftphoneAccount(username=account, realm="*", registrar=None),
                 answer_timeout_seconds=ctx.answer_timeout,
                 allowed_media_addresses=tuple(ctx.approved_addresses) or (ctx.endpoint.address,),
+                allowed_media_networks=tuple(ctx.media_networks) or None,
+                allowed_media_ports=ctx.media_ports,
                 advertised_address=local,
                 tls_server_name=ctx.endpoint.server_name if tls else None,
                 tls_ca_file=ca_copy if tls else None,

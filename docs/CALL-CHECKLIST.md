@@ -16,7 +16,9 @@ service owner, and `./bin/sippycup scope check` shows what is still unanswered
   that name while connecting only to the literal address.
 - Test username, SIP domain, and password delivery method.
 - Test extension, echo service, or voice-agent destination.
-- Signaling and media IP addresses or CIDRs.
+- Signaling IP addresses, and the media-server addresses or pools (CIDR,
+  each at most 1024 addresses) plus the media servers' RTP port range.
+  Media ranges admit media only; signaling goes only to literal addresses.
 - Whether RTP, SRTP, or DTLS-SRTP is expected.
 - Expected codecs and DTMF method.
 - Whether early media, hold, transfer, and re-INVITE are supported.

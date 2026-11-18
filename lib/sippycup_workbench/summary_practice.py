@@ -11,7 +11,8 @@ field for field, to one archived practice approval. The archive, not the run's
 own copy, is the authority: an archived record must be a target profile with
 approval id LOCAL-PRACTICE-ONLY whose target and every approved address are
 IPv4 loopback addresses other than 127.0.0.1 (the only addresses `up` can
-issue). Such a run can only have reached the loopback-only practice
+issue), and whose media networks, if it had any (`up` issues none), lie
+wholly inside 127.0.0.0/8 without 127.0.0.1. Such a run can only have reached the loopback-only practice
 namespace. The report then checks it against the approval window and address
 that authorized it, instead of against the engagement's own records, and
 labels it as practice. Everything else is checked exactly as before.
@@ -60,7 +61,30 @@ def is_practice_approval(document: Any) -> bool:
     approved = target.get("approved_addresses")
     if not isinstance(approved, list) or not approved:
         return False
+    # `up` issues no media networks; should a record carry one, every
+    # address it admits must itself be a practice address (never 127.0.0.1
+    # or anything routable), so a practice label can never cover more.
+    media = document.get("media")
+    networks = media.get("networks") if isinstance(media, dict) else None
+    if networks is not None and not _practice_networks(networks):
+        return False
     return _practice_address(target.get("host")) and all(_practice_address(item) for item in approved)
+
+
+def _practice_networks(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    caller = ipaddress.ip_address("127.0.0.1")
+    for item in value:
+        try:
+            network = ipaddress.ip_network(str(item), strict=True)
+        except ValueError:
+            return False
+        if network.version != 4 or not network.subnet_of(ipaddress.ip_network("127.0.0.0/8")):
+            return False
+        if caller in network or network.num_addresses > 1024:
+            return False
+    return True
 
 
 def canonical(document: Any) -> str:

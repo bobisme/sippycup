@@ -130,30 +130,47 @@ def _high_entropy(token: str) -> bool:
 
 @dataclass
 class AddressBook:
-    """Approved literal addresses and networks, plus pseudonyms for the rest."""
+    """Approved literal addresses and networks, plus pseudonyms for the rest.
+
+    ``approved`` answers "may this address appear in the evidence", for any
+    role. Networks added with ``media_only=True`` (owner-approved media
+    networks) count there but never for ``approved_for_signaling``.
+    """
 
     networks: list[Any] = field(default_factory=list)
     assessor: set[str] = field(default_factory=set)
     pseudonyms: dict[str, str] = field(default_factory=dict)
+    # Networks approved for signaling (everything not added media-only).
+    signaling: list[Any] = field(default_factory=list)
 
-    def add_network(self, value: str) -> bool:
+    def add_network(self, value: str, *, media_only: bool = False) -> bool:
         try:
             network = ipaddress.ip_network(str(value).strip(), strict=False)
         except ValueError:
             return False
         if network not in self.networks:
             self.networks.append(network)
+        if not media_only and network not in self.signaling:
+            self.signaling.append(network)
         return True
 
-    def approved(self, value: str) -> bool:
+    @staticmethod
+    def _inside(value: str, networks: Iterable[Any]) -> bool:
         try:
             address = ipaddress.ip_address(value)
         except ValueError:
             return False
         return any(
             address.version == network.version and address in network
-            for network in self.networks
+            for network in networks
         )
+
+    def approved(self, value: str) -> bool:
+        return self._inside(value, self.networks)
+
+    def approved_for_signaling(self, value: str) -> bool:
+        """Inside a network approved for signaling, not only for media."""
+        return self._inside(value, self.signaling)
 
     def label(self, value: str) -> str:
         """Approved addresses are shown; everything else gets a stable label."""

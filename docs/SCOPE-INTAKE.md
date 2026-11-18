@@ -168,22 +168,55 @@ or a refusal.
 ### Signaling and media on different addresses
 
 Behind a proxy or SBC, answer `signaling.networks` and the targets with the
-proxy's address and `media.networks` with the media servers' literal
-addresses. The profile then approves both (the target first, then each
-single-host media address), the campaign authorizes both networks, and the
-expectations allow both, so the guided call, the campaign, and `srtp-policy`
-accept the media peer the SDP answer names. Leave the media address out and
-the guided call ends `media-outside-scope` as soon as the peer is known, a
-safety stop that the cockpit marks `[stop]` and the owner report discloses as
-an integrity exception with the RTP packets sent before the hangup.
-`./bin/sippycup practice-target rehearsal --proxy` rehearses exactly this
-shape and that stop (see `PRACTICE-TARGET.md`).
+proxy's address and `media.networks` with the media servers: their literal
+addresses, or the media-server pool as a range (CIDR), which is how most
+owners approve media. `scope compile` writes them so:
+
+| `media.networks` answer | Profile | Admits |
+|---|---|---|
+| a literal address (`198.51.100.7`) or a `/32` | `target.approved_addresses` (after the target) | media; the profile already treats literal approved addresses as reachable |
+| a range (`198.51.100.0/27`) | `media.networks` | media ONLY: never a signaling target |
+| `media.port_range` | `media.port_range` | the far end's RTP ports; a media port outside it stops the call |
+
+The campaign authorizes every network, the expectations list every address
+(up to 1024), and the guided call, the call matrix, and `srtp-policy` accept
+a media peer that is a literal approved address or lies inside a
+`media.networks` range. Signaling is never widened: `target.host` must still
+be one of the literal `approved_addresses`, so a call whose host lies inside
+a media range is refused before any packet. Each run records which rule
+admitted the media peer (`result.json` `mediaScope.admittedBy`:
+`approved-address` or `media-network` with the range).
+
+Breadth rule. A media range in the profile holds at most 1024 addresses
+(IPv4 `/22` or narrower, IPv6 `/118` or narrower), at most 1024 in total and
+at most 16 ranges, with no host bits set, and none containing unspecified,
+multicast, reserved, or broadcast addresses (`0.0.0.0/8`, `224.0.0.0/4`,
+`240.0.0.0/4`, `255.255.255.255`, `::`, `ff00::/8`). A real media-server
+pool is a few dozen to a few hundred addresses; anything wider is more likely
+a copied "any" or a whole provider block. 1024 is also the most the packet
+oracle's literal allowlist carries, so every admitted address is still
+checked offline. `scope check` reports a wider range as
+`scope.media_network_too_broad` (an error that blocks only the profile; the
+campaign manifest is still generated) and a range of more than 256 addresses
+as the warning `scope.media_network_wide`; `rehearse` refuses a profile that
+breaks the rule. Either message says what to ask the owner for: the exact
+media-server pool(s), each of at most 1024 addresses, or the literal media
+addresses.
+
+Leave the media address out and the guided call ends `media-outside-scope` as
+soon as the peer is known, a safety stop that the cockpit marks `[stop]` and
+the owner report discloses as an integrity exception with the RTP packets sent
+before the hangup. `./bin/sippycup practice-target rehearsal --proxy`
+rehearses exactly this shape and that stop, and `rehearsal --media-cidr` the
+same with media answered as a range (see `PRACTICE-TARGET.md`).
 
 ### What is not generated
 
 Hostnames (targets are literal addresses), media CIDRs larger than 1024
-addresses (the oracle takes literal endpoints, so expectations are skipped),
-media CIDRs in the profile's `approved_addresses`, a final-status expectation
+addresses (the oracle takes literal endpoints, so expectations are skipped;
+the profile is not generated either, see the breadth rule above), media
+ranges in the profile's `approved_addresses` (they go to the media-only
+`media.networks`), a final-status expectation
 for a destination that should reject, capture settings other than the profile
 defaults, and anything about test classes beyond `options` and `call`. A
 profile represents one target; the manifest carries all of them.

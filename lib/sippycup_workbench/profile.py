@@ -28,9 +28,11 @@ _TOP_LEVEL_FIELDS = {
     "features",
     # Optional: the owner-approved posture checks (see docs/SECURITY-CHECKS.md).
     "security_checks",
-    # Optional: the owner-approved codecs (see docs/GUIDED-CALL.md "Codec control").
+    # Optional: the owner-approved codecs (see docs/GUIDED-CALL.md "Codec control"),
+    # media networks and media port range (media only, never signaling).
     "media",
 }
+MEDIA_FIELDS = {"codecs", "networks", "port_range"}
 _SECTION_FIELDS = {
     "target": {
         "host",
@@ -260,9 +262,10 @@ def approved_codecs(
 ) -> tuple[str, ...] | None:
     """The owner-approved codecs (``media.codecs``) in supported spelling.
 
-    ``None`` when the profile has no ``media`` section, which approves no
-    particular codec list. Problems are appended to ``errors`` (or raised as
-    :class:`ProfileError` when ``errors`` is ``None``).
+    ``None`` when the profile has no ``media`` section, or a ``media``
+    section without ``codecs`` (only media networks or ports), which approves
+    no particular codec list. Problems are appended to ``errors`` (or raised
+    as :class:`ProfileError` when ``errors`` is ``None``).
     """
     from sippycup_softphone.driver import SoftphoneError, canonical_codec
 
@@ -271,14 +274,16 @@ def approved_codecs(
     if media is None:
         return None
     result: list[str] = []
-    if not isinstance(media, dict):
-        problems.append("media must be a mapping")
+    if not isinstance(media, dict) or not media:
+        problems.append("media must be a non-empty mapping (codecs, networks, port_range)")
     else:
-        unknown = set(media) - {"codecs"}
+        unknown = set(media) - MEDIA_FIELDS
         if unknown:
             problems.append(f"unknown media fields: {', '.join(sorted(unknown))}")
         codecs = media.get("codecs")
-        if not isinstance(codecs, list) or not codecs:
+        if "codecs" not in media:
+            pass
+        elif not isinstance(codecs, list) or not codecs:
             problems.append("media.codecs must be a non-empty list of codec names")
         else:
             for item in codecs:
@@ -296,7 +301,33 @@ def approved_codecs(
             raise ProfileError("; ".join(problems))
         errors.extend(problems)
         return None
+    if isinstance(media, dict) and "codecs" not in media:
+        return None
     return tuple(result)
+
+
+def approved_media(document: dict[str, Any], errors: list[str]) -> dict[str, Any]:
+    """Validate ``media.networks`` and ``media.port_range`` (see media_scope).
+
+    Returns the facts rehearse shows; problems go to ``errors``. Media
+    networks are a MEDIA-ONLY rule: they never make an address a signaling
+    target (``target.host`` must still be a literal approved address).
+    """
+    from .media_scope import validate_networks, validate_ports
+
+    media = document.get("media")
+    facts: dict[str, Any] = {}
+    if not isinstance(media, dict):
+        return facts
+    if "networks" in media:
+        networks = validate_networks(media["networks"], errors)
+        if networks is not None:
+            facts["media_networks"] = networks
+    if "port_range" in media:
+        ports = validate_ports(media["port_range"], errors)
+        if ports is not None:
+            facts["media_ports"] = {"start": ports[0], "end": ports[1]}
+    return facts
 
 
 def rehearse(
@@ -467,11 +498,13 @@ def rehearse(
                 "max_requests": security_checks.get("max_requests"),
             }
 
-    # Optional media section: the codecs the owner approved for calls.
+    # Optional media section: the codecs the owner approved for calls, and
+    # where media may flow besides the literal approved addresses.
     if "media" in document:
         codecs = approved_codecs(document, errors)
         if codecs is not None:
             facts["approved_codecs"] = codecs
+        facts.update(approved_media(document, errors))
 
     facts.update(
         {

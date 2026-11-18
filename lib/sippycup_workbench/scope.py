@@ -1075,6 +1075,27 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
             for field_name, message in problem:
                 v.add("scope.ceiling_infeasible", "inconsistent", field_name, message, (CAMPAIGN,))
 
+    # media CIDRs become the profile's media-only networks: the profile's
+    # breadth rule (media_scope) is checked here so the owner can be asked
+    # before compile, and a wide but acceptable range is flagged for review
+    if media_networks is not None:
+        from .media_scope import MAX_MEDIA_ADDRESSES, validate_networks
+
+        ranges = [n for n in media_networks if n.prefixlen != n.max_prefixlen]
+        problems: list[str] = []
+        if ranges:
+            validate_networks([str(n) for n in ranges], problems, indexed=False)
+        for problem in problems:
+            v.add("scope.media_network_too_broad", "inconsistent", "media.networks",
+                  f"{problem} (the target profile is not generated until this is fixed; "
+                  "the campaign manifest is not affected)", (PROFILE,))
+        for network in ranges if not problems else []:
+            if network.num_addresses > 256:
+                v.add("scope.media_network_wide", "inconsistent", "media.networks",
+                      f"media network {network} admits {network.num_addresses} addresses as media peers "
+                      f"(at most {MAX_MEDIA_ADDRESSES} are accepted); confirm with the owner that every "
+                      "address in it is one of their media servers", (), "warning")
+
     # a media network that the oracle cannot enumerate is a documented skip
     if media_networks is not None and sum(n.num_addresses for n in media_networks) > MAX_ENDPOINTS:
         v.add("scope.media_not_enumerable", "inconsistent", "media.networks",

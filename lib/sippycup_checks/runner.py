@@ -262,9 +262,15 @@ def _needs_password(plan: dict[str, Any]) -> bool:
     )
 
 
-def capture_filter(addresses: Sequence[str]) -> str:
+def capture_filter(addresses: Sequence[str], media_networks: Sequence[str] = ()) -> str:
     hosts = " or ".join(f"host {ipaddress.ip_address(item)}" for item in addresses)
-    return f"({hosts}) and (tcp or udp)"
+    scope = f"({hosts}) and (tcp or udp)"
+    if media_networks:
+        # Owner-approved media networks: UDP (srtp-policy's RTP) only.
+        from sippycup_workbench.media_scope import capture_terms
+
+        scope = f"({scope}) or (({capture_terms(media_networks)}) and udp)"
+    return scope
 
 
 def _utc(instant: datetime) -> str:
@@ -315,6 +321,10 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     target = document["target"]
     host, port, transport = target["host"], target["port"], target["transport"]
     approved_addresses = list(target["approved_addresses"])
+    from sippycup_workbench.media_scope import profile_media
+
+    # Media only (srtp-policy's calls); every check still signals only to target.host.
+    media_networks, media_ports = profile_media(document)
     section = dict(document["security_checks"])
     server_name = target.get("tls_server_name") if transport == "tls" else None
     ca_data: bytes | None = None
@@ -371,13 +381,14 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
                       timeout=deps.timeout, invite_timeout=deps.invite_timeout, openssl=deps.openssl,
                       now=deps.now, monotonic=deps.monotonic,
                       approved_addresses=tuple(approved_addresses), recheck=lapsed, cancel=cancel,
+                      media_networks=tuple(media_networks), media_ports=media_ports,
                       place_call=deps.place_call,
                       call_environment=_sanitized_environment(
                           secrets_list, [options.secret_env] if options.secret_env else [],
                           environ=deps.environ),
                       pjsua=deps.pjsua, run_dir=run_dir, srtp_expected=features.get("srtp") is True)
     implementations = deps.implementations or IMPLEMENTATIONS
-    scope = capture_filter(approved_addresses)
+    scope = capture_filter(approved_addresses, media_networks)
     interface = str((document.get("capture") or {}).get("interface", "any"))
     capture_path = run_dir / "capture.pcap"
     capture_argv = [deps.tcpdump, "-i", interface, "-U", "--immediate-mode", "-n", "-Z", "root",
@@ -406,6 +417,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
             **plan,
             "authorization": {
                 "networks": [str(ipaddress.ip_network(item)) for item in approved_addresses] + local_networks,
+                **({"media_networks": list(media_networks)} if media_networks else {}),
                 "valid_until": plan.get("validUntil"),
             },
             "evidence": {"capture": deps.capture, "retainPayload": True},

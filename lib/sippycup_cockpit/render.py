@@ -101,8 +101,10 @@ def _target_line(target: dict[str, Any]) -> str:
         literal = "from scope.yaml; not compiled into a profile yet"
     else:
         literal = "literal approved address" if target.get("literal") else "NOT a literal approved address"
+    media = (f"; media also from {', '.join(target['mediaNetworks'])} (media only)"
+             if target.get("mediaNetworks") else "")
     return (f"{target.get('host')} port {target.get('port')}/{target.get('transport')} ({literal}){tls}; "
-            f"{account_text}; destinations: {destinations}")
+            f"{account_text}; destinations: {destinations}{media}")
 
 
 def _journal_line(journal: dict[str, Any]) -> str:

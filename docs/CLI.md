@@ -196,7 +196,9 @@ checks include `srtp-policy`, and a last stage shows the media-scope safety
 stop once in a throwaway engagement (`DIR-stop`). `--proxy` (`make
 dress-rehearsal-proxy`) writes the scope answers in the proxy shape:
 signaling to the practice proxy `127.0.0.3` (407 challenges, realm and
-certificate name `sippycup-proxy`), media from `127.0.0.2`. See
+certificate name `sippycup-proxy`), media from `127.0.0.2`. `--media-cidr`
+(`make dress-rehearsal-proxy-cidr`) is the proxy shape with media answered
+as the range `127.0.0.2/31` (a media-only `media.networks` entry). See
 `PRACTICE-TARGET.md`.
 
 ## Bash completion

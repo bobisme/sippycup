@@ -177,25 +177,52 @@ def _build_profile(doc: dict[str, Any], report: Report) -> dict[str, Any]:
 
 
 def _profile_media(doc: dict[str, Any]) -> dict[str, Any] | None:
-    """The owner's expected codecs become the profile's approved codecs.
+    """The owner's media answers become the profile's ``media`` section.
 
-    Calls then offer only these codecs and refuse any other. Omitted when
-    the scope names no codec, so such profiles are unchanged.
+    ``codecs``: the expected codecs become the approved codecs; calls then
+    offer only these and refuse any other. ``networks``: every media CIDR
+    wider than one address (single addresses are already literal approved
+    addresses); the guided call, the matrix, and srtp-policy admit a media
+    peer inside them, for media only. ``port_range``: the far end's RTP
+    ports; a negotiated media port outside it stops the call. Omitted when
+    the scope names none of these, so such profiles are unchanged.
     """
     from sippycup_softphone.driver import SoftphoneError, canonical_codec
 
-    codecs = (doc.get("media") or {}).get("codecs")
-    if not isinstance(codecs, list) or not codecs:
-        return None
-    names: list[str] = []
-    for item in codecs:
+    media = doc.get("media") or {}
+    section: dict[str, Any] = {}
+    codecs = media.get("codecs")
+    if isinstance(codecs, list) and codecs:
+        names: list[str] = []
+        for item in codecs:
+            try:
+                name = canonical_codec(item)
+            except SoftphoneError:
+                names = []
+                break
+            if name not in names:
+                names.append(name)
+        if names:
+            section["codecs"] = names
+    networks: list[str] = []
+    for text in media.get("networks") or []:
         try:
-            name = canonical_codec(item)
-        except SoftphoneError:
-            return None
-        if name not in names:
-            names.append(name)
-    return {"codecs": names}
+            network = canonical_network(str(text).strip())
+        except ValueError:
+            continue
+        if network.prefixlen != network.max_prefixlen and str(network) not in networks:
+            networks.append(str(network))
+    if networks:
+        section["networks"] = networks
+    port_range = media.get("port_range")
+    if (
+        isinstance(port_range, dict)
+        and type(port_range.get("start")) is int
+        and type(port_range.get("end")) is int
+        and 1 <= port_range["start"] <= port_range["end"] <= 65535
+    ):
+        section["port_range"] = {"start": port_range["start"], "end": port_range["end"]}
+    return section or None
 
 
 def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str]]:
@@ -598,15 +625,22 @@ def compile_scope(
         result.notes.append(
             "a destination expected to reject has no generated final-status expectation"
         )
-    media = doc["media"]["networks"]
-    if PROFILE in builders and any(
-        canonical_network(text).prefixlen != canonical_network(text).max_prefixlen for text in media
-    ):
-        result.notes.append(
-            "media CIDRs are not listed in the profile's approved_addresses (literal addresses only); "
-            "the guided call hangs up when media is negotiated to an address that is not listed, "
-            "so ask the owner for the literal media addresses"
-        )
+    if PROFILE in builders:
+        written = yaml.safe_load(builders[PROFILE].decode()).get("media") or {}
+        if written.get("networks"):
+            from .media_scope import describe
+
+            result.notes.append(
+                f"media networks {describe(written['networks'])} are in the profile's media.networks: "
+                "the guided call, the call matrix, and srtp-policy accept a media peer inside them "
+                "(media only; signaling still goes only to the literal target.host)"
+            )
+        if written.get("port_range"):
+            ports = written["port_range"]
+            result.notes.append(
+                f"media port range {ports['start']}-{ports['end']} is in the profile's media.port_range: "
+                "a call stops when the far end negotiates a media port outside it"
+            )
     return result
 
 

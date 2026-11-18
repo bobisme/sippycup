@@ -244,6 +244,9 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
     if auth["window"]:
         out.append(f"- Approval window: {md(auth['window']['from'])} to {md(auth['window']['until'])}")
     out.append("- Approved addresses: " + (", ".join(code(a) for a in auth["approvedAddresses"]) or "none recorded"))
+    if auth.get("mediaOnlyNetworks"):
+        out.append("- Of these, approved for media only (never a signaling target): "
+                   + ", ".join(code(a) for a in auth["mediaOnlyNetworks"]))
     out.append("")
     out += _md_table(
         ["Record", "Kind", "Approval", "Approved by", "Status", "Valid from", "Valid until", "Addresses", "Ports", "Transports", "Server names"],
@@ -787,6 +790,9 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
     if auth["window"]:
         out.append(f"<li>Approval window: {h(auth['window']['from'])} to {h(auth['window']['until'])}</li>")
     out.append("<li>Approved addresses: " + (", ".join(_c(a) for a in auth["approvedAddresses"]) or "none recorded") + "</li>")
+    if auth.get("mediaOnlyNetworks"):
+        out.append("<li>Of these, approved for media only (never a signaling target): "
+                   + ", ".join(_c(a) for a in auth["mediaOnlyNetworks"]) + "</li>")
     out.append("</ul>")
     out.append(
         _html_table(

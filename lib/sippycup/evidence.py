@@ -182,7 +182,12 @@ def _authorized_networks(plan: dict[str, Any], extras: Iterable[str]) -> list[An
     configured = authorization.get("networks", [])
     if not isinstance(configured, list):
         raise EvidenceError("plan authorization networks must be a list")
-    raw = list(configured) + list(extras)
+    # Owner-approved media networks (guided call and checks plans): an
+    # address inside one may appear in the evidence as a media peer.
+    media = authorization.get("media_networks", [])
+    if not isinstance(media, list):
+        raise EvidenceError("plan authorization media_networks must be a list")
+    raw = list(configured) + list(media) + list(extras)
     networks = []
     for value in raw:
         try:

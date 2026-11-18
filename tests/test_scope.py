@@ -495,7 +495,12 @@ class CompileTests(ScopeTestCase):
         self.assertEqual(profile["limits"]["max_calls"], 10)
         self.assertTrue(profile["features"]["srtp"])
         self.assertFalse(profile["features"]["dtls_srtp"])
-        self.assertEqual(profile["media"], {"codecs": ["PCMU", "PCMA"]})
+        self.assertEqual(profile["media"], {
+            "codecs": ["PCMU", "PCMA"],
+            "networks": ["10.20.31.0/28"],
+            "port_range": {"start": 10000, "end": 10100},
+        })
+        self.assertEqual(profile["target"]["approved_addresses"], ["10.20.30.40"])
         # After the window passes, rehearse (not compile) blocks the profile.
         late = rehearse(profile, now=datetime(2100, 1, 2, tzinfo=timezone.utc))
         self.assertFalse(late.ready)
@@ -675,13 +680,17 @@ class CompileTests(ScopeTestCase):
         self.assertEqual(result.generated, [])
         self.assertEqual(set(result.skipped), set(FILENAMES))
 
-    def test_oversized_media_network_skips_expectations_only(self) -> None:
+    def test_oversized_media_network_skips_expectations_and_profile_only(self) -> None:
         document = complete_scope()
         document["media"]["networks"] = ["10.20.0.0/20"]
         self.write_scope(document)
         result = self.compile()
-        self.assertEqual(set(result.skipped), {"expectations"})
+        # The oracle cannot enumerate it, and the profile's media-only rule
+        # refuses a network of more than 1024 addresses (bn-1qm); the
+        # campaign manifest is still generated.
+        self.assertEqual(set(result.skipped), {"expectations", "profile"})
         self.assertEqual(result.skipped["expectations"][0].code, "scope.media_not_enumerable")
+        self.assertEqual(result.skipped["profile"][0].code, "scope.media_network_too_broad")
         self.assertEqual(result.exit_code, 1)
 
     def test_invalid_scope_writes_nothing(self) -> None:
@@ -697,7 +706,7 @@ class CompileTests(ScopeTestCase):
         self.write_scope(complete_scope())
         notes = " ".join(self.compile().notes)
         self.assertIn("first target", notes)
-        self.assertIn("media CIDRs", notes)
+        self.assertIn("10.20.31.0/28 (16 addresses) are in the profile's media.networks", notes)
 
 
 class StalenessTests(ScopeTestCase):

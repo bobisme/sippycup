@@ -97,6 +97,18 @@
       }
     },
     "captureFilter": {"type": "string"},
+    "mediaScope": {
+      "type": ["object", "null"],
+      "description": "The media-scope rules the softphone enforced (literal approved addresses, the profile's media.networks and media.port_range) and which rule admitted the media peer PJSUA reported: admittedBy approved-address, media-network (network names the CIDR; media only, never a signaling target), any-address (only a port rule), or null (refused or peer unknown). inScope is null while the peer is unknown. null when no call object was built.",
+      "properties": {
+        "rules": {"type": "object"},
+        "peer": {"type": ["string", "null"]},
+        "admittedBy": {"enum": ["approved-address", "media-network", "any-address", null]},
+        "network": {"type": ["string", "null"]},
+        "portAdmitted": {"type": ["boolean", "null"]},
+        "inScope": {"type": ["boolean", "null"]}
+      }
+    },
     "preflight": {
       "type": ["object", "null"],
       "properties": {
