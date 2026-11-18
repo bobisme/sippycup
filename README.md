@@ -486,6 +486,15 @@ numbers, or capture clock origin:
 ./bin/sippycup diff evidence/baseline evidence/candidate --format human
 ```
 
+To see a call's flow in seconds, draw a redacted SIP and media ladder from a
+run directory or capture (text for the terminal, self-contained HTML for the
+owner report; see `docs/LADDER.md`):
+
+```sh
+./bin/sippycup ladder work/practice/calls/RUN_ID
+./bin/sippycup ladder work/practice/calls/RUN_ID --format html --output ladder.html
+```
+
 Codec, endpoint topology, one-way media, response/setup timing, assertion,
 and post-BYE changes remain semantic and link back to source frames. JSON,
 human, and JUnit views share one versioned result model. See

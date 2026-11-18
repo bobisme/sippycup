@@ -158,6 +158,16 @@ is 0 when written, 1 when written with integrity exceptions, 2 for usage
 errors, and 3 when the privacy lint refused to write anything. See
 `ENGAGEMENT-REPORT.md`.
 
+## Call ladder
+
+`./bin/sippycup ladder RUN_DIR|CAPTURE [--format text|html|json] [--output FILE]
+[--call-id-index N] [--width N] [--approve NET] [--show-addresses]` draws a
+redacted SIP and media sequence diagram from recorded evidence. It is offline
+(`direct` mode: host, or the image under `--isolated`/`--practice`). Exit
+status is 0 when drawn, 2 for bad arguments or an unusable path, 3 for an
+unreadable capture, 4 when there is nothing to draw (no SIP, TLS, or RTP), and
+5 for an internal error or a privacy lint refusal. See `LADDER.md`.
+
 ## Bash completion
 
 Source the completion from a checkout:

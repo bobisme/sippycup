@@ -199,6 +199,7 @@ COPY bin/selftest /usr/local/bin/sippycup-selftest
 COPY bin/sippycup-assert /usr/local/bin/sippycup-assert
 COPY bin/sippycup-chaos /usr/local/bin/sippycup-chaos
 COPY bin/sippycup-diff /usr/local/bin/sippycup-diff
+COPY bin/sippycup-ladder /usr/local/bin/sippycup-ladder
 COPY bin/sippycup-evidence /usr/local/bin/sippycup-evidence
 COPY bin/sippycup-pack /usr/local/bin/sippycup-pack
 COPY bin/sippycup-envelope /usr/local/bin/sippycup-envelope
@@ -221,6 +222,7 @@ COPY lib/sippycup_chaos /usr/local/lib/sippycup_chaos
 COPY lib/sippycup_torture /usr/local/lib/sippycup_torture
 COPY lib/sippycup_tui /usr/local/lib/sippycup_tui
 COPY lib/sippycup_learn /usr/local/lib/sippycup_learn
+COPY lib/sippycup_ladder /usr/local/lib/sippycup_ladder
 COPY lib/sippycup_media /usr/local/lib/sippycup_media
 COPY lib/sippycup_mcp /usr/local/lib/sippycup_mcp
 COPY lib/sippycup_resilience /usr/local/lib/sippycup_resilience
@@ -258,6 +260,7 @@ RUN chmod 0755 \
         /usr/local/bin/sippycup-assert \
         /usr/local/bin/sippycup-chaos \
         /usr/local/bin/sippycup-diff \
+        /usr/local/bin/sippycup-ladder \
         /usr/local/bin/sippycup-evidence \
         /usr/local/bin/sippycup-pack \
         /usr/local/bin/sippycup-envelope \
