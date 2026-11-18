@@ -41,6 +41,39 @@ class JournalTests(unittest.TestCase):
             with self.assertRaises(JournalError):
                 initialize(root, title="replacement", owner="Quad")
 
+    def test_initialize_adopts_an_existing_journal_free_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as parent_name:
+            root = Path(parent_name) / "assessment"
+            root.mkdir(mode=0o755)
+            (root / "scope.yaml").write_text("name: x\n")
+            initialize(root, title="Assessment", owner="Quad")
+            self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
+            self.assertEqual((root / "scope.yaml").read_text(), "name: x\n")
+            self.assertEqual(
+                stat.S_IMODE((root / "journal.jsonl").stat().st_mode), 0o600
+            )
+            append(root, kind="note", summary="kept")
+            before = (root / "journal.jsonl").read_bytes()
+            with self.assertRaises(JournalError):
+                initialize(root, title="replacement", owner="Quad")
+            self.assertEqual((root / "journal.jsonl").read_bytes(), before)
+
+    def test_initialize_refuses_partial_or_symlinked_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as parent_name:
+            parent = Path(parent_name)
+            partial = parent / "partial"
+            partial.mkdir()
+            (partial / "journal.jsonl").write_text("")
+            with self.assertRaises(JournalError):
+                initialize(partial, title="t", owner="o")
+            real = parent / "real"
+            real.mkdir()
+            link = parent / "link"
+            link.symlink_to(real)
+            with self.assertRaises(JournalError):
+                initialize(link, title="t", owner="o")
+            self.assertFalse((real / "engagement.json").exists())
+
     def test_append_builds_a_verifiable_hash_chain(self) -> None:
         with tempfile.TemporaryDirectory() as parent_name:
             root = Path(parent_name) / "assessment"

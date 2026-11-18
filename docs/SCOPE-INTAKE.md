@@ -62,8 +62,9 @@ too. A rejected file produces no derivatives.
 
 Creates a pending mode-0600 `scope.yaml` containing no addresses, approval, or
 limits (`status: pending`, everything else null or empty). It refuses to
-overwrite an existing file. The directory must already exist because
-`journal init` refuses an existing directory; create the journal first.
+overwrite an existing file. The directory must already exist. `scope init`
+works whether or not the directory already has a journal, and `journal init`
+works in an existing directory that has no journal yet, so either order is fine.
 `--name` sets the engagement name (default: a slug of the directory name).
 
 ## `scope questions [ENGAGEMENT_DIR]`
