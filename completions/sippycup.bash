@@ -70,7 +70,7 @@ _sippycup() {
         summary)
             COMPREPLY=(
                 $(compgen -W \
-                    "--output --format md html json text --audience owner internal --runs --since --title --generated-at --run-root --profile --manifest --include-journal-notes --forbid-file --force --allow-exceptions --journal --help" \
+                    "--output --format md html json text --audience owner internal --runs --since --title --generated-at --run-root --matrix-root --profile --manifest --include-journal-notes --forbid-file --force --allow-exceptions --journal --help" \
                     -- "${current}")
             )
             ;;

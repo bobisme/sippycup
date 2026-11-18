@@ -32,6 +32,7 @@ from typing import Any, Iterable
 
 import yaml
 
+from . import summary_matrix
 from .journal import JournalError, verify as verify_journal
 from .summary_privacy import AddressBook, Sanitizer, short_hash, strip_controls
 
@@ -127,6 +128,7 @@ class Options:
     title: str | None = None
     generated_at: str | None = None
     run_roots: tuple[Path, ...] = ()
+    matrix_roots: tuple[Path, ...] = ()
     profiles: tuple[Path, ...] = ()
     manifests: tuple[Path, ...] = ()
     forbidden: tuple[str, ...] = ()
@@ -1880,6 +1882,37 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     for run in runs:
         exceptions.extend(run["integrity"])
         candidate_findings.extend(_observations(run) if run["readable"] != "unreadable" else [])
+    # Matrix grids (matrix.json), checked against the runs found above.
+    matrices: list[dict[str, Any]] = []
+    matrix_files, matrix_warnings = summary_matrix.discover(root, [Path(p) for p in options.matrix_roots], profile_paths)
+    discovery_warnings = list(discovery_warnings) + matrix_warnings
+    if matrix_files:
+        schema_file = summary_matrix.schema_path()
+        schema = None
+        if schema_file is not None:
+            try:
+                schema = read_json(schema_file)
+            except Unreadable:
+                schema = None
+        runs_by_id = {run["id"]: run for run in runs}
+        for ref, matrix_path in matrix_files:
+            matrix, matrix_exceptions = summary_matrix.build(
+                matrix_path,
+                ref,
+                read_json=read_json,
+                known_runs={raw.name for raw in raws},
+                runs_by_id=runs_by_id,
+                ctx=ctx,
+                destinations=scope.destinations,
+                ident=_ident,
+                schema=schema if isinstance(schema, dict) else None,
+            )
+            exceptions.extend(matrix_exceptions)
+            if matrix is not None:
+                matrices.append(matrix)
+        matrices.sort(key=lambda m: (m.get("started") or "9999", m["id"]))
+        for index, matrix in enumerate(matrices, 1):
+            matrix["label"] = f"M{index}"
     # Deduplicate exceptions.
     unique_exceptions = {(e["code"], e["run"] or "", e["detail"]): e for e in exceptions}
     exceptions = [unique_exceptions[key] for key in sorted(unique_exceptions)]
@@ -1920,6 +1953,14 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     "with no other interface). They are rehearsal runs, not assessment traffic: they are not counted in "
                     "the totals and were re-checked against the archived practice approval each one used.",
         })
+    for matrix in matrices:
+        if matrix["state"] in {"stopped", "cancelled"} or matrix["notRun"]:
+            limitations.append({
+                "code": "matrix-incomplete",
+                "text": f"Matrix {matrix['label']} {matrix['state']}: {matrix['callsPlaced']} of {matrix['totalCalls']} cells ran"
+                        + (f" ({matrix['stopReason']})" if matrix.get("stopReason") else "")
+                        + f"; {matrix['notRun']} cell(s) were not run.",
+            })
     recommendations = []
     for finding in findings:
         if finding.get("remediation"):
@@ -1960,6 +2001,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         },
         "integrityExceptions": exceptions,
         "runs": runs,
+        "matrices": matrices,
         "runCounts": kinds,
         "totals": totals,
         "ceilings": ceilings,

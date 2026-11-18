@@ -72,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--title", metavar="TEXT", help="report title (default: the engagement title)")
     parser.add_argument("--generated-at", metavar="TIME", help="fixed generation time (RFC 3339) for reproducible output")
     parser.add_argument("--run-root", action="append", default=[], metavar="DIR", help="extra directory of run directories; repeatable")
+    parser.add_argument("--matrix-root", action="append", default=[], metavar="DIR", help="extra directory of matrix run directories (each holds matrix.json); repeatable. DIR/matrix and matrix/ beside each profile are read without it")
     parser.add_argument("--profile", action="append", default=[], metavar="PATH", help="extra target profile to treat as an authorization record")
     parser.add_argument("--manifest", action="append", default=[], metavar="PATH", help="extra campaign manifest to treat as an authorization record")
     parser.add_argument("--include-journal-notes", action="store_true", help="include journal entry detail text (sanitized)")
@@ -218,12 +219,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             title=args.title,
             generated_at=generated_text,
             run_roots=tuple(Path(p) for p in args.run_root),
+            matrix_roots=tuple(Path(p) for p in args.matrix_root),
             profiles=tuple(Path(p) for p in args.profile),
             manifests=tuple(Path(p) for p in args.manifest),
             forbidden=_forbidden(args.forbid_file),
             cli_version=_cli_version(),
         )
-        for extra in list(options.run_roots) + list(options.profiles) + list(options.manifests):
+        for extra in list(options.run_roots) + list(options.matrix_roots) + list(options.profiles) + list(options.manifests):
             if not extra.exists():
                 raise UsageError(f"path does not exist: {extra}")
         formats = sorted(set(args.format or ["md", "html"]))

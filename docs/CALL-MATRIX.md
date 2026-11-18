@@ -83,8 +83,9 @@ and negotiated codec with its payload type, whether the codec was verified on
 the wire, whether SRTP was active, and the call's run directory.
 
 `./bin/sippycup summary ENGAGEMENT` picks the calls up as ordinary call runs
-from the `calls/` directories it already reads; the grid itself is in
-`matrix.json`, which the owner report does not render yet.
+from the `calls/` directories it already reads, and draws the grid from
+`matrix.json` (it finds `matrix/` next to the profiles, or use
+`summary --matrix-root DIR`); see `ENGAGEMENT-REPORT.md`.
 
 ## Practice target
 

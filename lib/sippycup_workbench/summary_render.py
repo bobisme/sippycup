@@ -66,6 +66,47 @@ def _sent(sent: dict[str, Any]) -> str:
     return ", ".join(parts) or "—"
 
 
+def _matrix_cell(cell: dict[str, Any] | None) -> tuple[str, str]:
+    """(plain text, class) for one grid cell: verdict, setup time, run label."""
+    if cell is None:
+        return "—", "none"
+    if cell["status"] == "not-run":
+        return "not run", "none"
+    if cell["status"] != "run":
+        return str(cell["status"]), "none"
+    verdict = cell.get("verdict") or "unrecorded"
+    text = verdict
+    if verdict == "pass" and cell.get("setupSeconds") is not None:
+        text += f" {cell['setupSeconds']:.3f}s"
+    elif verdict != "pass" and cell.get("finalStatus"):
+        text += f" ({cell['finalStatus']})"
+    if cell.get("run"):
+        text += f" [{cell['run']}]"
+    if cell.get("warning"):
+        text += " †"
+    return text, "ok" if verdict == "pass" else "bad"
+
+
+def _matrix_heading(matrix: dict[str, Any]) -> str:
+    text = (
+        f"{matrix['label']} (destination {_value(matrix['destination'])}): {_value(matrix['state'])}, "
+        f"{matrix['callsPlaced']} of {matrix['totalCalls']} cells ran, {matrix['passed']} passed"
+    )
+    if matrix["notRun"]:
+        text += f", {matrix['notRun']} not run"
+    if matrix.get("stopReason"):
+        text += f"; stop reason: {matrix['stopReason']}"
+    if matrix.get("practice"):
+        text += "; practice target"
+    return text
+
+
+_MATRIX_NOTE = (
+    "Each cell is one guided call; [R#] names its run. † SRTP keys were offered in SDP over cleartext "
+    "signaling (SDES over UDP or TCP)."
+)
+
+
 def _yes(value: Any) -> str:
     return _value(value)
 
@@ -280,6 +321,16 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
             for r in calls
         ),
     )
+    out += ["### Call matrices", ""]
+    if not model.get("matrices"):
+        out += ["No call matrix was found.", ""]
+    for matrix in model.get("matrices", []):
+        out += [md(_matrix_heading(matrix)), ""]
+        out += _md_table(
+            ["Transport", "SRTP", *[md(c) for c in matrix["codecs"]]],
+            ([md(r["transport"]), md(r["srtp"]), *[md(_matrix_cell(c)[0]) for c in r["cells"]]] for r in matrix["rows"]),
+        )
+        out += [_MATRIX_NOTE, ""]
     out += ["### Campaigns", ""]
     campaigns = [r for r in model["runs"] if r["kind"] == "campaign"]
     if not campaigns:
@@ -637,6 +688,10 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .svg-window{fill:var(--window)}.svg-activity{fill:var(--activity)}.svg-axis{stroke:var(--line)}
 .svg-bar.st-ok{fill:var(--ok)}.svg-bar.st-bad{fill:var(--bad)}.svg-bar.st-warn{fill:var(--warn)}.svg-bar.st-unknown{fill:var(--unk)}
 .svg-exception{stroke:var(--bad);stroke-width:2;stroke-dasharray:3 2}
+.mx{display:inline-block;white-space:nowrap;font-variant-numeric:tabular-nums}
+.mx-ok{color:var(--ok)}.mx-bad{color:var(--bad);font-weight:600}.mx-none{color:var(--unk)}
+.mx-mark{display:inline-block;width:1.1em;text-align:center}
+.mx-head{margin:14px 0 6px}
 .svg-to{fill:var(--to)}.svg-from{fill:var(--from)}
 details{margin:0 0 12px}summary{cursor:pointer;font-weight:600;padding:4px 0}
 footer{margin-top:40px;color:var(--muted);font-size:.85rem}
@@ -822,6 +877,21 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             ),
         )
     )
+    out.append('<h3>Call matrices</h3>')
+    if not model.get("matrices"):
+        out.append("<p>No call matrix was found.</p>")
+    for matrix in model.get("matrices", []):
+        out.append(f'<p class="mx-head"><strong>{h(matrix["label"])}</strong>{h(_matrix_heading(matrix)[len(matrix["label"]):])}</p>')
+        rows = []
+        for r in matrix["rows"]:
+            cells = []
+            for c in r["cells"]:
+                text, css = _matrix_cell(c)
+                mark = {"ok": "✓", "bad": "✗", "none": "–"}[css]
+                cells.append(f'<span class="mx mx-{css}"><span class="mx-mark" aria-hidden="true">{mark}</span> {h(text)}</span>')
+            rows.append([h(r["transport"]), h(r["srtp"]), *cells])
+        out.append(_html_table(f"Call matrix {matrix['label']}", ["Transport", "SRTP", *[_value(c) for c in matrix["codecs"]]], rows, row_header=False))
+        out.append(f'<p class="meta">{h(_MATRIX_NOTE)}</p>')
     out.append('<h3>Campaigns</h3>')
     campaigns = [r for r in model["runs"] if r["kind"] == "campaign"]
     if not campaigns:
@@ -1011,6 +1081,14 @@ def render_text(model: dict[str, Any], report_sha256: str) -> str:
     for r in model["runs"]:
         out.append(f"  {r['id']}  {r['kind']:<8} {_value(r['started'])}  {_target(r.get('target'))}  {r.get('verdict') or r['readable']}")
         out.append(f"      sent: {_sent(r['sent'])}")
+    for matrix in model.get("matrices", []):
+        out += ["", "CALL MATRIX", "", "  " + _matrix_heading(matrix)]
+        texts = [[_matrix_cell(c)[0] for c in r["cells"]] for r in matrix["rows"]]
+        widths = [max([len(c)] + [len(line[i]) for line in texts]) for i, c in enumerate(matrix["codecs"])]
+        out.append(("  " + f"{'transport':<10} {'srtp':<10} " + "  ".join(c.ljust(w) for c, w in zip(matrix["codecs"], widths))).rstrip())
+        for r, line in zip(matrix["rows"], texts):
+            out.append("  " + f"{r['transport']:<10} {r['srtp']:<10} " + "  ".join(t.ljust(w) for t, w in zip(line, widths)).rstrip())
+        out.append("  " + _MATRIX_NOTE)
     out += ["", "FINDINGS", ""]
     if not model["findings"]:
         out.append("  none")

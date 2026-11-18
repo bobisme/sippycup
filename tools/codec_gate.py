@@ -187,6 +187,20 @@ class CodecGate(practice_gate.Gate):
             code == 0 and len(statuses) == 4 and all(item[2] == "pass" for item in statuses),
             {"exit": code, "cells": statuses, "stderr": stderr.strip()[-300:] or None},
         )
+        report = self.run(
+            "summary", self.work_path(""), "--run-root", self.work_path("matrix-calls-shipped"),
+            "--matrix-root", self.work_path("matrix-shipped"), "--format", "text", "--output",
+            self.work_path("report-shipped"), "--generated-at", datetime.now(timezone.utc).isoformat(),
+            "--allow-exceptions",
+        )
+        text_path = self.host_path("report-shipped") / "engagement-report.txt"
+        text = text_path.read_text(encoding="utf-8") if text_path.is_file() else ""
+        self.record(
+            "summary draws the shipped matrix as a grid (4 cells, all pass) with no matrix integrity exception",
+            report.returncode == 0 and "CALL MATRIX" in text and text.count("pass ") >= 4
+            and "[matrix-" not in text,
+            {"exit": report.returncode, "stderr": report.stderr.strip()[-200:] or None},
+        )
         proxy = [f"work/practice/{name}" for name in ("target-profile-matrix-proxy.yaml", "target-profile-matrix-proxy-tls.yaml")]
         code, value, stderr = self.matrix(
             "shipped-proxy", "--dial", "echo", "--codecs", "PCMU", "--transports", "udp", profiles=proxy
