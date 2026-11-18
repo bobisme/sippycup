@@ -229,6 +229,22 @@ class MediaInvariantTests(unittest.TestCase):
         frames = {item.frame_number.value for item in result["media.timing"].evidence}
         self.assertEqual(frames, {300, 301})
 
+    def test_media_in_flight_to_the_bye_sender_is_late_only_after_the_bye_is_answered(self) -> None:
+        # Baseline: the caller sends BYE at 0.5 and the callee answers 200 at 0.6.
+        in_flight = good_media() + (
+            rtp_frame(310, "0.55", caller_to_callee=False, sequence=30, timestamp=4800),
+        )
+        result = assertions(evaluate_invariants(in_flight, baseline_dialog()))
+        self.assertEqual(result["media.timing"].verdict, Verdict.PASS)
+        late = good_media() + (
+            rtp_frame(311, "0.55", caller_to_callee=True, sequence=30, timestamp=4800),
+            rtp_frame(312, "0.65", caller_to_callee=False, sequence=31, timestamp=4960),
+        )
+        result = assertions(evaluate_invariants(late, baseline_dialog()))
+        self.assertEqual(result["media.timing"].verdict, Verdict.FAIL)
+        frames = {item.frame_number.value for item in result["media.timing"].evidence}
+        self.assertEqual(frames, {311, 312})
+
     def test_renegotiated_payload_change_is_not_an_unexpected_transition(self) -> None:
         dialog = reconstruct_dialogs(scenario_frames("renegotiation")).dialogs[0]
         media = (

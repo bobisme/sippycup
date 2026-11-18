@@ -1,7 +1,7 @@
 # The operator cockpit: `./bin/sippycup go`
 
 `./bin/sippycup go [DIR]` shows where an engagement stands and walks you
-through the next step. It reads files on disk, shows an eight-stage checklist,
+through the next step. It reads files on disk, shows a nine-stage checklist,
 and offers the next commands. When you choose one, it starts the ordinary
 public command (`./bin/sippycup ...`) and streams its output.
 
@@ -77,7 +77,7 @@ Status always uses text markers; colour is only a supplement and is off when
 | `[local]` | changes local containers or files; asks y/N |
 | `[LIVE]` | sends traffic; needs the typed approval token |
 
-## The eight stages
+## The nine stages
 
 The stage text lives in one module (`lib/sippycup_cockpit/help_text.py`);
 press `?` or type `sN` to read it in the cockpit.
@@ -92,11 +92,27 @@ press `?` or type `sN` to read it in the cockpit.
    literal address.
 5. **First call**: one guided baseline call with a PASS verdict.
 6. **Campaign**: freeze the campaign plan, then run it.
-7. **Evidence**: every run has an evidence manifest and a journal entry.
-8. **Report**: an internal report draft rendered from the journal.
+7. **Security checks**: `checks plan`, then `checks run` (through `--practice`
+   when the target is the practice address; the password comes from the same
+   `file`/`env` prompt as the call). Done when a checks run completed: its
+   `result.json` state is `completed` and no check ended in `error`. Findings
+   are the output of a completed run, not a failure. Shown as `[--]` not
+   applicable when the profile's `security_checks.approved` is empty.
+8. **Evidence**: every run has an evidence manifest and a journal entry.
+9. **Owner report**: `summary DIR --journal` wrote `report/report.json` (or a
+   newer `report-STAMP/`) with no integrity exceptions, and that report lists
+   every run (run it again after a new run). An internal draft from the
+   journal is optional.
 
 Each stage is derived from files on disk, so the cockpit shows the same state
 after a restart, and work done outside the cockpit counts.
+
+The cockpit does not offer the advisor's `init` (a hand-made pending profile):
+`scope compile` refuses to overwrite a profile it did not generate
+(`scope.derivative_unmanaged`), so following both would block stage 3.
+`./bin/sippycup practice-target rehearsal` drives a whole engagement through
+these stages and checks after each one that `go --plain` and `go --format json`
+agree; see [PRACTICE-TARGET.md](PRACTICE-TARGET.md).
 
 ## Confirmation
 
@@ -181,7 +197,7 @@ never appears in argv. Do not put secrets in a note.
 | --- | --- | --- |
 | `N` | arrows, Enter | choose action N |
 | `rN` | Tab, then arrows | open run N |
-| `sN` | `1`..`8` | stage help |
+| `sN` | `1`..`9` | stage help |
 | `skip` | `S` | skip or restore the practice stage |
 | `?` | `?` | help |
 | Enter | `r` | refresh |

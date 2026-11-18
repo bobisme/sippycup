@@ -31,6 +31,10 @@ Commands:
                      destinations that misbehave on purpose (no answer, late
                      answer, one-way media, hang-up, 403/429/503, ...) and
                      compare each verdict with the correct one (about 3 minutes)
+  rehearsal [--list] Dress rehearsal: walk the whole owner-facing chain (scope,
+                     rehearse, preflight, call, campaign, checks, evidence,
+                     owner report) with the real commands and check that the
+                     cockpit agrees at every stage (about 3 minutes)
   help               Show this help
 
 `up` refuses any address outside 127.0.0.0/8 and 127.0.0.1 itself (the
@@ -278,6 +282,14 @@ case "${command_name}" in
         PYTHONDONTWRITEBYTECODE=1 \
             PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
             exec python3 -m sippycup.practice_drill --project-dir "${project_dir}" "$@"
+        ;;
+    rehearsal)
+        # The whole owner-facing chain against the practice target only; it
+        # starts the target when it is down and takes it down again.
+        validate_container_name
+        PYTHONDONTWRITEBYTECODE=1 \
+            PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            exec python3 -m sippycup.practice_rehearsal --project-dir "${project_dir}" "$@"
         ;;
     *)
         printf 'Unknown practice-target command: %s\n' "${command_name}" >&2

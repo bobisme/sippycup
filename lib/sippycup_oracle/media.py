@@ -1088,6 +1088,43 @@ def evaluate_invariants(
     first_answer = min(answer_times) if answer_times else None
     first_invite = min(invite_times) if invite_times else None
     teardown = min(teardown_times) if teardown_times else None
+    # The party that sends BYE must stop media when it sends it. The other
+    # party cannot know before the BYE reaches it, so its packets are late
+    # only after it answered the BYE with a 2xx (packets already in flight
+    # are not a violation). Without an observed BYE request and 2xx, or for
+    # packets of unknown direction, the earliest teardown applies.
+    receiver_teardown = teardown
+    bye_requests = sorted(
+        (time, item.event)
+        for item in dialog.transitions
+        if item.event in {"local_bye", "remote_bye"}
+        and (time := _evidence_time(item.evidence)) is not None
+    )
+    bye_sender: MediaDirection | None = None
+    if bye_requests and bye_requests[0][0] == teardown:
+        bye_sender = (
+            MediaDirection.CALLER_TO_CALLEE
+            if bye_requests[0][1] == "local_bye"
+            else MediaDirection.CALLEE_TO_CALLER
+        )
+        answered = [
+            time
+            for item in dialog.transitions
+            if item.event.startswith("bye_2")
+            and (time := _evidence_time(item.evidence)) is not None
+            and time >= teardown
+        ]
+        if answered:
+            receiver_teardown = min(answered)
+
+    def _teardown_for(stream: RtpStream) -> Decimal | None:
+        if (
+            bye_sender is None
+            or stream.direction is MediaDirection.UNKNOWN
+            or stream.direction is bye_sender
+        ):
+            return teardown
+        return receiver_teardown
     before_answer = [
         packet
         for stream in streams
@@ -1100,9 +1137,9 @@ def evaluate_invariants(
         packet
         for stream in streams
         for packet in stream.frames
-        if teardown is not None
+        if (limit := _teardown_for(stream)) is not None
         and _evidence_time(packet.evidence) is not None
-        and _evidence_time(packet.evidence) > teardown
+        and _evidence_time(packet.evidence) > limit
     ]
     setup_ms = (
         (first_answer - first_invite) * Decimal(1000)

@@ -240,6 +240,25 @@ report would disclose credentials, subscriber identifiers, or unapproved
 addresses. `--journal` records the report hash in the journal. See
 [`ENGAGEMENT-REPORT.md`](ENGAGEMENT-REPORT.md).
 
+## Dress rehearsal
+
+Before the real engagement, run the whole chain once against the local
+practice target:
+
+```sh
+./bin/sippycup practice-target rehearsal
+```
+
+It creates a fresh engagement under `work/practice/rehearsals/`, writes a
+scope answers file for the practice target, and then runs `scope compile`,
+`rehearse`, `preflight` (UDP and verified TLS), the guided `call` (and one with
+DTMF), `campaign plan` and `run`, `checks plan` and `run`, the evidence
+actions, and `summary --forbid-file`, in the order of this document. After every
+stage it checks that `./bin/sippycup go --plain` and `go --format json` agree
+on what is done and what is next. Each stage prints PASS or FAIL and the
+commands it ran, so the output doubles as the sequence to follow on the day.
+See [PRACTICE-TARGET.md](PRACTICE-TARGET.md#dress-rehearsal).
+
 ## Campaign evidence inside the engagement
 
 Place supervised runs below the engagement root:

@@ -168,6 +168,24 @@ status is 0 when drawn, 2 for bad arguments or an unusable path, 3 for an
 unreadable capture, 4 when there is nothing to draw (no SIP, TLS, or RTP), and
 5 for an internal error or a privacy lint refusal. See `LADDER.md`.
 
+
+## Dress rehearsal
+
+`./bin/sippycup practice-target rehearsal` walks the whole owner-facing chain
+against the local practice target with the public commands, in the order of a
+real engagement: `journal init`, `scope init`, the cockpit's practice call,
+`scope check` and `scope compile`, `rehearse`, `--practice preflight` over UDP
+and verified TLS, the guided `call` (and one with `--dtmf`), `campaign plan`
+and `campaign run`, `checks plan` and `checks run`, the cockpit's evidence
+actions, and `summary --forbid-file`. After each stage it requires
+`go --plain` and `go --format json` to agree with each other and with the
+stage just finished. It prints PASS or FAIL per stage with the exact commands,
+exits 0 only when every stage passed (1 on a failure, 2 when it could not
+start), keeps the evidence in `work/practice/rehearsals/dress-STAMP/`, and
+starts and stops the practice target only when it was down. `--list` prints
+the stages and sends nothing. `make dress-rehearsal` runs it. See
+`PRACTICE-TARGET.md`.
+
 ## Bash completion
 
 Source the completion from a checkout:

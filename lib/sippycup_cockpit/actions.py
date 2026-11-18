@@ -133,6 +133,26 @@ def _campaign_run(model: dict[str, Any]) -> list[str] | str | None:
     ]
 
 
+def _checks_run(model: dict[str, Any], *, dry_run: bool) -> list[str] | str | None:
+    if not model["profile"]["present"]:
+        return None
+    if not model["profile"].get("securityChecks"):
+        return "the profile approves no checks: add security_checks to scope.yaml (with the owner's approval) and compile"
+    # Same route as the guided call: the practice address is reachable only
+    # through --practice. The password (needed by nonce-replay) is added from
+    # the confirmation prompt, like the call's.
+    argv = [*_route(model), "checks", "run", _profile(model)]
+    if dry_run:
+        argv.append("--dry-run")
+    return argv
+
+
+def _summary(model: dict[str, Any]) -> list[str] | None:
+    if not model["engagement"]["initialized"]:
+        return None
+    return [LAUNCHER, "summary", _eng(model), "--journal"]
+
+
 def _next_report(model: dict[str, Any]) -> list[str] | None:
     if not model["journal"]["valid"] or model["journal"]["entries"] == 0:
         return None
@@ -257,28 +277,27 @@ TABLE: tuple[ActionSpec, ...] = (
         "live", _campaign_run, requires="campaign", secret="campaign",
     ),
     ActionSpec(
-        "checks-plan", "campaign", "Plan the security posture checks",
+        "checks-plan", "checks", "Plan the security posture checks",
         "Shows which checks would run and what each sends; sends nothing.",
         "none", lambda m: [LAUNCHER, "checks", "plan", _profile(m)] if m["profile"]["present"] else None,
         requires="checks",
     ),
     ActionSpec(
-        "checks-run", "campaign", "Run the security posture checks",
+        "checks-run", "checks", "Run the security posture checks",
         "Sends the bounded checks to the approved target and writes findings.json.",
-        "live", lambda m: [LAUNCHER, "checks", "run", _profile(m)] if m["profile"]["present"] else None,
-        requires="checks",
-        preview=lambda m: [LAUNCHER, "checks", "run", _profile(m), "--dry-run"] if m["profile"]["present"] else None,
+        "live", lambda m: _checks_run(m, dry_run=False), requires="checks",
+        preview=lambda m: _checks_run(m, dry_run=True), secret="call",
     ),
     ActionSpec(
-        "render-internal-report", "report", "Render a new internal report draft",
+        "render-internal-report", "report", "Render a new internal report draft (optional)",
         "Synthesizes the verified journal; confidential, never overwrites an earlier draft.",
-        "none", _next_report,
+        "none", _next_report, progress=False,
     ),
     ActionSpec(
-        "summary", "report", "Render the owner summary report",
-        "Summarizes the engagement's runs and findings for the service owner; network-free.",
-        "none", lambda m: [LAUNCHER, "summary", _eng(m)] if m["engagement"]["initialized"] else None,
-        requires="summary",
+        "summary", "report", "Write the owner report (summary)",
+        "Re-checks every run against the approval, writes the owner report, and records its hash in the journal; "
+        "network-free. Add --forbid-file with the password file to prove the password is absent.",
+        "none", _summary, requires="summary",
     ),
 )
 TABLE_BY_ID = {spec.identifier: spec for spec in TABLE}
@@ -287,6 +306,9 @@ ADVISOR_COVERED = {
     "refresh-internal-report",  # the table renders the next free numbered draft
     "review-guided-call-dry-run",  # call-dry-run adds the account username
     "rehearse-on-practice-target",  # stage 2 is the practice rehearsal itself
+    # A hand-made pending profile from `init` blocks the first `scope compile`
+    # (scope.derivative_unmanaged, needs --force); stage 3 compiles the profile.
+    "create-target-profile",
 }
 
 

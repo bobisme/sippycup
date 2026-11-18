@@ -1,0 +1,204 @@
+"""Offline tests for the dress rehearsal (`practice-target rehearsal`)."""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(ROOT / "lib"))
+
+from sippycup import practice, practice_rehearsal as rehearsal  # noqa: E402
+from sippycup_workbench.journal import initialize  # noqa: E402
+from sippycup_workbench.profile import load_profile, rehearse  # noqa: E402
+from sippycup_workbench.scope import inspect  # noqa: E402
+from sippycup_workbench.scope_derive import compile_scope  # noqa: E402
+
+NOW = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+
+
+def facts(address: str = "127.0.0.2", hours: float = 4) -> dict:
+    return {"address": address, "profile_valid_until_utc": (NOW + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+class ScopeAnswersTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.work = Path(self.temporary.name) / "work"
+        self.root = self.work / "eng"
+        self.work.mkdir()
+        initialize(self.root, title="t", owner="o")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_answers_check_clean_and_compile_into_an_approved_profile_with_checks(self) -> None:
+        # A real CA certificate is needed for tls_ca_file; reuse one PEM shape.
+        ca = self.root / "practice-ca.crt"
+        ca.write_text(_pem())
+        text = rehearsal.scope_answers(facts(), now=NOW, name="dress-rehearsal", ca_file="work/eng/practice-ca.crt")
+        path = self.root / "scope.yaml"
+        path.write_text(text)
+        path.chmod(0o600)
+        with mock.patch.dict(os.environ, {"SIPPYCUP_WORK_ROOT": str(self.work)}):
+            report = inspect(path, now=NOW)
+        problems = [f"{item.code} {item.field}" for item in report.findings if item.severity == "error"]
+        self.assertEqual([], problems)
+        self.assertTrue(report.ok and report.complete)
+        self.assertIn("127.0.0.2", text)
+        self.assertIn("valid_from: 2026-11-18T11:59:00Z", text)
+        self.assertIn("valid_until: 2026-11-18T16:00:00Z", text)
+        self.assertNotIn("password:", text)
+        for check in rehearsal.UDP_CHECKS:
+            self.assertIn(check, text)
+
+    def test_window_too_short_or_routable_address_is_refused(self) -> None:
+        with self.assertRaises(rehearsal.CannotStart):
+            rehearsal.scope_answers(facts(hours=0.1), now=NOW, name="x", ca_file="work/x/ca.crt")
+        for address in ("10.0.0.5", "127.0.0.1", "192.0.2.1"):
+            with self.subTest(address=address), self.assertRaises(practice.PracticeError):
+                rehearsal.scope_answers(facts(address=address), now=NOW, name="x", ca_file="work/x/ca.crt")
+
+
+def _pem() -> str:
+    """A throwaway self-signed CA certificate (public material only)."""
+    import shutil
+
+    if shutil.which("openssl") is None:
+        raise unittest.SkipTest("openssl is not available")
+    with tempfile.TemporaryDirectory() as directory:
+        key, cert = Path(directory) / "k", Path(directory) / "c"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+                        "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "2", "-subj", "/CN=test-ca"],
+                       check=True, capture_output=True)
+        return cert.read_text()
+
+
+class CompileTests(unittest.TestCase):
+    def test_compiled_profile_rehearses_ready_and_carries_the_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "work" / "eng"
+            root.parent.mkdir()
+            initialize(root, title="t", owner="o")
+            ca = root / "practice-ca.crt"
+            ca.write_text(_pem())
+            now = datetime.now(timezone.utc)
+            live = {"address": "127.0.0.2",
+                    "profile_valid_until_utc": (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+            (root / "scope.yaml").write_text(rehearsal.scope_answers(live, now=now, name="dress-rehearsal",
+                                                                     ca_file="work/eng/practice-ca.crt"))
+            (root / "scope.yaml").chmod(0o600)
+            with mock.patch.dict(os.environ, {"SIPPYCUP_WORK_ROOT": str(root.parent)}):
+                outcome = compile_scope(root, now=now)
+            self.assertEqual(0, outcome.exit_code, outcome.as_dict())
+            profile = load_profile(root / "target-profile.yaml")
+            self.assertTrue(rehearse(profile, now=now).ready)
+            self.assertEqual(list(rehearsal.UDP_CHECKS), profile["security_checks"]["approved"])
+            self.assertEqual("practice", profile["security_checks"]["account"])
+            self.assertEqual(["127.0.0.2"], profile["target"]["approved_addresses"])
+
+
+class CockpitAgreementTests(unittest.TestCase):
+    MODEL = {"currentStage": "first-call", "nextCommand": "./bin/sippycup call x --dry-run", "complete": False,
+             "stages": [{"id": "scope", "title": "Scope", "state": "done"},
+                        {"id": "first-call", "title": "First call", "state": "current"}]}
+    PLAIN = ("Stages\n  [ok] 3 Scope\n  [>>] 5 First call   <- you are here\n\n"
+             "Next: ./bin/sippycup call x --dry-run\n")
+
+    def test_agreeing_renderings_at_the_expected_stage(self) -> None:
+        view = rehearsal.cockpit_view(self.MODEL, self.PLAIN)
+        self.assertEqual("first-call", view["plainStage"])
+        self.assertEqual([], rehearsal.agreement_problems(view, "first-call"))
+
+    def test_wrong_stage_and_disagreement_are_reported(self) -> None:
+        view = rehearsal.cockpit_view(self.MODEL, self.PLAIN)
+        self.assertTrue(rehearsal.agreement_problems(view, "campaign"))
+        other = rehearsal.cockpit_view(self.MODEL, self.PLAIN.replace("Next: ./bin/sippycup call x --dry-run",
+                                                                      "Next: ./bin/sippycup something-else"))
+        self.assertTrue(any("differs" in item for item in rehearsal.agreement_problems(other, "first-call")))
+        moved = rehearsal.cockpit_view(self.MODEL, self.PLAIN.replace("[>>] 5 First call   <- you are here",
+                                                                      "[>>] 3 Scope   <- you are here"))
+        self.assertTrue(any("go --plain" in item for item in rehearsal.agreement_problems(moved, "first-call")))
+
+    def test_complete(self) -> None:
+        model = {"currentStage": None, "nextCommand": None, "complete": True, "stages": []}
+        view = rehearsal.cockpit_view(model, "Stages\n\nNext: every stage is complete; record remediation.\n")
+        self.assertEqual([], rehearsal.agreement_problems(view, None))
+        self.assertTrue(rehearsal.agreement_problems(view, "report"))
+
+    def test_only_offered_launcher_actions_are_used(self) -> None:
+        model = {"actions": [
+            {"id": "a", "available": True, "argv": ["./bin/sippycup", "summary", "work/x"]},
+            {"id": "b", "available": False, "argv": ["./bin/sippycup", "x"], "unavailableReason": "blocked"},
+            {"id": "c", "available": True, "argv": ["/bin/sh", "-c", "x"]},
+        ]}
+        self.assertEqual("a", rehearsal.find_action(model, "a")["id"])
+        for identifier in ("b", "c", "missing"):
+            with self.subTest(identifier=identifier), self.assertRaises(rehearsal.RehearsalError):
+                rehearsal.find_action(model, identifier)
+
+
+class SecretScanTests(unittest.TestCase):
+    def test_files_containing_finds_the_secret_anywhere(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a").mkdir()
+            (root / "a" / "clean.txt").write_text("nothing here")
+            (root / "a" / "leak.bin").write_bytes(b"\x00xx-hunter2-xx")
+            self.assertEqual(["a/leak.bin"], rehearsal.files_containing(root, b"hunter2"))
+
+
+class FailureSummaryTests(unittest.TestCase):
+    def test_a_failed_call_names_the_failing_assertion_and_host_run_path(self) -> None:
+        printed = json.dumps({"verdict": "fail", "runDirectory": "/work/eng/calls/R1", "oracle": {
+            "failedDetails": [{"id": "dialog[0].media.timing", "message": "late media"}]}})
+        self.assertEqual("verdict fail; dialog[0].media.timing: late media; run work/eng/calls/R1",
+                         rehearsal._failure_summary(printed))
+        self.assertIsNone(rehearsal._failure_summary("not json"))
+
+
+class DriverTests(unittest.TestCase):
+    def test_missing_practice_image_stops_before_anything_is_sent(self) -> None:
+        calls = []
+
+        def runner(argv, env, timeout):
+            calls.append(argv)
+            return rehearsal.Completed(argv, 1, "Practice profile: not installed\nTarget: down\n", "")
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = io.StringIO()
+            code = rehearsal.Rehearsal(Path(directory), runner=runner, out=out).execute()
+        self.assertEqual(2, code)
+        self.assertEqual([["./bin/sippycup", "practice-target", "status"]], calls)
+        self.assertIn("practice-target build", out.getvalue())
+
+    def test_a_failed_stage_skips_the_rest_and_exits_1(self) -> None:
+        stages = []
+        driver = rehearsal.Rehearsal(Path("."), runner=lambda *a: None, out=io.StringIO())
+
+        def fail():
+            raise rehearsal.RehearsalError("boom")
+
+        self.assertFalse(driver.stage("one", fail))
+        self.assertFalse(driver.stage("two", lambda: stages.append("ran")))
+        self.assertEqual(["FAIL", "SKIP"], [stage.status for stage in driver.stages])
+        self.assertEqual([], stages)
+
+    def test_list_is_network_free(self) -> None:
+        result = subprocess.run([str(ROOT / "bin" / "sippycup"), "practice-target", "rehearsal", "--list"],
+                                cwd=ROOT, capture_output=True, text=True, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("owner report: summary --forbid-file", result.stdout)
+        self.assertIn("Network activity: none", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

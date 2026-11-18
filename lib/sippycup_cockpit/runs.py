@@ -26,6 +26,7 @@ MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
 FINDINGS_VERSION = "sippycup.dev/findings/v1"
 CALL_VERSION = "sippycup.dev/call-result/v1"
+CHECKS_RESULT_VERSION = "sippycup.dev/checks-result/v1"
 PRACTICE_CONTAINER = "practice-calls"
 PRACTICE_PROFILE_PREFIX = "sippycup-local-practice"
 RUN_MARKERS = ("result.json", "findings.json", "events.jsonl", "evidence-manifest.json")
@@ -293,7 +294,7 @@ def _campaign_summary(run: Path, document: dict[str, Any], summary: dict[str, An
     )
 
 
-def _findings_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
+def _findings_summary(document: dict[str, Any], summary: dict[str, Any], run: Path | None = None) -> None:
     checks = document.get("checks") if isinstance(document.get("checks"), list) else []
     findings = document.get("findings") if isinstance(document.get("findings"), list) else []
     severities: dict[str, int] = {}
@@ -306,9 +307,29 @@ def _findings_summary(document: dict[str, Any], summary: dict[str, Any]) -> None
         titles.append(f"[{severity}] {item.get('title', '(untitled)')}")
     summary["verdict"] = f"{len(findings)} finding(s)" if findings else "no findings"
     summary["state"] = document.get("state") if isinstance(document.get("state"), str) else "completed"
+    # `checks run` records its own state and exit code in result.json
+    # (sippycup.dev/checks-result/v1); findings.json alone cannot say whether
+    # the run was stopped by an error or an interruption.
+    result: Any = None
+    if run is not None and _regular(run / "result.json"):
+        try:
+            result = read_json(run / "result.json")
+        except Unreadable:
+            result = None
+    if isinstance(result, dict) and result.get("apiVersion") == CHECKS_RESULT_VERSION:
+        if isinstance(result.get("state"), str):
+            summary["state"] = result["state"]
+        summary["exitCode"] = result.get("exitCode")
+    errors = [item for item in checks if isinstance(item, dict) and item.get("status") == "error"]
+    # Completed: every approved check ran to an outcome. Findings are the
+    # product of a completed run, not a failure of it.
+    summary["completed"] = summary["state"] == "completed" and not errors
     summary["passed"] = not findings
     counts = ", ".join(f"{key} {value}" for key, value in sorted(severities.items())) or "none"
-    summary["facts"] = [("Checks", str(len(checks))), ("Findings", str(len(findings))), ("By severity", counts)]
+    summary["facts"] = [("State", str(summary["state"])), ("Checks", str(len(checks))),
+                        ("Findings", str(len(findings))), ("By severity", counts)]
+    if errors:
+        summary["facts"].append(("Check errors", ", ".join(str(item.get("id")) for item in errors)))
     summary["notes"] = titles[:20]
     summary["reason"] = titles[0] if titles else f"{len(checks)} check(s), no findings"
 
@@ -346,7 +367,7 @@ def summarize(run: Path, *, container: str = "", engagement: Path | None = None)
             if not isinstance(document, dict) or document.get("apiVersion") != FINDINGS_VERSION:
                 raise Unreadable("findings.json does not declare sippycup.dev/findings/v1")
             summary["kind"] = "checks"
-            _findings_summary(document, summary)
+            _findings_summary(document, summary, run)
         elif _regular(run / "result.json"):
             document = read_json(run / "result.json")
             if not isinstance(document, dict):
