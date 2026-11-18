@@ -93,6 +93,65 @@ class LadderTests(unittest.TestCase):
         # Aggregated: no per-packet lines.
         self.assertLess(len(text), 6000)
 
+    def proxied(self, **kw) -> Path:
+        return self.capture(
+            lambda c: basic_call(
+                c, media_target="192.0.2.30", challenge_status=407, challenge_reason="Proxy Authentication Required", dtmf=True, **kw
+            )
+        )
+
+    def test_separate_media_host_gets_its_own_column(self):
+        path = self.proxied()
+        doc = json.loads(ladder(str(path), "--approve", "192.0.2.0/24", "--format", "json").stdout)
+        columns = doc["sections"][0]["columns"]
+        self.assertEqual([c["media"] for c in columns], [False, False, True])
+        self.assertEqual(columns[2]["address"], "192.0.2.30")
+        self.assertEqual(columns[2]["roles"], ["media"])
+        for event in doc["sections"][0]["events"]:
+            if event["type"] == "media":
+                self.assertIn(2, (event["from"], event["to"]))
+                self.assertIn(0, (event["from"], event["to"]))
+            else:
+                self.assertNotIn(2, (event["from"], event["to"]))
+        text = ladder(str(path), "--approve", "192.0.2.0/24", "--width", "140").stdout
+        self.assertIn("(media)", text)
+        rtp = next(line for line in text.splitlines() if "RTP 18 pkts" in line)
+        self.assertTrue(rtp.rstrip().endswith("|"), rtp)
+        self.assertEqual(rtp.count("|"), 3, "the arrow passes over the signaling lifeline, which stays drawn")
+        self.assertIn(">", rtp.rsplit("|", 1)[0])
+        # Every row keeps the three lifelines in the same columns.
+        bars = {tuple(i for i, ch in enumerate(line) if ch == "|") for line in text.splitlines() if line.startswith("  +1.1")}
+        self.assertEqual(len(bars), 1)
+
+    def test_direct_call_keeps_two_columns(self):
+        path = self.capture(lambda c: basic_call(c))
+        doc = json.loads(ladder(str(path), "--approve", "192.0.2.0/24", "--format", "json").stdout)
+        self.assertEqual(len(doc["sections"][0]["columns"]), 2)
+        self.assertNotIn("(media)", ladder(str(path), "--approve", "192.0.2.0/24").stdout)
+
+    def test_labels_are_never_cut_mid_word_or_mid_tag(self):
+        path = self.proxied()
+        for width in (60, 70, 80, 100, 140, 200):
+            with self.subTest(width=width):
+                text = ladder(str(path), "--approve", "192.0.2.0/24", "--width", str(width)).stdout
+                self.assertNotIn("[AUTH CHA...", text)
+                self.assertNotIn("[AUTH RES...", text)
+                for line in text.splitlines():
+                    if "[AUTH CHALLENGE" in line or "[AUTH RESPONSE" in line:
+                        self.assertIn("]", line[line.index("[") :])
+                    if "407" in line and "<" in line:
+                        self.assertRegex(line, r"407( Proxy( Authentication( Required)?)?(\.\.\.)?)?( \[AUTH CHALLENGE\])? ?-")
+        wide = ladder(str(path), "--approve", "192.0.2.0/24", "--width", "200").stdout
+        self.assertIn("407 Proxy Authentication Required [AUTH CHALLENGE]", wide)
+
+    def test_html_draws_media_column_and_full_labels(self):
+        path = self.proxied()
+        html = ladder(str(path), "--approve", "192.0.2.0/24", "--format", "html").stdout
+        self.assertIn(">media<", html)
+        self.assertIn("407 Proxy Authentication Required", html)
+        self.assertIn("192.0.2.30:6000", html)
+        self.assertNotIn("Proxy Authentication Req...", html)
+
     def test_addresses_redacted_unless_approved_or_shown(self):
         path = self.capture(lambda c: basic_call(c))
         plain = ladder(str(path)).stdout

@@ -41,6 +41,22 @@ previous message. Marks:
   (RTP/AVP or RTP/SAVP), codec names, direction, ptime. SDES-SRTP shows the
   suite name only.
 
+Media follows the address in the SDP, not the signaling address. When it is the
+same host as a signaling endpoint (the usual direct call, whatever the ports),
+it shares that endpoint's column. When the SDP names a host that no signaling
+message in the call uses (an SBC or proxy in front of separate media servers,
+such as the practice proxy: signaling to 127.0.0.3, media at 127.0.0.2), that
+host gets its own column labelled `(media)` with its RTP port, and the RTP/RTCP
+rows run between the caller and that column. An arrow that passes over another
+column leaves that column's line drawn.
+
+Labels are never cut mid-word and tags are never cut. The column gaps grow to
+fit the labels (up to `--width`; the HTML widens its drawing). If they still
+do not fit, the reason phrase is shortened by whole words first
+(`407 Proxy... [AUTH CHALLENGE]`); a label that still cannot fit is shortened
+at a word with `...` and the full label is printed under the arrow, and the
+tags move to a `tags:` line there. Use a wider `--width` for the full text.
+
 Media is aggregated (`===>`): per direction, packet count, payload types,
 first and last time, sequence gaps, and the number of telephone-event (DTMF)
 events. RTCP appears as its own aggregate row. TShark decodes RTP from the SDP

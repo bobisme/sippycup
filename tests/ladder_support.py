@@ -253,11 +253,12 @@ def tls_app_data(length: int = 120) -> bytes:
     return tls_record(23, b"\xaa" * length)
 
 
-def basic_call(capture: Capture, *, call_id: str = "call-one@192.0.2.10", start: float = 1000.0, caller: str = "192.0.2.10", target: str = "192.0.2.20", dtmf: bool = False, invite_retransmit: bool = False) -> None:
+def basic_call(capture: Capture, *, call_id: str = "call-one@192.0.2.10", start: float = 1000.0, caller: str = "192.0.2.10", target: str = "192.0.2.20", dtmf: bool = False, invite_retransmit: bool = False, media_target: str | None = None, challenge_status: int = 401, challenge_reason: str = "Unauthorized") -> None:
     """One passing, authenticated call with RTP both ways and a BYE."""
     fam = "IP6" if ":" in caller else "IP4"
     sdp_a = sdp_body(caller, 4000, family=fam)
-    sdp_b = sdp_body(target, 6000, family=fam)
+    media = media_target or target
+    sdp_b = sdp_body(media, 6000, family=fam)
     inv1 = sip_request("INVITE", call_id, 1, sdp=sdp_a, uri=f"sip:bob@{target}", to=f"sip:bob@{target}", branch="z9hG4bKinv1")
     capture.udp(start, caller, 5060, target, 5060, inv1)
     if invite_retransmit:
@@ -269,8 +270,8 @@ def basic_call(capture: Capture, *, call_id: str = "call-one@192.0.2.10", start:
         caller,
         5060,
         sip_response(
-            401,
-            "Unauthorized",
+            challenge_status,
+            challenge_reason,
             "INVITE",
             call_id,
             1,
@@ -330,17 +331,17 @@ def basic_call(capture: Capture, *, call_id: str = "call-one@192.0.2.10", start:
     )
     for i in range(10):
         t = start + 1.1 + i * 0.02
-        capture.udp(t, caller, 4000, target, 6000, rtp_packet(i, i * 160))
-        capture.udp(t + 0.001, target, 6000, caller, 4000, rtp_packet(i, i * 160, ssrc=0x55667788))
+        capture.udp(t, caller, 4000, media, 6000, rtp_packet(i, i * 160))
+        capture.udp(t + 0.001, media, 6000, caller, 4000, rtp_packet(i, i * 160, ssrc=0x55667788))
     if dtmf:
         base = 20 * 160
         for i in range(3):
-            capture.udp(start + 1.4 + i * 0.02, caller, 4000, target, 6000, telephone_event(20 + i, base, 5, False, 160 * (i + 1)))
+            capture.udp(start + 1.4 + i * 0.02, caller, 4000, media, 6000, telephone_event(20 + i, base, 5, False, 160 * (i + 1)))
         for i in range(3):
-            capture.udp(start + 1.46 + i * 0.001, caller, 4000, target, 6000, telephone_event(23 + i, base, 5, True, 640))
+            capture.udp(start + 1.46 + i * 0.001, caller, 4000, media, 6000, telephone_event(23 + i, base, 5, True, 640))
         base2 = base + 3200
-        capture.udp(start + 1.6, caller, 4000, target, 6000, telephone_event(26, base2, 9, False, 160))
-        capture.udp(start + 1.62, caller, 4000, target, 6000, telephone_event(27, base2, 9, True, 640))
+        capture.udp(start + 1.6, caller, 4000, media, 6000, telephone_event(26, base2, 9, False, 160))
+        capture.udp(start + 1.62, caller, 4000, media, 6000, telephone_event(27, base2, 9, True, 640))
     capture.udp(
         start + 3.0,
         caller,

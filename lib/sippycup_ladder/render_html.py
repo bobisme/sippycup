@@ -6,6 +6,8 @@ import html
 import textwrap
 from typing import Any
 
+from .layout import fit_label, label_slot, pick_caps
+
 CHAR_W = 7.2  # monospace 12px
 LINE_H = 15
 GUTTER = 150
@@ -32,6 +34,7 @@ section.call{border:1px solid var(--line);border-radius:10px;margin:22px 0;paddi
 svg{display:block;min-width:720px;width:100%;height:auto}
 svg text{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;font-size:12px;fill:var(--fg)}
 svg .muted{fill:var(--muted)}
+svg .lbl{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
 svg .life{stroke:var(--line);stroke-width:1.2;stroke-dasharray:3 4}
 svg .head{fill:var(--panel);stroke:var(--line)}
 svg .rowline{stroke:var(--line);stroke-width:.5;opacity:.5}
@@ -103,14 +106,31 @@ _TAGS = {
 def _section_svg(section: dict) -> str:
     columns = section["columns"]
     count = len(columns)
-    width = max(1000, 250 * count + GUTTER + 2 * MARGIN)
-    span = width - GUTTER - 2 * MARGIN
     inner = 90
+    base = max(1000, 250 * count + GUTTER + 2 * MARGIN)
+    events_all = section["events"]
+
+    def pills_of(event: dict) -> list:
+        return [_TAGS[t] for t in event.get("tags", ()) if t in _TAGS]
+
+    def need(event: dict, label: str) -> float:
+        return (len(label) + sum(len(text) + 3 for text, _ in pills_of(event))) * CHAR_W + 40
+
+    width, cap, gaps = base, None, None
+    if count > 1:
+        for width in dict.fromkeys((base, max(base, 1300), max(base, 1600))):
+            span = width - GUTTER - 2 * MARGIN
+            cap, gaps = pick_caps(count, events_all, span - 2 * inner, need, [210] * (count - 1))
+            if cap is None:  # every label fits in full: widen rather than shorten
+                break
+    span = width - GUTTER - 2 * MARGIN
     if count == 1:
         xs = [GUTTER + MARGIN + span // 2]
     else:
-        usable = span - 2 * inner
-        xs = [GUTTER + MARGIN + inner + (usable * i) // (count - 1) for i in range(count)]
+        xs = [GUTTER + MARGIN + inner]
+        for gap in gaps:
+            xs.append(xs[-1] + gap)
+        xs = [int(x) for x in xs]
     head_h = 52
     rows = []
     y = head_h + 14
@@ -120,10 +140,9 @@ def _section_svg(section: dict) -> str:
         lo, hi = min(a, b), max(a, b)
         klass, marker, label_class = _arrow_class(event)
         markers.add(marker)
-        chars_label = max(8, int((hi - lo - 24) / CHAR_W)) if hi > lo else 40
-        pills = [_TAGS[t] for t in event.get("tags", ()) if t in _TAGS]
+        pills = pills_of(event)
         pill_chars = sum(len(text) + 3 for text, _ in pills)
-        label = _clip(event["label"], max(6, chars_label - pill_chars))
+        label = fit_label(event, cap)
         y_label = y + 11
         y_line = y + 20
         parts = []
@@ -142,13 +161,15 @@ def _section_svg(section: dict) -> str:
             parts.append(
                 f'<line class="a {klass}" x1="{x1}" y1="{y_line}" x2="{x2}" y2="{y_line}" marker-end="url(#{marker})"/>'
             )
-            mid = (lo + hi) / 2
+            ci, cj = xs.index(lo), xs.index(hi)
+            left, right = label_slot(xs, ci, cj, (len(label) + pill_chars) * CHAR_W + 8, 4)
+            mid = (left + right) / 2
         else:
             mid = a + 80
         text_width = (len(label) + pill_chars) * CHAR_W
         start = mid - text_width / 2
         parts.append(
-            f'<text x="{start:.1f}" y="{y_label}" class="{label_class}"><title>{_esc(event["label"])}</title>{_esc(label)}</text>'
+            f'<text x="{start:.1f}" y="{y_label}" class="lbl {label_class}"><title>{_esc(event["label"])}</title>{_esc(label)}</text>'
         )
         px = start + len(label) * CHAR_W + 8
         for text, kind in pills:
