@@ -187,9 +187,9 @@ from the recorded artifacts, and lists any exception at the top:
 
 | Code | Meaning |
 |---|---|
-| `target-not-approved` | A run, step, or preflight target is not in any approved address, port, and transport set |
+| `target-not-approved` | A run, step, or preflight target is not in any approved address, port, and transport set (an owner-approved media network never counts here: it admits media only) |
 | `target-not-literal` | A recorded target is not a literal address |
-| `media-peer-not-approved` | A call's negotiated media peer is not approved |
+| `media-peer-not-approved` | A call's negotiated media peer is neither an approved address nor inside an approved media network (scope `media.networks`, profile `media.networks`); each call's `details.media.peerApprovedBy` says which rule approved it (`approved-address` or `media-network`) and `peerRecordedRule` what the run itself recorded |
 | `outside-approval-window` | A run's start or end lies outside every window that covers its target |
 | `approval-not-active` | The covering record is not in `approved` status |
 | `ceiling-exceeded` | Recorded packets, bytes, calls, or call time exceed the frozen ceiling |

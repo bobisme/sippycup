@@ -248,12 +248,18 @@ practice target:
 ```sh
 ./bin/sippycup practice-target rehearsal
 ./bin/sippycup practice-target rehearsal --proxy   # signaling and media on different addresses, 407
+./bin/sippycup practice-target rehearsal --media-cidr   # the same, media approved as a range
 ```
 
 Use `--proxy` when the platform is a proxy or SBC: the scope answers then
 name the signaling address and the media address separately, exactly as the
-owner's reply will. Both variants end by showing the media-scope safety stop
-once, in a throwaway engagement, with the media address left out of the scope.
+owner's reply will. Use `--media-cidr` when the owner approves media as a
+media-server pool (a CIDR such as a `/27`): the range becomes the profile's
+media-only `media.networks`, every call records that the media peer was
+admitted by it, and a call whose host lies in the range is refused (media
+networks never admit signaling). All variants end by showing the media-scope
+safety stop once, in a throwaway engagement, with the media address left out
+of the scope (`--media-cidr`: answered as the range just outside it).
 
 It creates a fresh engagement under `work/practice/rehearsals/`, writes a
 scope answers file for the practice target, and then runs `scope compile`,

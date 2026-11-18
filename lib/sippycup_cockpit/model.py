@@ -176,6 +176,9 @@ def _profile_facts(path: Path, repo: Path, now: datetime) -> dict[str, Any]:
         limits=document.get("limits") if isinstance(document.get("limits"), dict) else {},
         target=document.get("target") if isinstance(document.get("target"), dict) else {},
         securityChecks=_approved_checks(document),
+        # Owner-approved media networks and the far end's RTP ports: media only.
+        mediaNetworks=list(rehearsal.facts.get("media_networks") or []),
+        mediaPorts=rehearsal.facts.get("media_ports"),
     )
     if not facts["literalHost"] and "target.host must be one of the literal approved_addresses" not in facts["errors"]:
         facts["errors"].append("target.host must itself be one of the literal approved_addresses")
@@ -263,6 +266,8 @@ def _target_summary(profile: dict[str, Any], scope: dict[str, Any]) -> dict[str,
         "transport": target.get("transport"),
         "tlsServerName": target.get("tls_server_name"),
         "approvedAddresses": list(target.get("approved_addresses") or []),
+        "mediaNetworks": list(profile.get("mediaNetworks") or []) if profile.get("present") else [],
+        "mediaPorts": profile.get("mediaPorts") if profile.get("present") else None,
         "literal": bool(profile.get("literalHost")) if profile.get("present") else None,
         "source": profile["path"] if profile.get("present") else (scope.get("path") if target else None),
         "account": {

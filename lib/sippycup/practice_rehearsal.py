@@ -23,6 +23,17 @@ proxy (407 challenges, realm and certificate name sippycup-proxy), media from
 the practice address, so signaling and media addresses differ like on most
 real platforms. The approved checks include srtp-policy.
 
+``--media-cidr`` (implies ``--proxy``) answers media as a RANGE, the way
+owners approve a media-server pool: the /31 around the practice address
+(127.0.0.2/31, which covers 127.0.0.2 and 127.0.0.3; no range wider than one
+address can hold 127.0.0.2 without 127.0.0.3). The compiled profile then
+lists only the proxy as a literal approved address and the range as a
+media-only network; every call must record that the media peer was admitted
+by that network, a guided call whose host is the media address must be
+refused before any packet (a media network never admits signaling), and the
+stop leg answers the adjacent range 127.0.0.4/31, just outside the media
+address, so the call must stop media-outside-scope.
+
 After every stage it asks the cockpit (``go --format json`` and ``go
 --plain``) where the engagement stands and requires both to agree with each
 other and with the stage just finished. Each stage prints PASS or FAIL and the
@@ -106,14 +117,24 @@ class Shape:
     server_name: str
     realm: str
     prefix: str
+    # What the owner wrote under media.networks when it is not the literal
+    # media addresses (the --media-cidr ranges); None means ``media``.
+    media_answer: tuple[str, ...] | None = None
+
+    @property
+    def answered_media(self) -> tuple[str, ...]:
+        return self.media_answer if self.media_answer is not None else self.media
 
 
-def shape_for(facts: dict[str, Any], *, proxy: bool, media_approved: bool = True) -> Shape:
+def shape_for(facts: dict[str, Any], *, proxy: bool, media_approved: bool = True,
+              media_cidr: bool = False) -> Shape:
     """The answer shape from the generated connection facts, loopback only.
 
     ``media_approved=False`` is the deliberate mistake of the stop leg: the
     owner answers that media comes from the signaling address, so only the
-    signaling address is approved and the real media address is not.
+    signaling address is approved and the real media address is not. With
+    ``media_cidr`` media is answered as a range: the /31 holding the media
+    address, or for the stop leg the adjacent /31 just outside it.
     """
     address = practice.validate_address(str(facts["address"]))
     if not proxy:
@@ -130,7 +151,29 @@ def shape_for(facts: dict[str, Any], *, proxy: bool, media_approved: bool = True
     if details.get("dns_name") != practice.PROXY_DNS_NAME:
         raise CannotStart(f"unexpected proxy server name {details.get('dns_name')!r}")
     media = (address,) if media_approved else (signaling,)
-    return Shape("proxy", signaling, media, practice.PROXY_DNS_NAME, practice.PROXY_REALM, "proxy")
+    answer = None
+    if media_cidr:
+        answer = (media_range(address, inside=media_approved),)
+        media = (address,)
+    return Shape("proxy", signaling, media, practice.PROXY_DNS_NAME, practice.PROXY_REALM, "proxy",
+                 media_answer=answer)
+
+
+def media_range(address: str, *, inside: bool = True) -> str:
+    """The /31 holding ``address`` (inside) or the next /31 above it (just outside).
+
+    Both stay in 127.0.0.0/8 and never hold 127.0.0.1, the caller's address.
+    """
+    import ipaddress
+
+    network = ipaddress.ip_network(f"{address}/31", strict=False)
+    if not inside:
+        network = ipaddress.ip_network(f"{network.broadcast_address + 1}/31")
+    loopback = ipaddress.ip_network("127.0.0.0/8")
+    if not network.subnet_of(loopback) or ipaddress.ip_address(practice.CALLER_ADDRESS) in network:
+        raise CannotStart(f"cannot form a practice media range from {address}: {network} leaves the "
+                          "loopback practice addresses or holds the caller's address")
+    return str(network)
 
 
 def checks_section(checks: tuple[str, ...] = CHECKS) -> dict[str, Any]:
@@ -179,6 +222,12 @@ def scope_answers(facts: dict[str, Any], *, now: datetime, name: str, ca_file: s
         if shape.media == (shape.signaling,):
             where += ("# DELIBERATE MISTAKE (the stop leg): media is answered as the signaling\n"
                       "# address, so the real media address is not approved.\n")
+        if shape.media_answer is not None:
+            where += ("# Media is answered as a RANGE (a media-server pool), as most owners do;\n"
+                      "# it becomes the profile's media-only media.networks.\n")
+            if not any(_contains(item, shape.media[0]) for item in shape.media_answer):
+                where += ("# DELIBERATE MISTAKE (the stop leg): the range is the one just outside\n"
+                          "# the real media address, so that address is not approved.\n")
     else:
         where = ""
     return f"""# Owner answers for the LOCAL PRACTICE TARGET, written by
@@ -210,7 +259,7 @@ targets:
     tls_server_name: {shape.server_name}
     tls_ca_file: {ca_file}
 media:
-  networks: [{', '.join(shape.media)}]
+  networks: [{', '.join(shape.answered_media)}]
   port_range: {{start: {practice.RTP_PORTS['start']}, end: {practice.RTP_PORTS['end']}}}
   protection: [rtp, sdes-srtp]
   codecs: [PCMU, PCMA]
@@ -261,6 +310,12 @@ evidence:
   retention_days: 30
   disclosure: private
 {checks_text}"""
+
+
+def _contains(network: str, address: str) -> bool:
+    import ipaddress
+
+    return ipaddress.ip_address(address) in ipaddress.ip_network(network, strict=False)
 
 
 def cockpit_view(model: dict[str, Any], plain: str) -> dict[str, Any]:
@@ -372,9 +427,10 @@ Runner = Callable[[list[str], dict[str, str] | None, float], Completed]
 
 class Rehearsal:
     def __init__(self, project: Path, *, runner: Runner | None = None, out=None, now=None,
-                 proxy: bool = False) -> None:
+                 proxy: bool = False, media_cidr: bool = False) -> None:
         self.project = project
-        self.proxy = proxy
+        self.media_cidr = media_cidr
+        self.proxy = proxy or media_cidr
         self.shape: Shape | None = None
         self.check_findings: list[str] = []
         self.stop_engagement: Path | None = None
@@ -527,7 +583,7 @@ class Rehearsal:
                 "restart the target (practice-target down, then up)"
             )
         self.facts = facts
-        self.shape = shape_for(facts, proxy=self.proxy)
+        self.shape = shape_for(facts, proxy=self.proxy, media_cidr=self.media_cidr)
         self.secret = self.password().encode("utf-8")
         # A target started before approvals were archived has no record of its
         # approval yet; record the current one (idempotent) so the owner report
@@ -541,12 +597,18 @@ class Rehearsal:
         if self.shape.kind == "proxy":
             self.fact(f"proxy shape: signaling to the proxy {self.shape.signaling} ({self.shape.server_name}, "
                       f"407 in realm {self.shape.realm}), media from {', '.join(self.shape.media)}")
+        if self.shape.media_answer is not None:
+            import ipaddress
+
+            covered = [str(item) for net in self.shape.media_answer for item in ipaddress.ip_network(net)]
+            self.fact(f"media answered as the range {', '.join(self.shape.media_answer)}, which covers "
+                      f"{', '.join(covered)}; signaling stays bound to the literal proxy address")
 
     def create_engagement(self) -> None:
         stamp = self.now().strftime("%Y%m%dt%H%M%Sz")
         parent = practice.state_dir(self.project) / "rehearsals"
         parent.mkdir(mode=0o700, exist_ok=True)
-        kind = "dress-proxy" if self.proxy else "dress"
+        kind = "dress-proxy-cidr" if self.media_cidr else "dress-proxy" if self.proxy else "dress"
         self.engagement = parent / f"{kind}-{stamp}-{os.getpid()}"
         self.log = None
         self.command([LAUNCHER, "journal", "init", self.eng, "--title", "Dress rehearsal (local practice target)",
@@ -581,11 +643,11 @@ class Rehearsal:
                                 shape=shape, checks=checks)
         practice.write_private(self.engagement / "scope.yaml", answers)
         assert shape is not None
-        media = ", ".join(shape.media)
+        media = ", ".join(shape.answered_media)
         self.say(f"    (answers written to {self.eng}/scope.yaml from the practice connection facts: signaling "
                  f"{shape.signaling}, media {media}; on a real engagement you fill it from the owner's written reply)")
 
-    def compile_scope(self) -> None:
+    def compile_scope(self, shape: Shape | None = None) -> None:
         assert self.engagement is not None
         self.command([LAUNCHER, "scope", "check", self.eng])
         compiled = self.command([LAUNCHER, "scope", "compile", self.eng])
@@ -593,10 +655,35 @@ class Rehearsal:
             self.require((self.engagement / name).is_file(), f"scope compile did not write {name}")
         self.require("authorization status: approved" in compiled.stdout, "the compiled profile is not approved")
         self.fact("compiled target-profile.yaml (approved), campaign.yaml, expectations.yaml")
+        shape = shape or self.shape
+        if shape is not None and shape.media_answer is not None:
+            self.require_media_networks(shape, compiled.stdout)
+
+    def require_media_networks(self, shape: Shape, compiled: str) -> None:
+        """The range became a media-only rule; only the proxy is a literal approved address."""
+        import yaml
+
+        assert self.engagement is not None
+        profile = yaml.safe_load((self.engagement / "target-profile.yaml").read_text(encoding="utf-8"))
+        approved = (profile.get("target") or {}).get("approved_addresses")
+        networks = (profile.get("media") or {}).get("networks")
+        self.require(approved == [shape.signaling],
+                     f"the profile's literal approved addresses are {approved}, expected only {shape.signaling}")
+        self.require(networks == list(shape.media_answer or ()),
+                     f"the profile's media.networks are {networks}, expected {list(shape.media_answer or ())}")
+        self.require("media.networks" in compiled and "media only" in compiled,
+                     "scope compile did not say where the media range went")
+        self.fact(f"profile: approved_addresses {approved} (signaling and media), media.networks {networks} "
+                  "(media only)")
 
     def rehearse(self) -> None:
         result = self.command([LAUNCHER, "rehearse", f"{self.eng}/target-profile.yaml"])
         self.require("Ready: yes" in result.stdout, "rehearse did not report Ready: yes")
+        if self.shape is not None and self.shape.media_answer is not None:
+            shown = [line for line in result.stdout.splitlines() if line.startswith("Media only: ")]
+            self.require(len(shown) == 1 and all(item in shown[0] for item in self.shape.media_answer),
+                         f"rehearse does not show the media network for review: {result.stdout.strip()[-400:]}")
+            self.fact(f"rehearse shows it for review: {shown[0]}")
         self.command([LAUNCHER, "checks", "plan", f"{self.eng}/target-profile.yaml"])
 
     def preflight(self) -> None:
@@ -622,6 +709,8 @@ class Rehearsal:
         self.fact(f"guided call to echo: pass; {self.shape_seen(result)}; run {result.get('runDirectory')}")
         self.journal_call(result)
         route = argv[:argv.index("call")]
+        if self.shape is not None and self.shape.media_answer is not None:
+            self.signaling_not_widened(route)
         dtmf = self.run_result(self.command([
             *route, "call", f"{self.eng}/target-profile.yaml", "--dial", "dtmf", "--dtmf", DTMF_DIGITS,
             "--duration", "8", "--username", practice.ACCOUNT, "--secret-file", PASSWORD_FILE, "--format", "json",
@@ -646,7 +735,41 @@ class Rehearsal:
         self.require(host == self.shape.signaling, f"the call signalled to {host!r}, not {self.shape.signaling}")
         self.require(peer.rsplit(":", 1)[0] in self.shape.media,
                      f"the media peer {peer!r} is not the answered media address {', '.join(self.shape.media)}")
-        return f"signaling {host}, media peer {peer}"
+        if self.shape.media_answer is None:
+            return f"signaling {host}, media peer {peer}"
+        record = result.get("mediaScope") if isinstance(result.get("mediaScope"), dict) else {}
+        self.require(record.get("admittedBy") == "media-network" and record.get("network") in self.shape.media_answer
+                     and record.get("inScope") is True,
+                     f"the result does not record the media range as the rule that admitted the peer: {record}")
+        return f"signaling {host}, media peer {peer} admitted by media network {record['network']}"
+
+    def signaling_not_widened(self, route: list[str]) -> None:
+        """A media network never admits signaling: a call whose host is the media address is refused.
+
+        The profile copy differs from the compiled one only in target.host
+        (the media address, inside the approved media range); the guided call
+        must refuse it before any packet (exit 2, no run directory).
+        """
+        import yaml
+
+        assert self.engagement is not None and self.shape is not None
+        document = yaml.safe_load((self.engagement / "target-profile.yaml").read_text(encoding="utf-8"))
+        media_address = self.shape.media[0]
+        document["target"]["host"] = media_address
+        path = self.engagement / "rehearsal" / "media-address-as-signaling.yaml"
+        practice.write_private(path, yaml.safe_dump(document, sort_keys=False))
+        relative = path.relative_to(self.project).as_posix()
+        refused = self.run_result(self.command([
+            *route, "call", relative, "--dial", "echo", "--username", practice.ACCOUNT,
+            "--secret-file", PASSWORD_FILE, "--format", "json",
+        ], timeout=120, expect=(2,)))
+        errors = " ".join(str(item) for item in refused.get("blockingErrors") or [])
+        self.require(refused.get("state") == "blocked" and refused.get("runDirectory") is None
+                     and refused.get("networkActivity") == "none"
+                     and "literal approved_addresses" in errors,
+                     f"a call signalling to the media address {media_address} was not refused: {refused}")
+        self.fact(f"signaling to the media address {media_address} (inside the media range) refused before any "
+                  f"packet: {errors}")
 
     def campaign(self) -> None:
         assert self.engagement is not None
@@ -749,14 +872,14 @@ class Rehearsal:
         """
         assert self.engagement is not None and self.secret is not None
         main = self.engagement
-        stop_shape = shape_for(self.facts, proxy=True, media_approved=False)
+        stop_shape = shape_for(self.facts, proxy=True, media_approved=False, media_cidr=self.media_cidr)
         self.engagement = main.parent / f"{main.name}-stop"
         try:
             self.command([LAUNCHER, "journal", "init", self.eng, "--title",
                           "Dress rehearsal stop leg (media address not approved)", "--owner", "Practice target"])
             self.command([LAUNCHER, "scope", "init", self.eng, "--name", SCOPE_NAME])
             self.write_answers(stop_shape, checks=())
-            self.compile_scope()
+            self.compile_scope(stop_shape)
             self.rehearse_only()
             model = self.cockpit("practice")
             action = find_action(model, "call")
@@ -768,6 +891,12 @@ class Rehearsal:
             self.require(result.get("verdict") == "media-outside-scope",
                          f"expected verdict media-outside-scope, got {result.get('verdict')!r}")
             self.require(peer.split(":")[0] == media, f"the stopped media peer is {peer!r}, not {media}")
+            if stop_shape.media_answer is not None:
+                record = result.get("mediaScope") if isinstance(result.get("mediaScope"), dict) else {}
+                self.require(record.get("admittedBy") is None and record.get("inScope") is False,
+                             f"the stopped call's media scope record does not show the refusal: {record}")
+                self.fact(f"media peer {media} is just outside the approved range "
+                          f"{', '.join(stop_shape.media_answer)}: refused, recorded admittedBy null")
             self.journal_call(result)
             model = self.cockpit("first-call")
             self.require_stop_presented(model)
@@ -855,6 +984,8 @@ class Rehearsal:
         started = time.monotonic()
         shape = ("the proxy shape (signaling to the practice proxy, media from the practice address)"
                  if self.proxy else "the practice target directly")
+        if self.media_cidr:
+            shape += " with media answered as a range"
         self.say(f"Dress rehearsal: the owner-facing chain against {shape} "
                  "(loopback inside the practice namespace only).")
         bodies = (
@@ -863,7 +994,7 @@ class Rehearsal:
             self.safety_stop,
         )
         try:
-            for title, body in zip(stage_titles(self.proxy), bodies, strict=True):
+            for title, body in zip(stage_titles(self.proxy, self.media_cidr), bodies, strict=True):
                 self.stage(title, body)
         except CannotStart as error:
             self.say(f"practice-target rehearsal: {error}")
@@ -879,6 +1010,7 @@ class Rehearsal:
             "elapsedSeconds": elapsed,
             "engagement": self.eng if self.engagement else None,
             "shape": "proxy" if self.proxy else "direct",
+            "mediaAnswer": "range" if self.media_cidr else "addresses",
             "stopEngagement": (self.stop_engagement.relative_to(self.project).as_posix()
                                if self.stop_engagement else None),
             "stages": [stage.__dict__ for stage in self.stages],
@@ -892,7 +1024,8 @@ class Rehearsal:
         for stage in self.stages:
             self.say(f"  {stage.status:<4} {stage.number:>2}. {stage.title} ({stage.seconds} s)")
         verdict = "PASS" if ok else "FAIL"
-        label = "Dress rehearsal (proxy shape)" if self.proxy else "Dress rehearsal"
+        label = ("Dress rehearsal (proxy shape, media range)" if self.media_cidr
+                 else "Dress rehearsal (proxy shape)" if self.proxy else "Dress rehearsal")
         self.say(f"{label}: {verdict} in {elapsed} s "
                  f"({sum(1 for s in self.stages if s.status == 'PASS')}/{len(self.stages)} stages)")
         if self.engagement is not None:
@@ -921,15 +1054,21 @@ def main(argv: list[str] | None = None) -> int:
         help="describe the proxy shape in the scope answers: signaling to the practice proxy (407 challenges, "
              "Record-Route, realm and certificate name sippycup-proxy), media from the practice address",
     )
+    parser.add_argument(
+        "--media-cidr", action="store_true",
+        help="the proxy shape with media answered as a range (127.0.0.2/31, a media-only network in the "
+             "profile); the stop leg answers the adjacent range just outside the media address",
+    )
     parser.add_argument("--project-dir", required=True, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
     project = Path(arguments.project_dir).resolve()
+    proxy = arguments.proxy or arguments.media_cidr
     if arguments.list:
-        for number, title in enumerate(stage_titles(arguments.proxy), 1):
+        for number, title in enumerate(stage_titles(proxy, arguments.media_cidr), 1):
             print(f"{number:>2}. {title}")
         print("Network activity: none")
         return 0
-    return Rehearsal(project, proxy=arguments.proxy).execute()
+    return Rehearsal(project, proxy=proxy, media_cidr=arguments.media_cidr).execute()
 
 
 STAGE_TITLES = (
@@ -948,12 +1087,16 @@ STAGE_TITLES = (
 )
 
 
-def stage_titles(proxy: bool) -> tuple[str, ...]:
-    if not proxy:
+def stage_titles(proxy: bool, media_cidr: bool = False) -> tuple[str, ...]:
+    if not proxy and not media_cidr:
         return STAGE_TITLES
     titles = list(STAGE_TITLES)
     titles[3] = "scope answers (proxy shape): scope check, scope compile"
     titles[5] = "preflight to the proxy: UDP and verified TLS"
+    if media_cidr:
+        titles[3] = "scope answers (proxy shape, media as a range): scope check, scope compile"
+        titles[6] = "guided call (media admitted by the range), DTMF call, signaling to the media address refused"
+        titles[11] = "safety stop: media address just outside the approved range (throwaway engagement)"
     return tuple(titles)
 
 

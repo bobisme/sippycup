@@ -2,9 +2,10 @@
 
 It runs the public `./bin/sippycup practice-target rehearsal` (the whole
 owner-facing chain against the practice target, about 90 s) and, with
-SIPPYCUP_DRESS_REHEARSAL_GATE=proxy or =all, `rehearsal --proxy`, and needs
-the core toolbox image and the practice image. It runs only when explicitly
-enabled with SIPPYCUP_DRESS_REHEARSAL_GATE (1, proxy, or all) and skips when an image is absent
+SIPPYCUP_DRESS_REHEARSAL_GATE=proxy or =all, `rehearsal --proxy`, with
+=proxy-cidr or =all `rehearsal --media-cidr` (media answered as a range), and
+needs the core toolbox image and the practice image. It runs only when explicitly
+enabled with SIPPYCUP_DRESS_REHEARSAL_GATE (1, proxy, proxy-cidr, or all) and skips when an image is absent
 (unless SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1, which the make target sets).
 """
 
@@ -32,6 +33,9 @@ class DressRehearsalGateTests(unittest.TestCase):
     def test_dress_rehearsal_proxy(self) -> None:
         self._gate("proxy", ["--proxy"])
 
+    def test_dress_rehearsal_proxy_media_cidr(self) -> None:
+        self._gate("proxy-cidr", ["--media-cidr"])
+
     def _gate(self, variant: str, extra: list[str]) -> None:
         wanted = os.environ.get("SIPPYCUP_DRESS_REHEARSAL_GATE")
         if wanted not in {"1" if variant == "direct" else variant, "all"}:
@@ -49,12 +53,13 @@ class DressRehearsalGateTests(unittest.TestCase):
         )
         print(result.stdout)
         self.assertEqual(0, result.returncode, result.stdout[-3000:])
-        self.assertRegex(result.stdout, r"Dress rehearsal( \(proxy shape\))?: PASS in [0-9.]+ s")
+        self.assertRegex(result.stdout, r"Dress rehearsal( \(proxy shape(, media range)?\))?: PASS in [0-9.]+ s")
         self.assertNotIn("[FAIL]", result.stdout)
         evidence = next(line.split()[1] for line in result.stdout.splitlines() if line.startswith("Evidence: "))
         summary = json.loads((ROOT / evidence / "rehearsal" / "summary.json").read_text(encoding="utf-8"))
         self.assertTrue(summary["ok"])
-        self.assertEqual(variant, summary["shape"])
+        self.assertEqual(variant.removesuffix("-cidr"), summary["shape"])
+        self.assertEqual("range" if variant == "proxy-cidr" else "addresses", summary["mediaAnswer"])
         self.assertEqual(12, len(summary["stages"]))
         report = json.loads((ROOT / evidence / "report" / "report.json").read_text(encoding="utf-8"))
         self.assertEqual([], report["integrityExceptions"])
@@ -64,6 +69,11 @@ class DressRehearsalGateTests(unittest.TestCase):
         stop = json.loads((ROOT / summary["stopEngagement"] / "report" / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(["media-peer-not-approved"], [item["code"] for item in stop["integrityExceptions"]])
         self.assertEqual(["media-outside-scope"], [run.get("verdict") for run in stop["runs"]])
+        if variant == "proxy-cidr":
+            calls = [run for run in report["runs"] if run.get("kind") == "call" and not run.get("practiceApproval")]
+            self.assertTrue(calls)
+            self.assertEqual({"media-network"}, {run["details"]["media"]["peerApprovedBy"] for run in calls})
+            self.assertEqual({"media-network"}, {run["details"]["media"]["peerRecordedRule"] for run in calls})
         # The practice target is left the way it was found.
         self.assertEqual(before, self._target_up())
 

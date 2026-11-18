@@ -296,13 +296,23 @@ def _within(path: Path, root: Path) -> bool:
         return False
 
 
-def capture_filter(addresses: Sequence[str], port: int, transport: str) -> str:
-    """Capture only approved addresses: the signaling port plus UDP for RTP."""
+def capture_filter(
+    addresses: Sequence[str], port: int, transport: str, media_networks: Sequence[str] = ()
+) -> str:
+    """Capture only approved addresses: the signaling port plus UDP for RTP.
+
+    Owner-approved media networks add UDP (media) only to and from them.
+    """
     if not addresses:
         raise CallError("capture scope needs at least one approved address")
     hosts = " or ".join(f"host {str(ipaddress.ip_address(item))}" for item in addresses)
     protocol = "udp" if transport == "udp" else "tcp"
-    return f"({hosts}) and ({protocol} port {int(port)} or udp)"
+    scope = f"({hosts}) and ({protocol} port {int(port)} or udp)"
+    if media_networks:
+        from .media_scope import capture_terms
+
+        scope = f"({scope}) or (({capture_terms(media_networks)}) and udp)"
+    return scope
 
 
 def srtp_mode(options: "CallOptions", document: dict[str, Any]) -> str:
@@ -327,10 +337,18 @@ def generate_expectations(
     *,
     media_required: bool,
     require_dtmf: bool = False,
+    media_networks: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Oracle expectations derived from the profile; codecs are never assumed."""
+    """Oracle expectations derived from the profile; codecs are never assumed.
+
+    The oracle's allowlist takes literal addresses only, so every address of
+    an owner-approved media network is listed (rehearse bounds them to 1024).
+    """
+    from .media_scope import MediaScope
+
     endpoints: list[str] = []
-    for address in [*approved_addresses, *([local_address] if local_address else [])]:
+    enumerated = MediaScope((), tuple(media_networks)).enumerate() if media_networks else []
+    for address in [*approved_addresses, *([local_address] if local_address else []), *enumerated]:
         rendered = str(ipaddress.ip_address(address))
         if rendered not in endpoints:
             endpoints.append(rendered)
@@ -614,6 +632,7 @@ def _softphone_parameters(
             }
         ),
         "signaling_pinned_to_target": True,
+        **_media_scope_parameters(document),
         "media_required": options.media_required,
         "dtmf": (
             None
@@ -657,8 +676,13 @@ def dry_run_plan(
             plan["blocking_errors"].append(message)
     target = document.get("target", {})
     approved = target.get("approved_addresses") if isinstance(target.get("approved_addresses"), list) else []
+    from .media_scope import profile_media
+
+    media_networks, _ports = profile_media(document)
     try:
-        scope = capture_filter(approved, int(target.get("port", 5060)), str(target.get("transport", "udp")))
+        scope = capture_filter(
+            approved, int(target.get("port", 5060)), str(target.get("transport", "udp")), media_networks
+        )
     except (CallError, ValueError, TypeError):
         scope = None
     return {
@@ -813,18 +837,42 @@ def remote_sdp_addresses(log_text: str) -> list[str] | None:
 
 
 def _peer_unknown_but_approved(
-    softphone: dict[str, Any], approved: Sequence[str], remote_media: Sequence[str] | None
+    softphone: dict[str, Any],
+    approved: Sequence[str],
+    remote_media: Sequence[str] | None,
+    media_networks: Sequence[str] = (),
 ) -> bool:
-    """True when PJSUA had no media peer yet but the far end's SDP is wholly approved."""
+    """True when PJSUA had no media peer yet but the far end's SDP is wholly approved.
+
+    Approved for media: a literal approved address or an address inside an
+    owner-approved media network.
+    """
     from sippycup_softphone.driver import _peer_address
+
+    from .media_scope import MediaScope
 
     peer = softphone.get("media_peer")
     if peer and _peer_address(str(peer)) is not None:
         return False
     if not remote_media or not approved:
         return False
-    allowed = {str(ipaddress.ip_address(item)) for item in approved}
-    return all(item in allowed for item in remote_media)
+    scope = MediaScope(tuple(str(ipaddress.ip_address(item)) for item in approved), tuple(media_networks))
+    return all(scope.admits(item) for item in remote_media)
+
+
+def _scope_stop_note(softphone: dict[str, Any], media_networks: Sequence[str]) -> str:
+    decision = softphone.get("media_scope") if isinstance(softphone.get("media_scope"), dict) else {}
+    ports = (decision.get("rules") or {}).get("mediaPorts")
+    if decision.get("admittedBy") and decision.get("portAdmitted") is False and ports:
+        return (
+            f"The negotiated media port is outside the approved media port range {ports[0]}-{ports[1]}; "
+            "the call was hung up."
+        )
+    return (
+        "The negotiated media peer is not an approved address"
+        + (" and not inside an approved media network" if media_networks else "")
+        + "; the call was hung up."
+    )
 
 
 def derive_setup(softphone: dict[str, Any] | None, log_text: str = "") -> dict[str, Any] | None:
@@ -940,6 +988,7 @@ def classify(
     srtp_media: dict[str, Any] | None = None,
     dtmf: dict[str, Any] | None = None,
     srtp_requested: str = "off",
+    media_networks: Sequence[str] = (),
 ) -> tuple[str, str, int, list[str]]:
     """Return (state, verdict, exit code, notes): the core verdict, then refinements.
 
@@ -953,6 +1002,7 @@ def classify(
         network_mode=network_mode, host=host, tls_media=tls_media, setup=setup,
         approved=approved, remote_media=remote_media,
         srtp_media=srtp_media, dtmf=dtmf, srtp_requested=srtp_requested,
+        media_networks=media_networks,
     )
     return _refine(
         state, verdict, code, notes, softphone=softphone, oracle=oracle,
@@ -978,6 +1028,7 @@ def _classify_core(
     srtp_media: dict[str, Any] | None = None,
     dtmf: dict[str, Any] | None = None,
     srtp_requested: str = "off",
+    media_networks: Sequence[str] = (),
 ) -> tuple[str, str, int, list[str]]:
     """Return (state, verdict, exit code, notes). Unknown stays unknown.
 
@@ -998,7 +1049,7 @@ def _classify_core(
         return "failed", "call-not-placed", EXIT_NOT_PASS, notes
     error = softphone.get("error")
     if error == "media_peer_outside_scope" and _peer_unknown_but_approved(
-        softphone, approved, remote_media
+        softphone, approved, remote_media, media_networks
     ):
         # PJSUA prints ``peer=-`` until the first RTP packet arrives, and the
         # softphone driver treats that placeholder as out of scope. The far
@@ -1007,11 +1058,11 @@ def _classify_core(
         notes.append(
             "PJSUA never learned a media address for the far end because no RTP arrived from it, "
             "and the softphone driver hung up the call early; the far end's SDP named only "
-            f"approved address(es): {', '.join(remote_media or ())}."
+            f"approved address(es) or media network(s): {', '.join(remote_media or ())}."
         )
         error = None
     if error == "media_peer_outside_scope":
-        notes.append("The negotiated media peer is not an approved address; the call was hung up.")
+        notes.append(_scope_stop_note(softphone, media_networks))
         return "failed", "media-outside-scope", EXIT_NOT_PASS, notes
     if error in ("tls_verification_failed", "tls_verification_not_observed") or (
         tls_media is not None and softphone.get("tls_verified") is not True
@@ -1738,6 +1789,11 @@ def _execute(
     port = target["port"]
     transport = target["transport"]
     approved = list(target["approved_addresses"])
+    # Owner-approved media networks and the far end's RTP port range: MEDIA
+    # ONLY. Signaling still goes only to the literal target.host (gate()).
+    from .media_scope import profile_media
+
+    media_networks, media_ports = profile_media(document)
     profile_name = str(document["name"])
     server_name = target.get("tls_server_name") if transport == "tls" else None
     ca_reference = target.get("tls_ca_file") if transport == "tls" else None
@@ -1829,9 +1885,9 @@ def _execute(
     internal_error: str | None = None
     expectations = generate_expectations(
         approved, local, media_required=options.media_required,
-        require_dtmf=options.dtmf is not None,
+        require_dtmf=options.dtmf is not None, media_networks=media_networks,
     )
-    scope = capture_filter(approved, port, transport)
+    scope = capture_filter(approved, port, transport, media_networks)
     interface = str(document.get("capture", {}).get("interface", "any"))
     tools = deps.tools
     capture_argv = [
@@ -1909,6 +1965,8 @@ def _execute(
             answer_timeout_seconds=options.answer_timeout,
             registration_timeout_seconds=REGISTRATION_TIMEOUT_SECONDS,
             allowed_media_addresses=tuple(approved),
+            allowed_media_networks=media_networks or None,
+            allowed_media_ports=media_ports,
             advertised_address=local,
             tls_server_name=server_name,
             tls_ca_file=ca_copy,
@@ -1931,6 +1989,12 @@ def _execute(
                 ],
                 "valid_until": rehearse(document, now=now).facts["authorization"]["valid_until"],
                 "approval_id_present": True,
+                **({"media_networks": list(media_networks)} if media_networks else {}),
+                **(
+                    {"media_ports": {"start": media_ports[0], "end": media_ports[1]}}
+                    if media_ports
+                    else {}
+                ),
             },
             "evidence": {"capture": True, "retainPayload": True},
             "target": {"host": host, "port": port, "transport": transport},
@@ -2176,6 +2240,7 @@ def _execute(
         srtp_media=srtp_media,
         dtmf=dtmf_report,
         srtp_requested=srtp,
+        media_networks=media_networks,
     )
     notes.insert(0, _network_note(network_mode, host))
     if internal_error is not None:
@@ -2239,6 +2304,7 @@ def _execute(
         "networkMode": network_mode,
         "durationSeconds": {"requested": options.duration, "limit": limit, "effective": duration},
         "captureFilter": scope,
+        "mediaScope": _media_scope_record(softphone_call, softphone_result),
         "preflight": None if preflight_ok is None else {"ok": preflight_ok, "detail": _read_preflight(run_dir)},
         "softphone": None if softphone_result is None else {
             key: softphone_result.get(key)
@@ -2275,6 +2341,39 @@ def _execute(
     except Exception as error:  # evidence failure must not hide the call verdict
         value["evidencePrivacy"] = f"manifest-error: {type(error).__name__}"
     return exit_code, value
+
+
+def _media_scope_parameters(document: dict[str, Any]) -> dict[str, Any]:
+    """``media_scope`` for the plan, only when the profile approves media networks or ports."""
+    from .media_scope import profile_media
+
+    networks, ports = profile_media(document)
+    if not networks and ports is None:
+        return {}
+    return {
+        "media_scope": {
+            "media_networks": list(networks),
+            "media_networks_admit": "media only; signaling goes only to the target host",
+            "media_ports": None if ports is None else {"start": ports[0], "end": ports[1]},
+        }
+    }
+
+
+def _media_scope_record(
+    call: SoftphoneCall | None, softphone: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """The media-scope rules of this call and which one admitted the media peer.
+
+    Recomputed from the call's own rules and the peer PJSUA reported, with
+    the same function the driver enforces with, so the record and the
+    enforcement cannot disagree. ``admittedBy`` is ``approved-address`` (a
+    literal approved address) or ``media-network`` (inside ``network``).
+    """
+    if call is None:
+        return None
+    from sippycup_softphone.driver import media_scope_decision
+
+    return media_scope_decision(call, (softphone or {}).get("media_peer"))
 
 
 def _read_preflight(run_dir: Path) -> str | None:
@@ -2488,6 +2587,22 @@ def render_human(value: dict[str, Any]) -> str:
         )
     for warning in value.get("warnings") or []:
         lines.append(f"WARNING: {warning}: SDES-SRTP keys were sent in SDP over cleartext signaling.")
+    scope_record = value.get("mediaScope")
+    if isinstance(scope_record, dict) and scope_record.get("peer"):
+        rule = scope_record.get("admittedBy")
+        lines.append(
+            f"  Media scope:  peer {scope_record['peer']} "
+            + (
+                "admitted by a literal approved address"
+                if rule == "approved-address"
+                else f"admitted by the approved media network {scope_record.get('network')} (media only)"
+                if rule == "media-network"
+                else "admitted (no address rule)"
+                if rule == "any-address"
+                else "NOT approved"
+            )
+            + ("; port outside the approved media port range" if scope_record.get("portAdmitted") is False else "")
+        )
     recording = value.get("recording")
     if recording and recording.get("present") and recording.get("readable"):
         silent = recording.get("silent")

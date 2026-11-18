@@ -111,6 +111,11 @@ def resolve(path_text: str) -> Inputs:
         target = profile.get("target")
         if isinstance(target, dict):
             approved += _networks(target.get("approved_addresses"))
+        # Owner-approved media networks: shown, not redacted (the ladder
+        # draws addresses; it never decides where signaling may go).
+        media = profile.get("media")
+        if isinstance(media, dict):
+            approved += _networks(media.get("networks"))
         result = _read_json(source / "result.json")
         local = result.get("localAddress") or plan.get("local_address")
         if isinstance(local, str):

@@ -79,6 +79,20 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
         target = value.get("facts", {}).get("target")
         if target:
             print(f"Target: {target['host']}:{target['port']} ({target['transport']})")
+        facts = value.get("facts", {})
+        if facts.get("media_networks") or facts.get("media_ports"):
+            from .media_scope import describe
+
+            approved = target.get("approved_addresses") if isinstance(target, dict) else None
+            if isinstance(approved, list):
+                print(f"Signaling and media: {', '.join(str(item) for item in approved) or 'none'} "
+                      "(literal approved addresses; signaling goes only to the target host)")
+            if facts.get("media_networks"):
+                print(f"Media only: {describe(facts['media_networks'])} "
+                      "(owner-approved media networks; never a signaling target)")
+            if facts.get("media_ports"):
+                ports = facts["media_ports"]
+                print(f"Media ports: {ports['start']}-{ports['end']} (the far end's RTP ports)")
         tls = value.get("facts", {}).get("tls")
         if tls:
             print(tls_summary(tls))

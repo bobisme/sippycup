@@ -514,6 +514,30 @@ guided call must have signalled to `127.0.0.3` with its media peer on
 `127.0.0.2`, and `unauthenticated-invite` must have seen the proxy's 407.
 DIR is `work/practice/rehearsals/dress-proxy-STAMP-PID`.
 
+### Media as a range (`--media-cidr`)
+
+Owners usually approve media as a media-server pool, a range. `--media-cidr`
+(it implies `--proxy`) answers `media.networks` with `127.0.0.2/31` instead of
+the literal `127.0.0.2`. That `/31` covers `127.0.0.2` and `127.0.0.3`: no
+range wider than one address can hold `127.0.0.2` without `127.0.0.3`, so the
+signaling address lies inside it too, which is harmless because signaling is
+approved only through the literal address. `scope compile` then writes
+`target.approved_addresses: [127.0.0.3]` and `media.networks: [127.0.0.2/31]`
+(media only), which the stage asserts, and `rehearse` must show the range on
+its `Media only:` line. In addition to the proxy assertions, every guided call
+must record `mediaScope.admittedBy: media-network` with network
+`127.0.0.2/31`, and stage 7 places one more call through the same route with a
+copy of the profile whose `target.host` is the media address `127.0.0.2`
+(inside the range): it must be refused before any packet (exit 2, state
+`blocked`, no run directory), because a media network never admits
+signaling. The owner report shows those calls with `peerApprovedBy:
+media-network` and lists the range under "approved for media only". The stop
+leg answers the adjacent range `127.0.0.4/31`, just outside the media
+address, so the call must stop `media-outside-scope` with `mediaScope`
+recording the refusal. DIR is
+`work/practice/rehearsals/dress-proxy-cidr-STAMP-PID`; `make
+dress-rehearsal-proxy-cidr` runs it.
+
 ### The safety stop (stage 12)
 
 Both variants end with one deliberately failing leg, so you see the stop
@@ -526,9 +550,10 @@ address `127.0.0.2` is not. The cockpit's guided call must end
 10 RTP packets sent there before the hangup (typically 3). Then:
 
 - the cockpit lists the run as `[stop]` with the reason "safety stop, not a
-  target failure: the media peer ... is not an approved address, so the call
-  was hung up after N RTP packets; add the owner's media addresses to the
-  scope and compile again";
+  target failure: the media peer ... is not an approved address or inside an
+  approved media network, so the call was hung up after N RTP packets; add
+  the owner's media addresses or media network to the scope and compile
+  again";
 - the owner report of `DIR-stop` lists it as an `info` observation titled
   "Safety stop: media was negotiated to an address outside the approved
   scope", no oracle observation, the executive summary row "1 run was ended

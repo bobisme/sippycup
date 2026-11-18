@@ -106,11 +106,21 @@ QUESTIONS: tuple[Question, ...] = (
              "Which destination(s) should we dial (extension, echo service, voice agent) and what should each do: echo the audio, answer as an agent, or reject the call?",
              ("destinations",), answered=_destinations_answered),
     Question("media.addresses", "Media",
-             "Which literal media IP address(es) or CIDR(s) will RTP come from and go to, if they differ from signaling?",
-             ("media.networks",)),
+             "Which IP addresses will your media servers send RTP from and receive it on? Give each media-server "
+             "address, or each media-server pool as a range in CIDR form (for example 198.51.100.0/27), even when it "
+             "is the signaling address.",
+             ("media.networks",), details=lambda: [
+                 "   We send media only to these addresses and ranges, never signaling: SIP goes only to the",
+                 "   signaling addresses above. A call stops by itself if your side offers media anywhere else.",
+                 "   Each range may hold at most 1024 addresses (IPv4 /22 or narrower), 1024 in total; a wider",
+                 "   range is refused, so please name the actual media-server pool(s).",
+             ]),
     Question("media.ports", "Media",
-             "Which media (RTP) port range may we use?",
-             ("media.port_range.start", "media.port_range.end")),
+             "Which media (RTP) port range do your media servers use (the far-end UDP ports we will send "
+             "media to), as a first and last port (for example 10000 to 20000)?",
+             ("media.port_range.start", "media.port_range.end"), details=lambda: [
+                 "   A call stops by itself if your side offers a media port outside this range.",
+             ]),
     Question("media.protection", "Media",
              "Is media plain RTP or SRTP, and if SRTP which keying: SDES or DTLS-SRTP?",
              ("media.protection",)),

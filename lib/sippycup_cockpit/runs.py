@@ -244,6 +244,19 @@ def _call_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
             ("Oracle", f"{oracle.get('verdict')} (pass {counts.get('pass', '?')}, fail {counts.get('fail', '?')},"
              f" unknown {counts.get('unknown', '?')})")
         )
+    media_scope = document.get("mediaScope") if isinstance(document.get("mediaScope"), dict) else None
+    if media_scope is not None and media_scope.get("peer"):
+        rule = media_scope.get("admittedBy")
+        facts.append((
+            "Media scope",
+            f"peer {media_scope.get('peer')} "
+            + ("admitted by a literal approved address" if rule == "approved-address"
+               else f"admitted by the approved media network {media_scope.get('network')} (media only)"
+               if rule == "media-network"
+               else "admitted (no address rule)" if rule == "any-address"
+               else "NOT approved")
+            + ("; port outside the approved media port range" if media_scope.get("portAdmitted") is False else ""),
+        ))
     if isinstance(document.get("networkActivity"), str):
         facts.append(("Network activity", document["networkActivity"]))
     summary["facts"] = facts
@@ -261,8 +274,9 @@ def _call_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
         peer = (softphone or {}).get("media_peer") or "an unapproved address"
         sent = (softphone or {}).get("rtp_tx_packets")
         packets = f" after {sent} RTP packet{'s' if sent != 1 else ''}" if isinstance(sent, int) else ""
-        reason = (f"safety stop, not a target failure: the media peer {peer} is not an approved address, "
-                  f"so the call was hung up{packets}; add the owner's media addresses to the scope and compile again")
+        reason = (f"safety stop, not a target failure: the media peer {peer} is not an approved address "
+                  f"or inside an approved media network, so the call was hung up{packets}; add the owner's "
+                  "media addresses or media network to the scope and compile again")
         facts.insert(0, ("Safety stop", reason))
     summary["reason"] = reason
     journal = document.get("journalCommand")

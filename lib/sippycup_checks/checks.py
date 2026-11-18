@@ -46,6 +46,10 @@ class Context:
     # carry its gates. ``recheck`` returns why authorization no longer holds
     # (None while it does) and is called before every call.
     approved_addresses: tuple[str, ...] = ()
+    # Owner-approved media networks and the far end's RTP port range (the
+    # profile's media section): they admit a media peer, never a signaling target.
+    media_networks: tuple[str, ...] = ()
+    media_ports: tuple[int, int] | None = None
     recheck: Callable[[], str | None] = lambda: None
     cancel: Any = None
     place_call: Callable[..., Any] | None = None

@@ -126,6 +126,46 @@ peer before the hang-up. Behind a proxy or SBC the media address usually
 differs from the signaling address; approve both (see the practice proxy in
 `docs/PRACTICE-TARGET.md`).
 
+### Media networks and media ports
+
+Owners usually approve media as a range: a media-server pool such as a `/27`.
+The profile's optional `media` section carries it, for MEDIA ONLY:
+
+```yaml
+media:
+  networks: [198.51.100.0/27]               # media-server pools (CIDR)
+  port_range: {start: 10000, end: 20000}    # the far end's RTP ports
+```
+
+The media peer is approved when it is a literal `target.approved_addresses`
+entry or lies inside a `media.networks` range, and, when `port_range` is
+present, its port lies inside the range; anything else stops the call with
+`media-outside-scope` exactly as before. `media.networks` never widens
+signaling: the preflight, registration, and INVITE go only to `target.host`,
+which must itself be a literal approved address, so a profile whose host lies
+inside a media range is refused (exit 2, nothing sent). `rehearse` refuses a
+range of more than 1024 addresses (see the breadth rule in
+`SCOPE-INTAKE.md`) and prints the ranges on their own `Media only:` line for
+review. With media networks the capture filter adds `net RANGE and udp`, the
+oracle allowlist lists every address of the ranges, and `plan.json` records
+them as `authorization.media_networks` (and `media_ports`), apart from the
+literal `authorization.networks`.
+
+`result.json` records the rules and which one admitted the peer:
+
+```json
+"mediaScope": {"rules": {"approvedAddresses": ["203.0.113.10"], "mediaNetworks": ["198.51.100.0/27"],
+               "mediaPorts": [10000, 20000]},
+               "peer": "198.51.100.12:10044", "admittedBy": "media-network",
+               "network": "198.51.100.0/27", "portAdmitted": true, "inScope": true}
+```
+
+`admittedBy` is `approved-address`, `media-network`, or `null` (refused); the
+human output prints it as `Media scope: peer ... admitted by the approved
+media network ...`. The call matrix (each cell is a guided call) copies it
+into each cell as `mediaAdmittedBy`/`mediaNetwork`, and `srtp-policy` rows
+carry the same two fields.
+
 ## DTMF
 
 `--dtmf 12#,34` sends `12#`, waits 1 s, then sends `34`, starting

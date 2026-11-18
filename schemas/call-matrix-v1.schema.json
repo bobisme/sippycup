@@ -75,6 +75,8 @@
           "negotiatedPayloadType": {"type": ["integer", "null"]},
           "codecVerifiedOnWire": {"type": ["boolean", "null"]},
           "srtpActive": {"type": ["boolean", "null"]},
+          "mediaAdmittedBy": {"description": "Which media-scope rule admitted the media peer (the cell's result.json mediaScope): approved-address, media-network, any-address, or null.", "enum": ["approved-address", "media-network", "any-address", null]},
+          "mediaNetwork": {"type": ["string", "null"], "description": "The approved media network that admitted the peer, when mediaAdmittedBy is media-network."},
           "runDirectory": {"type": ["string", "null"]}
         }
       }

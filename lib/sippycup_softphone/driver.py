@@ -246,6 +246,9 @@ class SoftphoneResult:
     warnings: list[str] = field(default_factory=list)
     # Requested, offered, answered, and negotiated codecs (see codec_facts).
     codecs: dict[str, Any] | None = None
+    # The media-scope rules and which one admitted the media peer (see
+    # media_scope_decision); ``None`` when the call had no media scope.
+    media_scope: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -582,27 +585,73 @@ def _peer_port(peer: str) -> int | None:
     return int(text) if text.isdigit() and 1 <= int(text) <= 65535 else None
 
 
-def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
+def media_scope_decision(call: SoftphoneCall, peer: str | None) -> dict[str, Any] | None:
+    """Which media-scope rule admitted (or refused) the observed media peer.
+
+    ``None`` when the call has no media scope. Otherwise the rules in force
+    and, once PJSUA knows the peer, ``admittedBy``: ``approved-address`` (a
+    literal approved address), ``media-network`` (inside ``network``, an
+    owner-approved media network), ``any-address`` (no address rule, only a
+    port rule), or ``None`` (refused); ``inScope`` is the overall answer
+    (``None`` while the peer is unknown). Recorded in the result so the
+    evidence shows why media was allowed to flow where it did.
+    """
+    if (
+        call.allowed_media_addresses is None
+        and call.allowed_media_networks is None
+        and call.allowed_media_ports is None
+    ):
+        return None
+    decision: dict[str, Any] = {
+        "rules": {
+            "approvedAddresses": (
+                None if call.allowed_media_addresses is None else list(call.allowed_media_addresses)
+            ),
+            "mediaNetworks": (
+                None if call.allowed_media_networks is None else list(call.allowed_media_networks)
+            ),
+            "mediaPorts": (
+                None if call.allowed_media_ports is None else list(call.allowed_media_ports)
+            ),
+        },
+        "peer": None,
+        "admittedBy": None,
+        "network": None,
+        "portAdmitted": None,
+        "inScope": None,
+    }
     # PJSUA prints "peer=-" (or another placeholder) until the first RTP
     # packet arrives; an unknown peer is unknown, not out of scope.
-    if peer is None or _peer_address(peer) is None:
-        return False
-    if call.allowed_media_addresses is not None or call.allowed_media_networks is not None:
-        address = _peer_address(peer)
-        in_addresses = (
-            call.allowed_media_addresses is not None and address in call.allowed_media_addresses
-        )
-        in_networks = call.allowed_media_networks is not None and any(
-            ipaddress.ip_address(address) in ipaddress.ip_network(network)
-            for network in call.allowed_media_networks
-        )
-        if not (in_addresses or in_networks):
-            return True
+    address = _peer_address(peer) if peer is not None else None
+    if address is None:
+        return decision
+    decision["peer"] = peer
+    parsed = ipaddress.ip_address(address)
+    if call.allowed_media_addresses is None and call.allowed_media_networks is None:
+        decision["admittedBy"] = "any-address"
+    elif call.allowed_media_addresses is not None and any(
+        ipaddress.ip_address(item) == parsed for item in call.allowed_media_addresses
+    ):
+        decision["admittedBy"] = "approved-address"
+    else:
+        for network in call.allowed_media_networks or ():
+            candidate = ipaddress.ip_network(network)
+            if candidate.version == parsed.version and parsed in candidate:
+                decision["admittedBy"] = "media-network"
+                decision["network"] = str(candidate)
+                break
+    address_ok = decision["admittedBy"] is not None
     if call.allowed_media_ports is not None:
         port = _peer_port(peer)
         start, end = call.allowed_media_ports
-        return port is None or not start <= port <= end
-    return False
+        decision["portAdmitted"] = port is not None and start <= port <= end
+    decision["inScope"] = address_ok and decision["portAdmitted"] is not False
+    return decision
+
+
+def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
+    decision = media_scope_decision(call, peer)
+    return decision is not None and decision["inScope"] is False
 
 
 def codec_matches(entry: Mapping[str, Any], requested: str) -> bool:
@@ -1333,6 +1382,7 @@ def place_call(
         result.media_peer = facts["media_peer"] or result.media_peer
         if result.error is None and _media_outside_scope(call, result.media_peer):
             result.error = "media_peer_outside_scope"
+        result.media_scope = media_scope_decision(call, result.media_peer)
         if result.final_status is None and result.disconnect_status is not None and not result.answered:
             result.final_status = result.disconnect_status
         _observe_media_facts(call, result, raw_text, raw_text + "\n" + console_text)

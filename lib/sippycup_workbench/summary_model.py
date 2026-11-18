@@ -96,7 +96,7 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
         "severity": "info",
         "title": "Safety stop: media was negotiated to an address outside the approved scope",
         "summary": "Sippycup hung the call up because the far end negotiated media to an address the written scope does not approve. This is a safety stop, not a target failure.",
-        "recommendation": "Confirm the media server addresses with the service owner and add them to the written scope (or have the advertised SDP connection address corrected), then repeat the call.",
+        "recommendation": "Confirm the media server addresses or media-server range with the service owner and add them to the written scope's media networks (or have the advertised SDP connection address corrected), then repeat the call.",
     },
     "oracle-assertion-failed": {
         "severity": "info",
@@ -474,10 +474,32 @@ def _profile_source(document: dict[str, Any], ref: str) -> Source:
     )
     if isinstance(target.get("tls_server_name"), str):
         source.server_names.append(target["tls_server_name"])
+    # Owner-approved media networks (media only: Source.covers, the signaling
+    # target check, never consults them) and the far end's RTP ports.
+    media = _dict(document.get("media"))
+    source.media_networks = [n for n in _str_list(media.get("networks")) if _is_network(n)]
+    port_range = _dict(media.get("port_range"))
+    if _int(port_range.get("start")) and _int(port_range.get("end")):
+        source.media_ports = (port_range["start"], port_range["end"])
     for key, value in _dict(document.get("limits")).items():
         if _int(value) is not None:
             source.limits[str(key)] = value
     return source
+
+
+def _canonical_network(value: Any) -> str | None:
+    try:
+        return str(ipaddress.ip_network(str(value).strip(), strict=False))
+    except ValueError:
+        return None
+
+
+def _is_network(value: Any) -> bool:
+    try:
+        ipaddress.ip_network(str(value), strict=False)
+    except ValueError:
+        return False
+    return True
 
 
 def _manifest_source(document: dict[str, Any], ref: str) -> Source:
@@ -864,12 +886,35 @@ def _target(scope: _Scope, address: Any, port: Any, transport: Any, server_name:
     canonical = _canonical_ip(address) if address is not None else None
     return {
         "address": scope.addresses.label(canonical) if canonical else ("unrecorded" if address is None else "unrecognized-host"),
-        "approvedAddress": bool(canonical and scope.addresses.approved(canonical)),
+        "approvedAddress": bool(canonical and scope.addresses.approved_for_signaling(canonical)),
         "port": _int(port),
         "transport": transport if transport in {"udp", "tcp", "tls"} else None,
         "serverName": scope.server_names(server_name) if isinstance(server_name, str) else None,
         "_raw": canonical,
     }
+
+
+def _media_rule(scope: "_Scope", peer: str | None) -> str | None:
+    """How the report's own records approve the media peer.
+
+    ``approved-address``: inside an address or network a reviewed record
+    approves for signaling (which also carries media); ``media-network``:
+    only inside an owner-approved media network; ``None``: not approved.
+    The engagement's records decide first; an address approved only by
+    another record (a practice approval) counts as an approved address. The
+    rule the run itself recorded (result.json ``mediaScope``) is shown
+    beside it as ``peerRecordedRule``.
+    """
+    if not peer or not scope.addresses.approved(peer):
+        return None
+    for attribute, rule in (("networks", "approved-address"), ("media_networks", "media-network")):
+        book = AddressBook()
+        for source in scope.sources:
+            for network in getattr(source, attribute):
+                book.add_network(network)
+        if book.approved(peer):
+            return rule
+    return "approved-address"
 
 
 def _destination_user(uri: Any) -> str | None:
@@ -963,6 +1008,8 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
             "direction": _ident(softphone.get("media_direction")),
             "peer": scope.addresses.label(media_peer) if media_peer else None,
             "peerApproved": bool(media_peer and scope.addresses.approved(media_peer)),
+            "peerApprovedBy": _media_rule(scope, media_peer),
+            "peerRecordedRule": _ident(_dict(result.get("mediaScope")).get("admittedBy")),
             "peerPort": media_port,
             "toPeerPackets": _int(tls_media.get("outbound")) if tls_media else rtp_tx,
             "fromPeerPackets": _int(tls_media.get("inbound")) if tls_media else rtp_rx,
@@ -1368,6 +1415,8 @@ def _practice_scopes(root: Path, raws: list[RawRun], scope: _Scope) -> dict[str,
             by_ref[ref] = source
             for network in source.networks:
                 scope.addresses.add_network(network)
+            for network in source.media_networks:
+                scope.addresses.add_network(network, media_only=True)
             scope.server_names.reviewed.update(source.server_names)
         scopes[raw.name] = _Scope(
             sources=[source],
@@ -1777,9 +1826,27 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         seen_refs.add(source.ref)
         unique_sources.append(source)
     sources = unique_sources
+    # A campaign manifest merges the scope's signaling and media networks
+    # into one authorization list. Where the reviewed scope names a network
+    # as media only, the manifest's copy is media only too, so a media range
+    # never makes an address an approved signaling target in this report.
+    scope_media_only = {
+        _canonical_network(network)
+        for source in sources if source.kind == "scope"
+        for network in source.media_networks
+        if _canonical_network(network) not in {_canonical_network(n) for n in source.networks}
+    } - {None}
     for source in sources:
-        for network in source.networks + source.media_networks:
+        if source.kind == "campaign-manifest" and scope_media_only:
+            moved = [n for n in source.networks if _canonical_network(n) in scope_media_only]
+            source.networks = [n for n in source.networks if n not in moved]
+            source.media_networks.extend(moved)
+    for source in sources:
+        for network in source.networks:
             addresses.add_network(network)
+        for network in source.media_networks:
+            # Approved for media (and so for evidence), never for signaling.
+            addresses.add_network(network, media_only=True)
         for item in source.assessor:
             canonical = _canonical_ip(item)
             if canonical:
@@ -1845,7 +1912,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             if raw.problems:
                 model["readable"] = "partial"
             if raw.kind == "call":
-                _call_run(raw, model, scope, ctx, prefix)
+                _call_run(raw, model, practice_scopes.get(raw.name, scope), ctx, prefix)
             elif raw.kind == "campaign":
                 _campaign_run(raw, model, scope, ctx, prefix)
             elif raw.kind == "check":
@@ -1886,7 +1953,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             peer = model.pop("_mediaPeerRaw", None)
             if peer and not addresses.approved(peer):
                 model["integrity"].append(
-                    _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address"
+                    _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address or inside an approved media network"
                                + _stop_detail(model))
                 )
             model["integrity"].extend(_window_check(run_scope, model, raw_targets))
@@ -2023,6 +2090,11 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             "sources": [source.as_dict() for source in sources + practice_sources],
             "window": window,
             "approvedAddresses": sorted({str(n) for n in addresses.networks}),
+            # Approved for media only (owner-approved media networks): never
+            # a signaling target; included in approvedAddresses for evidence.
+            "mediaOnlyNetworks": sorted(
+                {str(n) for n in addresses.networks if n not in addresses.signaling}
+            ),
             "present": bool(sources),
         },
         "integrityExceptions": exceptions,

@@ -66,7 +66,7 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
     ),
     "call.media-outside-scope": (
         "The negotiated media peer is not an approved address",
-        "The far end's media address is outside the profile's approved addresses, so Sippycup hung the call up. This is a safety stop, not a target failure. Review the SDP in the capture before changing the approved list.",
+        "The far end's media address is outside the profile's approved addresses and outside every owner-approved media network (media.networks), or its port is outside media.port_range, so Sippycup hung the call up. This is a safety stop, not a target failure. Review the SDP in the capture, then ask the owner for the media-server addresses or range (see ./bin/sippycup scope questions) before changing the scope.",
     ),
     "call.capture-failed": (
         "Packet capture did not start; nothing was sent",

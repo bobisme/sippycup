@@ -64,7 +64,7 @@ STOP_VERDICTS = {
     "blocked": "the profile gate refused the call",
     "capture-failed": "packet capture did not start",
     "capture-died": "packet capture stopped",
-    "media-outside-scope": "the far end negotiated media outside the approved addresses",
+    "media-outside-scope": "the far end negotiated media outside the approved addresses and media networks",
     "internal-error": "an internal error stopped a call",
     "cancelled": "the operator cancelled the run",
 }
@@ -312,6 +312,8 @@ def _cell_result(value: dict[str, Any], code: int) -> dict[str, Any]:
         "negotiatedPayloadType": codec.get("negotiatedPayloadType"),
         "codecVerifiedOnWire": wire.get("verified"),
         "srtpActive": srtp.get("active"),
+        "mediaAdmittedBy": (value.get("mediaScope") or {}).get("admittedBy"),
+        "mediaNetwork": (value.get("mediaScope") or {}).get("network"),
         "runDirectory": value.get("runDirectory"),
     }
 

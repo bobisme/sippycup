@@ -204,6 +204,18 @@ dress-rehearsal-proxy-gate:
 		SIPPYCUP_DRESS_REHEARSAL_GATE=proxy SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
 		PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_dress_rehearsal_gate -v
 
+# The proxy shape with media answered as a range (127.0.0.2/31, a media-only
+# network in the profile); the stop leg answers the range just outside it.
+.PHONY: dress-rehearsal-proxy-cidr dress-rehearsal-proxy-cidr-gate
+dress-rehearsal-proxy-cidr:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		./bin/sippycup practice-target rehearsal --media-cidr
+
+dress-rehearsal-proxy-cidr-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_DRESS_REHEARSAL_GATE=proxy-cidr SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_dress_rehearsal_gate -v
+
 # Live, loopback-only softphone checks (DTMF, SRTP, registration status,
 # media scope) against the practice target plus one isolated PJSUA peer.
 # Opt-in like practice-gate; needs both images. See docs/PRACTICE-TARGET.md.
