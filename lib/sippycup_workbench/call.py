@@ -867,7 +867,76 @@ def _network_activity(
 
 
 def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int, dict[str, Any]]:
-    """Run the guided call. Returns (exit code, rendered result document)."""
+    """Run the guided call. Returns (exit code, rendered result document).
+
+    Once the run directory exists, every exit writes a result.json: an error
+    that escapes the orchestrator becomes an honest ``internal-error`` result
+    instead of leaving a directory with no result file.
+    """
+    state: dict[str, Any] = {}
+    try:
+        return _execute(options, deps, state)
+    except Exception as error:
+        if "umask" in state:
+            os.umask(state["umask"])
+        run_dir = state.get("run_dir")
+        if run_dir is None:
+            raise
+        return _internal_error_result(run_dir, state, error)
+
+
+def _internal_error_result(
+    run_dir: Path, state: dict[str, Any], error: Exception
+) -> tuple[int, dict[str, Any]]:
+    detail = f"{type(error).__name__}: {error}"
+    secret = state.get("password")
+    if secret:
+        detail = detail.replace(secret, "<redacted>")
+    now = _utc(datetime.now(timezone.utc))
+    timestamps = {"started": state.get("started", now), "finished": now}
+    value: dict[str, Any] = {
+        "apiVersion": RESULT_VERSION,
+        "state": "failed",
+        "verdict": "internal-error",
+        "exitCode": EXIT_NOT_PASS,
+        "profile": state["profile"],
+        "target": state["target"],
+        "destinationUri": state["uri"],
+        "localAddress": state["local"],
+        "networkMode": state["network_mode"],
+        "durationSeconds": state["duration"],
+        "captureFilter": "",
+        "preflight": None,
+        "softphone": None,
+        "triage": None,
+        "oracle": None,
+        "recording": None,
+        "notes": [
+            f"Internal error stopped the run: {detail}",
+            "The run stopped outside the normal result path; whether any packet was "
+            "sent is unknown. Treat the capture, if any, as the record.",
+        ],
+        "timestamps": timestamps,
+        "runDirectory": _display(run_dir, state["work_root"]),
+        "evidenceManifest": "evidence-manifest.json",
+        "journalCommand": _journal_command(
+            state["engagement"], run_dir, state["work_root"], "internal-error", state["profile"]
+        ),
+        "networkActivity": "unknown: the run stopped on an internal error before the result was written",
+    }
+    _write_json(run_dir / "result.json", value)
+    from sippycup.evidence import write_evidence_manifest
+
+    try:
+        value["evidencePrivacy"] = write_evidence_manifest(run_dir)["privacy"]["status"]
+    except Exception as manifest_error:
+        value["evidencePrivacy"] = f"manifest-error: {type(manifest_error).__name__}"
+    return EXIT_NOT_PASS, value
+
+
+def _execute(
+    options: CallOptions, deps: Dependencies | None, state: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
     deps = deps or Dependencies()
     work_root = deps.work_root or default_work_root()
     network_mode = deps.network_mode or deps.environ.get("SIPPYCUP_NETWORK_MODE", "unknown")
@@ -962,10 +1031,18 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
 
     child_environment = _sanitized_environment(secrets, scrub_names, environ=deps.environ)
     old_umask = os.umask(0o077)
+    state["umask"] = old_umask
     run_dir = create_run_directory(run_root, _slug(profile_name))
+    state.update(
+        run_dir=run_dir, password=password, profile=profile_name, uri=uri, local=local,
+        target={"host": host, "port": port, "transport": transport}, network_mode=network_mode,
+        duration={"requested": options.duration, "limit": limit, "effective": duration},
+        work_root=work_root, engagement=engagement,
+    )
     capture_path = run_dir / "capture.pcap"
     play_path = Path(options.play) if options.play else run_dir / "played.wav"
     timestamps: dict[str, str | None] = {"started": _utc(deps.now())}
+    state["started"] = timestamps["started"]
     cancel = threading.Event()
     cancel_signal: list[int] = []
     previous_handlers: dict[int, Any] = {}

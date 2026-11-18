@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import tempfile
@@ -936,6 +937,21 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(loaded.returncode, 0, loaded.stderr)
+
+    def test_every_copied_command_is_in_the_containerfile_chmod_block(self) -> None:
+        text = (ROOT / "Containerfile").read_text(encoding="utf-8")
+        copied = re.findall(r"(?m)^COPY bin/\S+ (/usr/local/bin/\S+)$", text)
+        block = re.search(r"(?s)RUN chmod 0755 \\\n(.*?)\n\s+&& ", text)
+        self.assertIsNotNone(block, "chmod 0755 block not found")
+        chmodded = set(re.findall(r"/usr/\S+", block.group(1)))
+        self.assertGreater(len(copied), 20)
+        self.assertEqual(sorted(set(copied) - chmodded), [])
+
+    def test_every_copied_command_source_is_executable_in_the_repository(self) -> None:
+        text = (ROOT / "Containerfile").read_text(encoding="utf-8")
+        for source in re.findall(r"(?m)^COPY (bin/\S+) /usr/local/bin/\S+$", text):
+            with self.subTest(source=source):
+                self.assertTrue(os.access(ROOT / source, os.X_OK))
 
 
 if __name__ == "__main__":

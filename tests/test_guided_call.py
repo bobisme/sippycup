@@ -380,6 +380,54 @@ class ExecutionTests(GuidedCallCase):
         manifest = json.loads((run_dir / "evidence-manifest.json").read_text())
         self.assertEqual(manifest["runState"], "completed")
 
+    def test_passing_guided_call_manifest_has_no_missing_expected_files(self):
+        self.run_call(Fakes())
+        (run_dir,) = self.run_directories()
+        manifest = json.loads((run_dir / "evidence-manifest.json").read_text())
+        self.assertEqual(manifest["missingExpected"], [])
+
+    def test_error_before_the_result_block_still_writes_an_honest_result(self):
+        fakes = Fakes()
+        deps = fakes.dependencies(self.work)
+        deps.tools = {}  # KeyError while the run directory exists, before the try block
+        before = os.umask(0o022)
+        try:
+            code, value = guided.execute(self.options(), deps)
+            self.assertEqual(os.umask(before), 0o022, "umask must be restored")
+        finally:
+            os.umask(before)
+        self.assertEqual(code, 1)
+        self.assertEqual(value["verdict"], "internal-error")
+        self.assertEqual(fakes.events, [])
+        (run_dir,) = self.run_directories()
+        result = json.loads((run_dir / "result.json").read_text())
+        schema = json.loads((ROOT / "schemas" / "call-result-v1.schema.json").read_text())
+        for key in schema["required"]:
+            self.assertIn(key, result)
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["verdict"], "internal-error")
+        self.assertIn("KeyError", " ".join(result["notes"]))
+        self.assertTrue((run_dir / "evidence-manifest.json").exists())
+        self.assertEqual(stat.S_IMODE((run_dir / "result.json").stat().st_mode) & 0o077, 0)
+
+    def test_error_after_the_result_block_still_writes_an_honest_result(self):
+        fakes = Fakes()
+        deps = fakes.dependencies(self.work)
+        original = guided.analyze_recording
+
+        def explode(path):
+            raise RuntimeError("recording analysis exploded")
+
+        guided.analyze_recording = explode
+        try:
+            code, value = guided.execute(self.options(), deps)
+        finally:
+            guided.analyze_recording = original
+        self.assertEqual(code, 1)
+        (run_dir,) = self.run_directories()
+        result = json.loads((run_dir / "result.json").read_text())
+        self.assertEqual(result["verdict"], "internal-error")
+
     def test_every_run_gets_a_new_directory(self):
         self.run_call(Fakes())
         self.run_call(Fakes())

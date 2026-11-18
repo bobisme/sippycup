@@ -309,6 +309,61 @@ class AuthorizationPatternTests(unittest.TestCase):
             AUTHORIZATION.search(b'Proxy-Authorization : Digest nonce="n"\r\n')
         )
 
+    def test_redacted_header_values_are_not_flagged_but_digest_headers_are(self):
+        from sippycup.evidence import AUTHORIZATION
+
+        for scrubbed in (
+            b"Proxy-Authorization: <redacted>\n",
+            b"Authorization:   <redacted>  \r\n",
+            b"  Authorization: <redacted>",
+        ):
+            with self.subTest(scrubbed=scrubbed):
+                self.assertIsNone(AUTHORIZATION.search(scrubbed.lstrip()))
+        for live in (
+            b'Authorization: Digest username="a", response="x"\n',
+            b"Proxy-Authorization: <redacted> Digest response=abc\n",
+            b"Authorization: Digest <redacted>\n",
+        ):
+            with self.subTest(live=live):
+                self.assertIsNotNone(AUTHORIZATION.search(live))
+
+    def test_lint_passes_a_redacted_softphone_log_and_flags_a_real_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "plan.json").write_text(json.dumps({"authorization": {"networks": []}}))
+            (root / "softphone.log").write_text("SIP/2.0 407\nProxy-Authorization: <redacted>\n")
+            report = lint_evidence(root)
+            self.assertNotIn("authorization-material", {f["code"] for f in report["findings"]})
+            (root / "softphone.log").write_text('Proxy-Authorization: Digest response="x"\n')
+            report = lint_evidence(root)
+            self.assertIn("authorization-material", {f["code"] for f in report["findings"]})
+
+    def test_guided_call_run_expects_its_own_files_and_campaign_runs_keep_theirs(self):
+        from sippycup.evidence import EXPECTED_ARTIFACTS
+
+        guided_files = {
+            "plan.json", "commands.json", "versions.json", "capture.pcap", "report.txt",
+            "report.stderr", "result.json", "timestamps.json", "preflight.json",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in guided_files:
+                (root / name).write_text("{}")
+            (root / "result.json").write_text(
+                json.dumps({"apiVersion": "sippycup.dev/call-result/v1", "state": "completed"})
+            )
+            self.assertEqual(build_evidence_manifest(root)["missingExpected"], [])
+            (root / "capture.pcap").unlink()
+            self.assertEqual(build_evidence_manifest(root)["missingExpected"], ["capture.pcap"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in guided_files:
+                (root / name).write_text("{}")
+            self.assertEqual(
+                build_evidence_manifest(root)["missingExpected"],
+                sorted(EXPECTED_ARTIFACTS - guided_files),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
