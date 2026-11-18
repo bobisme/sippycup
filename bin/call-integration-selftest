@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# End-to-end self-test for the guided baseline call. Runs inside ONE isolated
+# container: a PJSUA auto-answer/auto-loop echo peer listens on 127.0.0.2 and
+# the real `sippycup-call` implementation calls it. Only loopback is used.
+set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'EOF'
+Usage: call-integration-selftest [BASE]
+
+Start a PJSUA echo peer on 127.0.0.2:5062 inside this container, run the
+guided call against it with a profile approved only for 127.0.0.2, and assert
+one OPTIONS, one INVITE dialog, bidirectional RTP, an oracle PASS, a
+non-silent recording, a complete run directory, and no credential leakage.
+The default BASE is /work/call-selftest.
+EOF
+    exit 0
+fi
+
+base="${1:-/work/call-selftest}"
+root="${base}-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
+mkdir -m 0700 "${root}"
+peer_address=127.0.0.2
+peer_port=5062
+peer_pid=""
+holder_pid=""
+
+cleanup() {
+    if [[ -n "${peer_pid}" ]]; then
+        kill "${peer_pid}" 2>/dev/null || true
+        wait "${peer_pid}" 2>/dev/null || true
+    fi
+    if [[ -n "${holder_pid}" ]]; then
+        kill "${holder_pid}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+fail() {
+    printf 'call self-test FAILED: %s\n' "$*" >&2
+    exit 1
+}
+
+# PJSUA quits when its standard input reaches EOF, so the peer reads from a
+# FIFO that a sleeping writer holds open.
+mkfifo -m 0600 "${root}/peer.stdin"
+sleep 600 >"${root}/peer.stdin" &
+holder_pid=$!
+pjsua \
+    --null-audio \
+    --no-color \
+    --no-vad \
+    --bound-addr="${peer_address}" \
+    --ip-addr="${peer_address}" \
+    --local-port="${peer_port}" \
+    --no-tcp \
+    --auto-answer=200 \
+    --auto-loop \
+    --max-calls=1 \
+    --add-codec=PCMU \
+    --rtp-port=20000 \
+    --log-file="${root}/peer.log" \
+    --log-level=4 \
+    --app-log-level=0 \
+    <"${root}/peer.stdin" >"${root}/peer.out" 2>&1 &
+peer_pid=$!
+
+for _ in $(seq 100); do
+    if ss -Hlun "src ${peer_address}:${peer_port}" 2>/dev/null | grep -q .; then
+        break
+    fi
+    sleep 0.05
+done
+ss -Hlun "src ${peer_address}:${peer_port}" | grep -q . || fail "echo peer did not listen"
+
+valid_from="$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+valid_until="$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+cat >"${root}/profile.yaml" <<YAML
+schema_version: sippycup.dev/target-profile/v1
+name: call-selftest
+target:
+  host: ${peer_address}
+  port: ${peer_port}
+  transport: udp
+  approved_addresses: [${peer_address}]
+authorization:
+  status: approved
+  approved_by: call-integration-selftest
+  approval_id: SELFTEST-LOOPBACK
+  valid_from: "${valid_from}"
+  valid_until: "${valid_until}"
+limits:
+  max_calls: 1
+  max_concurrency: 1
+  max_calls_per_second: 1
+  max_duration_seconds: 4
+capture:
+  interface: any
+  output: work/call-selftest.pcap
+features: {ice: false, turn: false, srtp: false, dtls_srtp: false, webrtc: false}
+YAML
+chmod 0600 "${root}/profile.yaml"
+
+# A credential the peer never challenges for: it must still never reach argv,
+# the run directory, or the private softphone directory after the call.
+secret="selftest-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+export SIPPYCUP_SELFTEST_SECRET="${secret}"
+
+set +e
+sippycup-call "${root}/profile.yaml" \
+    --dial echo \
+    --duration 10 \
+    --username selftest \
+    --secret-env SIPPYCUP_SELFTEST_SECRET \
+    --run-root "${root}/calls" \
+    --format json \
+    >"${root}/call.json" 2>"${root}/call.stderr"
+status=$?
+set -e
+unset SIPPYCUP_SELFTEST_SECRET
+
+if (( status != 0 )); then
+    cat "${root}/call.stderr" >&2 || true
+    jq . "${root}/call.json" >&2 || cat "${root}/call.json" >&2 || true
+    fail "sippycup-call exited ${status}"
+fi
+
+mapfile -t runs < <(find "${root}/calls" -mindepth 1 -maxdepth 1 -type d)
+(( ${#runs[@]} == 1 )) || fail "expected exactly one run directory, found ${#runs[@]}"
+run_dir="${runs[0]}"
+[[ "$(stat -c %a "${run_dir}")" == 700 ]] || fail "run directory is not mode 0700"
+
+for artifact in \
+    profile.json plan.json commands.json versions.json timestamps.json \
+    capture.pcap capture.log preflight.json softphone.json softphone.log \
+    softphone-console.txt played.wav heard.wav expectations.yaml report.txt \
+    triage.json assert.json result.json evidence-manifest.json
+do
+    [[ -s "${run_dir}/${artifact}" ]] || fail "missing or empty ${artifact}"
+done
+
+jq -e '.apiVersion == "sippycup.dev/call-result/v1" and .verdict == "pass" and .state == "completed"' \
+    "${run_dir}/result.json" >/dev/null || fail "result.json verdict is not pass"
+jq -e '.verdict == "pass"' "${run_dir}/assert.json" >/dev/null || fail "oracle verdict is not pass"
+jq -e '.softphone.registered == true and .softphone.answered == true and .softphone.final_status == 200' \
+    "${run_dir}/result.json" >/dev/null || fail "registration or answer was not observed"
+jq -e '.recording.silent == false and .recording.seconds > 1' \
+    "${run_dir}/result.json" >/dev/null || fail "recording is silent or too short"
+jq -e '.durationSeconds.effective == 4 and .durationSeconds.limit == 4' \
+    "${run_dir}/result.json" >/dev/null || fail "duration was not clamped to the profile limit"
+jq -e '.captureFilter == "(host 127.0.0.2) and (udp port 5062 or udp)"' \
+    "${run_dir}/result.json" >/dev/null || fail "capture filter is not target-scoped"
+
+capture="${run_dir}/capture.pcap"
+count() {
+    tshark -r "${capture}" -Y "$1" -T fields -e frame.number 2>/dev/null | wc -l
+}
+options="$(count 'sip.Method == "OPTIONS"')"
+invites="$(count 'sip.Method == "INVITE"')"
+dialogs="$(
+    tshark -r "${capture}" -Y 'sip.Method == "INVITE"' -T fields -e sip.Call-ID 2>/dev/null \
+        | sort -u | wc -l
+)"
+(( options == 1 )) || fail "expected exactly one OPTIONS request, saw ${options}"
+(( invites == 1 )) || fail "expected exactly one INVITE request, saw ${invites}"
+(( dialogs == 1 )) || fail "expected exactly one INVITE dialog, saw ${dialogs}"
+to_peer="$(count "rtp && ip.dst == ${peer_address}")"
+from_peer="$(count "rtp && ip.src == ${peer_address}")"
+(( to_peer > 20 && from_peer > 20 )) \
+    || fail "RTP is not bidirectional (to peer ${to_peer}, from peer ${from_peer})"
+outside="$(count "!(ip.addr == ${peer_address})")"
+(( outside == 0 )) || fail "capture contains ${outside} packets outside the approved address"
+
+if grep -rqF -- "${secret}" "${root}"; then
+    fail "the credential value appears in the self-test tree"
+fi
+if compgen -G '/dev/shm/sippycup-softphone-*' >/dev/null; then
+    fail "the private softphone directory was not removed"
+fi
+
+printf 'call integration self-test passed: %s\n' "${run_dir}"
+printf '  OPTIONS=%s INVITE=%s dialogs=%s RTP to-peer=%s from-peer=%s\n' \
+    "${options}" "${invites}" "${dialogs}" "${to_peer}" "${from_peer}"
+printf '  oracle=%s recording_peak_dbfs=%s\n' \
+    "$(jq -r .verdict "${run_dir}/assert.json")" \
+    "$(jq -r .recording.peak_dbfs "${run_dir}/result.json")"
+printf 'Network activity: loopback only inside this container (127.0.0.1 <-> %s)\n' "${peer_address}"

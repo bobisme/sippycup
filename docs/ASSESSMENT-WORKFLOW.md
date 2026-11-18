@@ -133,6 +133,11 @@ Begin with one OPTIONS transaction and one manual or automated call. Capture
 signaling and media, prove both directions and teardown, and establish a
 golden behavior pack before adversarial cases.
 
+`./bin/sippycup call work/ENGAGEMENT/profile.yaml --dial DESTINATION` runs
+this baseline in one terminal. Its run directory lands in
+`work/ENGAGEMENT/calls/`, and it prints the `journal add` command that links
+`result.json`, the evidence manifest, and the capture. See `GUIDED-CALL.md`.
+
 ### 5. Security cases
 
 Progress from exposure and TLS configuration through authentication and

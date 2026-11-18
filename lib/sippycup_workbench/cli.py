@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import shlex
 import sys
@@ -23,7 +22,14 @@ from .journal import (
     verify as verify_journal,
     write_rendered,
 )
-from .profile import ProfileError, default_profile, load_profile, rehearse, write_profile
+from .profile import (
+    ProfileError,
+    default_profile,
+    host_is_approved_literal as approved_literal_host,
+    load_profile,
+    rehearse,
+    write_profile,
+)
 from .scope import ScopeError, create_scope, inspect as inspect_scope, scope_path_for
 from .scope_derive import compile_scope
 from .scope_questions import render_questions
@@ -124,12 +130,7 @@ def _one_call_plan(profile_path: str) -> dict[str, Any]:
     if not scope_arguments:
         scope_arguments = ["--target", host]
     blocking_errors = list(rehearsal.errors)
-    try:
-        host_is_approved_literal = (
-            str(ipaddress.ip_address(host)) == host and host in approved_addresses
-        )
-    except ValueError:
-        host_is_approved_literal = False
+    host_is_approved_literal = approved_literal_host(document)
     if not host_is_approved_literal:
         blocking_errors.append(
             "one-call v1 requires target.host itself to be one of the literal approved_addresses"

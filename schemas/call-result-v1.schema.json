@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/call-result-v1.schema.json",
+  "title": "Sippycup guided baseline call result",
+  "description": "result.json written by `./bin/sippycup call` in every run directory. `--format json` prints the same document plus `evidencePrivacy`; a refused (blocked) call prints only apiVersion, state, verdict, exitCode, blockingErrors, runDirectory=null, and networkActivity=none, and creates no run directory. Values that were not observed are null.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "state",
+    "verdict",
+    "exitCode",
+    "profile",
+    "target",
+    "destinationUri",
+    "localAddress",
+    "networkMode",
+    "durationSeconds",
+    "captureFilter",
+    "preflight",
+    "softphone",
+    "triage",
+    "oracle",
+    "recording",
+    "notes",
+    "timestamps",
+    "runDirectory",
+    "evidenceManifest",
+    "journalCommand",
+    "networkActivity"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/call-result/v1"},
+    "state": {"enum": ["completed", "failed", "cancelled", "blocked"]},
+    "verdict": {
+      "enum": [
+        "pass",
+        "fail",
+        "inconclusive",
+        "possible-nat-one-way-media",
+        "one-way-media",
+        "preflight-failed",
+        "registration-failed",
+        "call-not-answered",
+        "call-not-placed",
+        "call-error",
+        "media-outside-scope",
+        "capture-failed",
+        "capture-died",
+        "authorization-lapsed",
+        "internal-error",
+        "cancelled",
+        "blocked"
+      ]
+    },
+    "exitCode": {"enum": [0, 1, 2, 130, 143]},
+    "profile": {"type": "string"},
+    "target": {
+      "type": "object",
+      "required": ["host", "port", "transport"],
+      "properties": {
+        "host": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "transport": {"enum": ["udp", "tcp", "tls"]}
+      }
+    },
+    "destinationUri": {"type": "string", "pattern": "^sip:"},
+    "localAddress": {"type": "string"},
+    "networkMode": {"enum": ["private", "host", "none", "unknown"]},
+    "durationSeconds": {
+      "type": "object",
+      "required": ["requested", "limit", "effective"],
+      "properties": {
+        "requested": {"type": "integer", "minimum": 1},
+        "limit": {"type": ["integer", "null"]},
+        "effective": {"type": "integer", "minimum": 1}
+      }
+    },
+    "captureFilter": {"type": "string"},
+    "preflight": {
+      "type": ["object", "null"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "detail": {"type": ["string", "null"]}
+      }
+    },
+    "softphone": {
+      "type": ["object", "null"],
+      "description": "Facts PJSUA printed; RTP counts come from PJSUA's own call dump.",
+      "properties": {
+        "registration_attempted": {"type": "boolean"},
+        "registered": {"type": ["boolean", "null"]},
+        "registration_status": {"type": ["integer", "null"]},
+        "dialed": {"type": "boolean"},
+        "answered": {"type": "boolean"},
+        "final_status": {"type": ["integer", "null"]},
+        "disconnect_status": {"type": ["integer", "null"]},
+        "disconnect_reason": {"type": ["string", "null"]},
+        "connected_seconds": {"type": ["number", "null"]},
+        "rtp_tx_packets": {"type": ["integer", "null"]},
+        "rtp_rx_packets": {"type": ["integer", "null"]},
+        "codec": {"type": ["string", "null"]},
+        "media_direction": {"type": ["string", "null"]},
+        "media_peer": {"type": ["string", "null"]},
+        "hangup": {"type": ["string", "null"]},
+        "error": {"type": ["string", "null"]},
+        "cancelled": {"type": "boolean"}
+      }
+    },
+    "triage": {"type": ["object", "null"]},
+    "oracle": {
+      "type": ["object", "null"],
+      "properties": {
+        "verdict": {"enum": ["pass", "fail", "unknown", null]},
+        "exit_code": {"type": "integer"}
+      }
+    },
+    "recording": {"type": ["object", "null"]},
+    "notes": {"type": "array", "items": {"type": "string"}},
+    "timestamps": {
+      "type": "object",
+      "required": ["started", "finished"],
+      "additionalProperties": {"type": ["string", "null"]}
+    },
+    "runDirectory": {"type": ["string", "null"]},
+    "evidenceManifest": {"const": "evidence-manifest.json"},
+    "journalCommand": {"type": "array", "items": {"type": "string"}},
+    "networkActivity": {"type": "string"},
+    "blockingErrors": {"type": "array", "items": {"type": "string"}},
+    "evidencePrivacy": {"type": "string"}
+  }
+}

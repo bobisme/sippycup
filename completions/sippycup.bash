@@ -60,6 +60,13 @@ _sippycup() {
         preflight)
             COMPREPLY=($(compgen -W "--dry-run --help udp tcp tls" -- "${current}"))
             ;;
+        call)
+            COMPREPLY=(
+                $(compgen -W \
+                    "--dial --duration --answer-timeout --play --codec --username --realm --no-register --secret-env --secret-file --run-root --engagement --no-media-required --format --dry-run --help" \
+                    -- "${current}")
+            )
+            ;;
         *)
             COMPREPLY=($(compgen -W "--help" -- "${current}"))
             ;;

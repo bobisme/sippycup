@@ -24,7 +24,26 @@ service owner, and `./bin/sippycup scope check` shows what is still unanswered
 Do not place passwords in this repository, shell history, PCAP filenames, or
 test notes.
 
-## Placing the call with the bundled softphone
+## Placing the call with the guided command
+
+For the baseline call, prefer the single guided command. It runs the scoped
+capture, one OPTIONS preflight, one PJSUA call, and the offline report,
+triage, and assertions in one terminal without sudo, and keeps the password
+out of argv and every persisted artifact:
+
+```sh
+SIP_PASSWORD="$(your-secret-tool read staging-sip)" \
+  ./bin/sippycup call work/ENGAGEMENT/profile.yaml --dial DESTINATION \
+  --username USER --secret-env SIP_PASSWORD \
+  --play work/ENGAGEMENT/phrase.wav
+```
+
+Use `--dry-run` first to review the plan. See `GUIDED-CALL.md`. The guided
+command checks signaling, media direction, and the recording automatically;
+the interactive items below (speaking, DTMF, mute, hold) still need the
+manual softphone.
+
+## Placing the call with the bundled softphone manually
 
 The image has no sound device. PJSUA plays a prepared WAV file as the caller's
 voice and records what it hears. Prepare a short mono 16-bit WAV of the agreed

@@ -183,6 +183,8 @@ COPY bin/campaign /usr/local/bin/campaign
 COPY bin/campaign-sipp-runner /usr/local/bin/campaign-sipp-runner
 COPY bin/campaign-loopback-uas /usr/local/bin/campaign-loopback-uas
 COPY bin/campaign-integration-selftest /usr/local/bin/campaign-integration-selftest
+COPY bin/call-integration-selftest /usr/local/bin/call-integration-selftest
+COPY bin/sippycup-call /usr/local/bin/sippycup-call
 COPY bin/container-preflight /usr/local/bin/sippycup-preflight
 COPY bin/container-report /usr/local/bin/sippycup-report
 COPY bin/selftest /usr/local/bin/sippycup-selftest
@@ -216,6 +218,7 @@ COPY lib/sippycup_mcp /usr/local/lib/sippycup_mcp
 COPY lib/sippycup_resilience /usr/local/lib/sippycup_resilience
 COPY lib/sippycup_webrtc /usr/local/lib/sippycup_webrtc
 COPY lib/sippycup_workbench /usr/local/lib/sippycup_workbench
+COPY lib/sippycup_softphone /usr/local/lib/sippycup_softphone
 COPY lib/sippycup_web_security /usr/local/lib/sippycup_web_security
 COPY media /usr/local/share/sippycup/media
 COPY profiles/chaos /usr/local/share/sippycup/chaos-profiles
@@ -232,6 +235,8 @@ RUN chmod 0755 \
         /usr/local/bin/campaign-sipp-runner \
         /usr/local/bin/campaign-loopback-uas \
         /usr/local/bin/campaign-integration-selftest \
+        /usr/local/bin/call-integration-selftest \
+        /usr/local/bin/sippycup-call \
         /usr/local/bin/sipp \
         /usr/local/bin/sippycup-preflight \
         /usr/local/bin/sippycup-report \

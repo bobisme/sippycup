@@ -548,7 +548,9 @@ def compile_scope(
         canonical_network(text).prefixlen != canonical_network(text).max_prefixlen for text in media
     ):
         result.notes.append(
-            "media CIDRs are not listed in the profile's approved_addresses (literal addresses only)"
+            "media CIDRs are not listed in the profile's approved_addresses (literal addresses only); "
+            "the guided call hangs up when media is negotiated to an address that is not listed, "
+            "so ask the owner for the literal media addresses"
         )
     return result
 
