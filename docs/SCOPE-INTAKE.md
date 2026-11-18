@@ -27,7 +27,7 @@ approved profile.
 | `signaling` | `networks` (literal IPs or CIDRs), `ports`, `transports` (`udp`, `tcp`, `tls`) |
 | `targets[]` | `name`, `address` (literal IP), `transport`, `port`, optional `tls_server_name` (required for `tls`) |
 | `media` | `networks`, `port_range` (`start`, `end`), `protection` (`rtp`, `sdes-srtp`, `dtls-srtp`), `codecs` (`PCMU`, `PCMA`, `G722`, `OPUS`), `dtmf` (`rfc4733`, `sip-info`, `inband`, `none`), `symmetric_rtp` |
-| `client` | `source_addresses`: the address(es) the service sees our tests come from |
+| `client` | `source_addresses`: the address(es) the service sees our tests come from, plus the local address your own capture shows when that differs (behind NAT, the private address) |
 | `account` | `required`; when true: `username`, `realm`, `credential_ref`, `credential_delivery` |
 | `destinations[]` | `name`, optional `target` (implied when there is one target), `user`, `expect` (`echo`, `agent`, `reject`) |
 | `limits` | `calls`, `concurrent_calls`, `calls_per_second`, `packets_per_second`, `packets`, `bytes`, `call_duration_seconds`, `total_duration_seconds` |
@@ -133,7 +133,8 @@ Generates, atomically and mode 0600, into the engagement directory:
 - `expectations.yaml`, the oracle expectations: allowed endpoints (target
   addresses, enumerated media addresses up to 1024, and your source addresses),
   expected codecs, bidirectional media when a destination echoes or answers,
-  the DTMF requirement, and symmetric RTP.
+  and symmetric RTP. DTMF is never required: the scope records which method
+  the service supports, and a baseline call sends no digits.
 
 Generated artifacts are validated with the real code paths before they are
 written: `rehearse` on the profile (with the compile-time clock), `campaign

@@ -507,7 +507,8 @@ class CompileTests(ScopeTestCase):
         self.assertIsNone(selector)
         self.assertEqual(expectation.expected_codecs, ("PCMU", "PCMA"))
         self.assertTrue(expectation.require_bidirectional)
-        self.assertTrue(expectation.require_dtmf)
+        # rfc4733 is the supported method, not a demand that every call send digits.
+        self.assertFalse(expectation.require_dtmf)
         self.assertIn("10.20.30.40", expectation.allowed_endpoints)
         self.assertIn("172.16.5.9", expectation.allowed_endpoints)
         self.assertIn("10.20.31.15", expectation.allowed_endpoints)

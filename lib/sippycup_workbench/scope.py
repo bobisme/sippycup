@@ -275,7 +275,7 @@ media:
   dtmf: null             # rfc4733 | sip-info | inband | none
   symmetric_rtp: null    # true when the service sends media to the observed source
 client:
-  source_addresses: []   # address(es) the service sees our tests come from
+  source_addresses: []   # address(es) the service sees us come from, plus our local capture-side address if NAT makes it differ
 account:
   required: null         # true | false
   username: null

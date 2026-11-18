@@ -309,7 +309,10 @@ def _build_expectations(doc: dict[str, Any]) -> dict[str, Any]:
     parameters: dict[str, Any] = {
         "require_bidirectional": any(item["expect"] != "reject" for item in destinations),
         "expected_codecs": [item.strip().upper() for item in doc["media"]["codecs"]],
-        "require_dtmf": doc["media"]["dtmf"] != "none",
+        # The DTMF answer names the method the service supports. A baseline
+        # call sends no digits, so requiring DTMF here would fail every
+        # ordinary capture; a digit-sending test must opt in explicitly.
+        "require_dtmf": False,
         "allow_symmetric_rtp": doc["media"]["symmetric_rtp"],
     }
     return {
