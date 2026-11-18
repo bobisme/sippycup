@@ -103,3 +103,6 @@
 1795023758552178	sippycup-2u2m2v	itc:AQ		item.move	bn-6zn	{"state":"done"}	blake3:hThpoOHnW4FvxOGxp2msVflmRLSIe_z0NIjh8ULQ-ak
 1795023855884389	sippycup-2u2m2v	itc:AQ		item.move	bn-3gi	{"state":"done"}	blake3:X37gbA2ka1E3hdeqLlPAmyVNXsMcB8Pr7UDbfP1tSVo
 1795024554275999	sippycup-2u2m2v	itc:AQ		item.create	bn-3lq	{"description":"Ladder draws RTP on the signaling column even when the SDP media address differs (proxy shape); practice profiles have limits.max_calls 1 so matrix cannot be practised; summary does not render matrix.json.","kind":"task","parent":"bn-32q","size":"m","title":"Polish: ladder media column for split media, practice matrix profiles, matrix grid in the owner report"}	blake3:_UPmRu6zV4OhjZ-8SzbyaUM23I1wVyjzcfAZxB9Mmac
+1795026420604943	sippycup-2u2m2v	itc:AQ		item.move	bn-38v	{"state":"done"}	blake3:S3XXj90loWjC7H21_FNuUd4dygXeUryZ0LbfHHQfBNc
+1795026648012538	sippycup-2u2m2v	itc:AQ		item.move	bn-3lq	{"state":"done"}	blake3:w7wXz397FoSYAA3AeyC5NpeCVwgwKBl26S7VsWpdPSk
+1795026648016788	sippycup-2u2m2v	itc:AQ		item.move	bn-32q	{"reason":"auto-completed: all children of bn-32q are done","state":"done"}	blake3:t6QsjnHt5d2JB8SsAVQGmWpcfVCgDnQ1svXdsZgmgZM
