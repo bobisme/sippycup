@@ -495,6 +495,7 @@ class CompileTests(ScopeTestCase):
         self.assertEqual(profile["limits"]["max_calls"], 10)
         self.assertTrue(profile["features"]["srtp"])
         self.assertFalse(profile["features"]["dtls_srtp"])
+        self.assertEqual(profile["media"], {"codecs": ["PCMU", "PCMA"]})
         # After the window passes, rehearse (not compile) blocks the profile.
         late = rehearse(profile, now=datetime(2100, 1, 2, tzinfo=timezone.utc))
         self.assertFalse(late.ready)

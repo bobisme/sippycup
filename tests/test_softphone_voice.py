@@ -102,7 +102,10 @@ class LogParsingTests(unittest.TestCase):
         sdp = evidence.negotiated_sdp(messages)
         self.assertEqual(sdp["offer"], {"port": 4002, "profile": "RTP/SAVP",
                                         "telephoneEvents": [120, 121],
-                                        "cryptoSuites": ["AES_CM_128_HMAC_SHA1_80"]})
+                                        "cryptoSuites": ["AES_CM_128_HMAC_SHA1_80"],
+                                        "formats": [0, 120, 121],
+                                        "codecs": [{"payloadType": 0, "name": "PCMU",
+                                                    "clockRate": 8000}]})
         self.assertEqual(sdp["answer"]["telephoneEvents"], [101])
         setup = evidence.setup_timing(messages)
         # The log crossed midnight between the INVITE and its responses.

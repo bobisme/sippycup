@@ -81,6 +81,13 @@ _sippycup() {
                     -- "${current}")
             )
             ;;
+        matrix)
+            COMPREPLY=(
+                $(compgen -W \
+                    "plan run --dial --transports --codecs --srtp --max-calls --duration --answer-timeout --username --realm --no-register --secret-env --secret-file --run-root --matrix-root --engagement --no-media-required --format --dry-run --help" \
+                    -- "${current}")
+            )
+            ;;
         practice-target)
             COMPREPLY=(
                 $(compgen -W \

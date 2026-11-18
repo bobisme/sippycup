@@ -191,16 +191,28 @@ properties:
             (default 5, clamped to the budget; not with generated) is how
             long the call stays connected, for example to hear an IVR
             respond. The runner never falls back to SIP INFO or in-band
-            DTMF. Valid only for type call.
+            DTMF. codecs (not with generated) are the only codecs the call
+            offers, in preference order, from the image's PJSUA set; names
+            are case-insensitive and frozen in this spelling. At least one
+            of dtmf and codecs is required. Valid only for type call.
           type: object
           additionalProperties: false
-          required: [dtmf]
+          anyOf:
+            - required: [dtmf]
+            - required: [codecs]
           properties:
             dtmf:
               type: string
               pattern: '^[0-9A-D*#,]{1,64}$'
             dtmfAfterSeconds: {type: integer, minimum: 0, maximum: 60}
             durationSeconds: {type: integer, minimum: 1, maximum: 3600}
+            codecs:
+              type: array
+              minItems: 1
+              maxItems: 9
+              uniqueItems: true
+              items:
+                enum: [PCMU, PCMA, G722, GSM, iLBC, opus, speex/8000, speex/16000, speex/32000]
       allOf:
         - if:
             required: [dial]

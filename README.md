@@ -223,6 +223,19 @@ each writes into `findings.json`. Nothing runs unless the profile's
 See `docs/SECURITY-CHECKS.md` for the catalog, the approval rules, the
 findings format, and the non-goals.
 
+`call --codec PCMA` offers only the named codecs (`docs/GUIDED-CALL.md`,
+"Codec control"). `matrix` places a transport x codec x SRTP grid of guided
+calls, one after another, limited to what the profiles approve, and prints
+the verdict and setup time of each cell:
+
+```sh
+./bin/sippycup matrix plan work/voice-assessment/profile.yaml --dial 1001 --codecs PCMU,PCMA,G722
+./bin/sippycup matrix run work/voice-assessment/profile.yaml --dial 1001 --codecs PCMU,PCMA,G722 \
+  --username 1001 --secret-env SIP_PASSWORD
+```
+
+See `docs/CALL-MATRIX.md`.
+
 Create a private, hash-chained engagement journal before testing:
 
 ```sh

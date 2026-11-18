@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/call-matrix-v1.schema.json",
+  "title": "Sippycup call matrix",
+  "description": "`./bin/sippycup matrix plan` prints this document with state planned (or blocked) and sends nothing. `matrix run` writes it as matrix.json in a new directory beneath the first profile's matrix/ (or --matrix-root) after placing the cells one after another, each as one guided call with its own run directory (result.json, schemas/call-result-v1.schema.json). Cells are ordered transport, then codec, then SRTP mode.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "state",
+    "ready",
+    "destination",
+    "transports",
+    "codecs",
+    "srtp",
+    "totalCalls",
+    "maxCalls",
+    "profiles",
+    "spacingSeconds",
+    "plannedWallSeconds",
+    "callSeconds",
+    "cells",
+    "blockingErrors",
+    "networkActivity"
+  ],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/call-matrix/v1"},
+    "state": {"enum": ["planned", "blocked", "completed", "stopped", "cancelled"]},
+    "ready": {"type": "boolean"},
+    "destination": {"type": "string"},
+    "transports": {"type": "array", "items": {"enum": ["udp", "tcp", "tls"]}},
+    "codecs": {"type": "array", "items": {"type": "string"}},
+    "srtp": {"type": "array", "items": {"enum": ["off", "optional", "mandatory"]}},
+    "totalCalls": {"type": "integer", "minimum": 1},
+    "maxCalls": {"type": "integer", "minimum": 1, "maximum": 48},
+    "profiles": {
+      "type": "object",
+      "description": "Per profile path: its transport, the calls placed through it, and the limits and approvals that bounded the plan.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["transport", "calls", "max_calls", "max_calls_per_second", "approved_codecs", "srtp_approved"],
+        "properties": {
+          "transport": {"enum": ["udp", "tcp", "tls"]},
+          "calls": {"type": "integer"},
+          "max_calls": {"type": ["integer", "null"]},
+          "max_calls_per_second": {"type": ["integer", "null"]},
+          "approved_codecs": {"type": ["array", "null"], "items": {"type": "string"}},
+          "srtp_approved": {"type": "boolean"}
+        }
+      }
+    },
+    "spacingSeconds": {"type": "number", "description": "Least time between two call starts (the profile call rate, at least 1 s)."},
+    "plannedWallSeconds": {"type": "integer"},
+    "callSeconds": {"type": "integer"},
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "transport", "codec", "srtp", "profile", "status"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1},
+          "transport": {"enum": ["udp", "tcp", "tls"]},
+          "codec": {"type": "string"},
+          "srtp": {"enum": ["off", "optional", "mandatory"]},
+          "profile": {"type": "string"},
+          "warning": {"enum": ["sdes-key-exposed-on-cleartext-signaling", null]},
+          "status": {"enum": ["planned", "run", "not-run", "refused"]},
+          "reason": {"type": "string", "description": "Why a cell was not run or was refused."},
+          "verdict": {"type": ["string", "null"], "description": "The guided call's verdict (call-result-v1), or refused."},
+          "state": {"type": ["string", "null"]},
+          "exitCode": {"type": "integer"},
+          "finalStatus": {"type": ["integer", "null"]},
+          "setupSeconds": {"type": ["number", "null"], "description": "INVITE to answer from PJSUA's log timestamps (else the driver clock)."},
+          "offered": {"type": ["array", "null"], "items": {"type": "string"}},
+          "negotiated": {"type": ["string", "null"]},
+          "negotiatedPayloadType": {"type": ["integer", "null"]},
+          "codecVerifiedOnWire": {"type": ["boolean", "null"]},
+          "srtpActive": {"type": ["boolean", "null"]},
+          "runDirectory": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "blockingErrors": {"type": "array", "items": {"type": "string"}},
+    "exitCode": {"enum": [0, 1, 2, 3, 130, 143]},
+    "stopReason": {"type": ["string", "null"]},
+    "callsPlaced": {"type": "integer"},
+    "passed": {"type": "integer"},
+    "matrixDirectory": {"type": "string"},
+    "timestamps": {
+      "type": "object",
+      "required": ["started", "finished"],
+      "properties": {"started": {"type": "string"}, "finished": {"type": "string"}}
+    },
+    "networkActivity": {"type": "string"}
+  }
+}

@@ -17,6 +17,7 @@ capture|host|capture||Execution|network|Capture only explicitly scoped host or n
 preflight|container||sippycup-preflight|Execution|network|Send one bounded SIP OPTIONS preflight
 call|container-private|sippycup-call|sippycup-call|Execution|network|Place one guided baseline call with scoped capture and offline evidence
 checks|container-private|sippycup-checks|sippycup-checks|Execution|network|Run owner-approved low-volume security posture checks and write findings
+matrix|container-private|sippycup-matrix|sippycup-matrix|Execution|network|Plan or run a sequential transport x codec x SRTP grid of guided calls
 campaign|direct|campaign|campaign|Execution|network|Plan or execute a safety-gated call campaign
 media|direct|sippycup-media|sippycup-media|Execution|network|Plan analyze or send negotiated RTP media
 media-echo|direct|sippycup-media-echo|sippycup-media-echo|Execution|local-network|Run the bounded RTP echo fixture

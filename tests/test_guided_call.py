@@ -150,7 +150,10 @@ class Fakes:
         return result
 
     def run_offline(self, argv, stdout, stderr, environment):
-        name = "assert" if "--expect" in argv else "triage" if "triage" in argv else "report"
+        name = (
+            "assert" if "--expect" in argv else "triage" if "triage" in argv
+            else "tshark" if argv[0].endswith("tshark") else "report"
+        )
         self.events.append(name)
         self.environments[name] = dict(environment)
         if name == "assert":
@@ -343,7 +346,7 @@ class ExecutionTests(GuidedCallCase):
         self.assertEqual(value["verdict"], "pass")
         self.assertEqual(
             fakes.events,
-            ["capture", "preflight", "softphone", "capture-stop", "report", "triage", "assert"],
+            ["capture", "preflight", "softphone", "capture-stop", "report", "triage", "assert", "tshark"],
         )
         (run_dir,) = self.run_directories()
         self.assertRegex(run_dir.name, r"^\d{8}T\d{6}\.\d{6}Z-voice-staging-[0-9a-f]{8}$")

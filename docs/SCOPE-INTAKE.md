@@ -39,7 +39,9 @@ approved profile.
 Per-target TLS server names, dial destinations with expected behavior, the
 account identity and credential reference, and expected media protection and
 codecs are recorded here so later commands can consume them; today only the
-three derivatives below do.
+three derivatives below do. The codecs become the profile's optional
+`media.codecs`, which `call` and `matrix` treat as the approved codec list
+(`GUIDED-CALL.md`, "Codec control").
 
 ### Secrets
 

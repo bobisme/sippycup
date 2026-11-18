@@ -68,6 +68,7 @@
         "srtp-not-negotiated",
         "dtmf-not-negotiated",
         "dtmf-mismatch",
+        "codec-not-offered",
         "cancelled",
         "blocked"
       ]
@@ -165,6 +166,35 @@
         "echoed": {"type": ["string", "null"]},
         "verified": {"type": ["boolean", "null"]},
         "wire": {"type": ["object", "null"]}
+      }
+    },
+    "codec": {
+      "type": "object",
+      "description": "Codecs requested (exclusive: offered only these, from --codec or the profile's media.codecs), approved by the profile, offered, answered, and negotiated (the answer's first codec). Names are NAME/CLOCKRATE from the SDP. unoffered lists answer codecs that were not in the offer (verdict codec-not-offered). wire proves it from the capture: the SDP offer and answer (sdpSource capture, or pjsua-log under TLS) and RTP packet counts per payload type on the negotiated media port; verified is true only when an exclusive offer listed nothing but the requested codecs and the RTP used only the negotiated payload type, telephone-event, or comfort noise.",
+      "required": ["requested", "exclusive", "offered", "answered", "negotiated"],
+      "properties": {
+        "requested": {"type": "array", "items": {"type": "string"}},
+        "exclusive": {"type": "boolean"},
+        "approved": {"type": ["array", "null"], "items": {"type": "string"}},
+        "offered": {"type": "array", "items": {"type": "string"}},
+        "answered": {"type": "array", "items": {"type": "string"}},
+        "negotiated": {"type": ["string", "null"]},
+        "negotiatedPayloadType": {"type": ["integer", "null"]},
+        "negotiatedRequested": {"type": ["boolean", "null"]},
+        "offerOnlyRequested": {"type": ["boolean", "null"]},
+        "unoffered": {"type": "array", "items": {"type": "string"}},
+        "wire": {
+          "type": ["object", "null"],
+          "properties": {
+            "sdpSource": {"enum": ["capture", "pjsua-log"]},
+            "offerFormats": {"type": ["array", "null"], "items": {"type": "integer"}},
+            "answerFormats": {"type": ["array", "null"], "items": {"type": "integer"}},
+            "rtpPayloadTypes": {"type": ["object", "null"]},
+            "rtpSource": {"enum": ["capture", null]},
+            "mediaUsesNegotiated": {"type": ["boolean", "null"]},
+            "verified": {"type": ["boolean", "null"]}
+          }
+        }
       }
     },
     "warnings": {"type": "array", "items": {"enum": ["sdes-key-exposed-on-cleartext-signaling"]}},
