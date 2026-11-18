@@ -12,6 +12,10 @@ Use it only against the exact staging addresses and credentials covered by
 your test authorization. Keep carrier trunks and unrelated networks out of
 scope.
 
+First engagement tomorrow? Read [docs/FIRST-ENGAGEMENT.md](docs/FIRST-ENGAGEMENT.md)
+the evening before: the exact command order, what "right" looks like, the stop
+conditions, and what to send the owner.
+
 ## Start here
 
 ```sh
