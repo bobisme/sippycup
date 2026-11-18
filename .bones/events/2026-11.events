@@ -63,3 +63,13 @@
 1794970128894968	sippycup-2u2m2v	itc:AQ		item.create	bn-20l	{"description":"Practice destinations that misbehave on purpose (one-way audio, no answer, late answer, 503, mid-call drop, silence) and a gate proving each guided-call verdict against them.","kind":"task","labels":["usability"],"parent":"bn-za4","title":"Practice target fault scenarios to rehearse triage verdicts"}	blake3:_zWhFVGwpjb1gpif1nmHCpKm7IPA-ONhPdlduckpNeE
 1794970128915936	sippycup-2u2m2v	itc:AQ		item.move	bn-20j	{"state":"doing"}	blake3:gO5i0T6LUpMf-pGhjX6YPtW4buzj3hGOc7QPVeimZMM
 1794970128919830	sippycup-2u2m2v	itc:AQ		item.assign	bn-20j	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:V_LS7GzQtS0ldKeHPiyqnl1noUs72hzf7OQ-LWcujQ8
+1794970381882725	sippycup-2u2m2v	itc:AQ		item.move	bn-19a	{"state":"doing"}	blake3:y_LOE0bKW6aQbNfQDftE8OWH8bcgfiyb5FMlwUztAbo
+1794970381895211	sippycup-2u2m2v	itc:AQ		item.assign	bn-19a	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:Gl2ALlGIr3ApveHVF5208iB5te-ns-1dge6VObJVj-o
+1794970381907439	sippycup-2u2m2v	itc:AQ		item.move	bn-35p	{"state":"doing"}	blake3:KICpiHyYNaScXYM4cQ2m_cQhrKTczNT92I8wqc52Kto
+1794970381911613	sippycup-2u2m2v	itc:AQ		item.assign	bn-35p	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:NNsDD3qt8S9WK-VJatfJy5xqE6FdNTyc6DH8SU6OR4w
+1794970381923103	sippycup-2u2m2v	itc:AQ		item.move	bn-753	{"state":"doing"}	blake3:IRtvmkmM81z60_tJjjWUSUjjq3hseuQNWnq_J3d3SIc
+1794970381926413	sippycup-2u2m2v	itc:AQ		item.assign	bn-753	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:oPxNvSgFpzZ6bPIOcjarmZsarn6kyRLmhiS5NzD2m8k
+1794970381938072	sippycup-2u2m2v	itc:AQ		item.move	bn-2s8	{"state":"doing"}	blake3:4zf5A3h9xhVhY6qvgieWEF2U-NWK4EYCE8BMoe-KeDI
+1794970381941988	sippycup-2u2m2v	itc:AQ		item.assign	bn-2s8	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:Rw1nHoc79HC1rmb9xmahgbcR_wcSwphqAHG3ZrSjYSo
+1794970381954128	sippycup-2u2m2v	itc:AQ		item.move	bn-20l	{"state":"doing"}	blake3:ZFooH7107Zj2UIve6A-PnG53ZTWfePnwQWDueKWj0Go
+1794970381957241	sippycup-2u2m2v	itc:AQ		item.assign	bn-20l	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:smO_lqOSf1TqjNYLGZG-bO9pliR35dxXUOke7m5eC5c
