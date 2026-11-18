@@ -163,6 +163,7 @@ def _call_facts(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], bool]
     facts = {"directory": str(root / "calls"), "count": 0, "passed": 0, "evidenceManifestMissing": 0}
     actions: list[dict[str, Any]] = []
     practice_passed = False
+    newest: tuple[Path, Any] | None = None
     for name in ("calls", "practice-calls"):
         directory = root / name
         if not directory.is_dir() or directory.is_symlink():
@@ -185,6 +186,7 @@ def _call_facts(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], bool]
                 continue
             facts["count"] += 1
             facts["passed"] += 1 if verdict == "pass" else 0
+            newest = (run, verdict)
             manifest = run / "evidence-manifest.json"
             if not manifest.is_file() or manifest.is_symlink():
                 facts["evidenceManifestMissing"] += 1
@@ -196,6 +198,15 @@ def _call_facts(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], bool]
                         argv=["./bin/sippycup", "evidence", "manifest", str(run), "--write"],
                     )
                 )
+    if newest is not None and isinstance(newest[1], str) and newest[1] != "pass":
+        actions.append(
+            _action(
+                f"calls-diagnose-{newest[0].name}",
+                f"Explain why the newest guided call did not pass ({newest[1]})",
+                "One page: where it stopped, the decisive evidence, whose side it is on, and the next step. Reads files only.",
+                argv=["./bin/sippycup", "diagnose", str(newest[0])],
+            )
+        )
     return facts, actions, practice_passed
 
 

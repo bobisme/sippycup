@@ -67,6 +67,24 @@ class AdvisorTests(unittest.TestCase):
         self.assertIn("Acme Voice", review["argv"])
         self.assertNotIn("Quad", json.dumps(result))
 
+    def test_newest_failed_call_gets_a_diagnose_action_and_a_pass_does_not(self) -> None:
+        now = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "assessment"
+            initialize(root, title="Assessment", owner="Acme Voice")
+            older = root / "calls" / "20260719T100000.000000Z-a-00000001"
+            newer = root / "calls" / "20260719T110000.000000Z-a-00000002"
+            for run, verdict in ((older, "pass"), (newer, "one-way-media")):
+                run.mkdir(parents=True)
+                (run / "result.json").write_text(json.dumps({"verdict": verdict}))
+            failed = assess(root, now=now)
+            (newer / "result.json").write_text(json.dumps({"verdict": "pass"}))
+            passed = assess(root, now=now)
+        action = next(a for a in failed["nextActions"] if a["id"].startswith("calls-diagnose-"))
+        self.assertEqual(["./bin/sippycup", "diagnose", str(newer)], action["argv"])
+        self.assertFalse(action["networkActivity"])
+        self.assertFalse([a for a in passed["nextActions"] if a["id"].startswith("calls-diagnose-")])
+
     def test_approved_inputs_stop_at_human_review_and_never_execute(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "assessment"

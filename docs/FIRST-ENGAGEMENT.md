@@ -94,6 +94,20 @@ and pass `--secret-env REF=ACME_PASSWORD`. REF is the credential reference in
 
 ## 3. First traffic: preflight, then one call (LIVE)
 
+Run the go/no-go check first. It sends nothing to the target. It checks the
+journal, the scope, the profile, the approval window, the clock, the image,
+capture, the password file, and the route, and it prints your source address
+(the address the owner must allow).
+
+```sh
+./bin/sippycup ready work/acme --secret-file work/acme/account.password
+```
+
+Continue only on `VERDICT: GO`. On `NO-GO`, each blocking line has a `fix:`
+line; do it and run `ready` again. Run the `Journal:` line it prints. The
+cockpit refuses LIVE actions until a GO exists for the current profile. See
+[COCKPIT.md](COCKPIT.md).
+
 ```sh
 ./bin/sippycup --practice preflight 127.0.0.2 5060 udp
 ./bin/sippycup --practice call work/acme/target-profile.yaml --dial echo --username practice --dry-run
@@ -111,6 +125,17 @@ Record it: ./bin/sippycup journal add work/acme --kind action --summary '...' --
 
 Run the `Record it:` line exactly as printed. A call takes about 15 s and
 prints nothing until it ends.
+
+When a run does not pass, it prints a `Diagnose:` line. Run it:
+
+```sh
+./bin/sippycup diagnose work/acme/calls/RUN
+```
+
+The page says where the run stopped, the decisive evidence, whose side the
+cause is probably on and how sure that is, and the next command. When the
+page starts its next steps with `STOP`, do not retry: ask the owner. See
+[DIAGNOSE.md](DIAGNOSE.md).
 
 Variants that passed, one call each:
 
@@ -231,10 +256,26 @@ Stop and send nothing more if one of these happens:
 - `registration-failed` or `call-auth-failed`. Do not try the password again
   without the owner: every attempt is a credentialed attempt on their account.
 - `call-rate-limited` (429), or `call-unavailable` with 503.
-- `media-outside-scope`. The far end sent media from an address that the
+- `media-outside-scope`. The far end named or used a media address that the
   owner did not approve. Ask the owner, then record the address in scope.
+- `signaling-outside-scope`. The far end routed our next SIP request to an
+  address that the owner did not approve, and the softphone was killed
+  without a BYE. Tell the owner that one call is left to time out on their
+  side, and ask which signaling addresses their platform uses.
 - `capture-failed`, `capture-died`, or `internal-error`.
 - The owner contact asks you to stop.
+
+To stop everything this checkout is sending, from any terminal:
+
+```sh
+./bin/sippycup stop
+```
+
+It ends each run with its normal shutdown (BYE, unregister), kills what is
+left after 30 s, then checks that nothing is still sending and prints
+`Silence: PROVED`. It prints a journal line; run it. `./bin/sippycup stop
+--dry-run` lists what it would stop and signals nothing. Do not run `stop`
+while you want another run from this checkout to continue.
 
 ## Troubleshooting
 
