@@ -101,3 +101,4 @@
 1795023227576050	sippycup-2u2m2v	itc:AQ		item.create	bn-38v	{"description":"rehearsal --proxy: scope answers name the proxy as signaling and the practice address as media; whole chain (scope compile, rehearse, preflight, call, campaign, checks incl. srtp-policy, summary, cockpit) must pass; fix seams in scope intake/compile for separate media addresses.","kind":"task","parent":"bn-32q","size":"m","title":"Dress rehearsal through the practice proxy (split signaling and media addresses, 407) and with srtp-policy"}	blake3:ajIDGrHrZYZ9_b5oFXf3hLsQ_TcurcmGZOjDnSL2l6Q
 1795023758536354	sippycup-2u2m2v	itc:AQ		item.move	bn-1pw	{"state":"done"}	blake3:6dcS3cLXSK2ouQ2eFzqu_TjIpG-eTcYAMtfdPHa04ZM
 1795023758552178	sippycup-2u2m2v	itc:AQ		item.move	bn-6zn	{"state":"done"}	blake3:hThpoOHnW4FvxOGxp2msVflmRLSIe_z0NIjh8ULQ-ak
+1795023855884389	sippycup-2u2m2v	itc:AQ		item.move	bn-3gi	{"state":"done"}	blake3:X37gbA2ka1E3hdeqLlPAmyVNXsMcB8Pr7UDbfP1tSVo

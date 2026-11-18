@@ -684,6 +684,20 @@ def _rtcp(layers: Any, protocols: tuple[str, ...], status: Value[CaptureStatus])
     )
 
 
+def _per_sip_message(layers: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """One layers view per SIP message carried by a frame.
+
+    A TCP segment can carry several SIP messages (a 180 and a 200 written
+    together, for example). With ``--no-duplicate-keys`` TShark then emits
+    the ``sip`` layer as a list. Each message becomes its own record with the
+    frame's evidence, in wire order, so none is lost.
+    """
+    messages = layers.get("sip")
+    if not isinstance(messages, list) or len(messages) < 2:
+        return (layers,)
+    return tuple({**layers, "sip": message} for message in messages)
+
+
 def parse_tshark_json(document: str | bytes, capture_format: CaptureFormat) -> CaptureRecord:
     """Parse `tshark -T json` output into immutable packet records."""
     try:
@@ -703,6 +717,10 @@ def parse_tshark_json(document: str | bytes, capture_format: CaptureFormat) -> C
         if not isinstance(layers, dict):
             raise CaptureDecodeError(f"packet {index} has no layers object")
         status = _status(layers)
+        if isinstance(status, Unknown):
+            warnings.append(f"packet {index}: unknown capture status")
+        elif status.value is not CaptureStatus.COMPLETE:
+            warnings.append(f"packet {index}: {status.value.value}")
         reason = _missing_for(status)
         evidence = EvidenceRef(
             frame_number=_typed(layers, "frame.number", _integer, missing_reason=reason),
@@ -711,29 +729,26 @@ def parse_tshark_json(document: str | bytes, capture_format: CaptureFormat) -> C
             ),
         )
         protocols = _protocols(layers)
-        if isinstance(status, Unknown):
-            warnings.append(f"packet {index}: unknown capture status")
-        elif status.value is not CaptureStatus.COMPLETE:
-            warnings.append(f"packet {index}: {status.value.value}")
-        frames.append(
-            FrameRecord(
-                evidence=evidence,
-                captured_length=_typed(
-                    layers, "frame.cap_len", _integer, missing_reason=reason
-                ),
-                original_length=_typed(
-                    layers, "frame.len", _integer, missing_reason=reason
-                ),
-                status=status,
-                source=_endpoint(layers, "src", status),
-                destination=_endpoint(layers, "dst", status),
-                protocols=protocols,
-                sip=_sip(layers, protocols, status),
-                sdp=_sdp(layers, protocols, evidence, status),
-                rtp=_rtp(layers, protocols, status),
-                rtcp=_rtcp(layers, protocols, status),
+        for message_layers in _per_sip_message(layers):
+            frames.append(
+                FrameRecord(
+                    evidence=evidence,
+                    captured_length=_typed(
+                        layers, "frame.cap_len", _integer, missing_reason=reason
+                    ),
+                    original_length=_typed(
+                        layers, "frame.len", _integer, missing_reason=reason
+                    ),
+                    status=status,
+                    source=_endpoint(message_layers, "src", status),
+                    destination=_endpoint(message_layers, "dst", status),
+                    protocols=protocols,
+                    sip=_sip(message_layers, protocols, status),
+                    sdp=_sdp(message_layers, protocols, evidence, status),
+                    rtp=_rtp(message_layers, protocols, status),
+                    rtcp=_rtcp(message_layers, protocols, status),
+                )
             )
-        )
     return CaptureRecord(
         schema_version=PACKET_RECORD_SCHEMA_VERSION,
         capture_format=capture_format,
