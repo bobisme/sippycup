@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 MAX_JSON_BYTES = 1024 * 1024
+# Call verdicts where Sippycup stopped the run itself to stay inside the scope.
+SAFETY_STOPS = frozenset({"media-outside-scope"})
 MAX_CONTAINERS = 64
 MAX_RUNS_PER_CONTAINER = 500
 MAX_FILES_LISTED = 200
@@ -252,6 +254,16 @@ def _call_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
         reason = str(softphone["error"])
     if reason is None and oracle is not None:
         reason = f"oracle {oracle.get('verdict')}"
+    if verdict in SAFETY_STOPS:
+        # Sippycup stopped the call to stay inside the scope; the target did
+        # nothing wrong. Say so first, with what reached the unapproved peer.
+        summary["safetyStop"] = True
+        peer = (softphone or {}).get("media_peer") or "an unapproved address"
+        sent = (softphone or {}).get("rtp_tx_packets")
+        packets = f" after {sent} RTP packet{'s' if sent != 1 else ''}" if isinstance(sent, int) else ""
+        reason = (f"safety stop, not a target failure: the media peer {peer} is not an approved address, "
+                  f"so the call was hung up{packets}; add the owner's media addresses to the scope and compile again")
+        facts.insert(0, ("Safety stop", reason))
     summary["reason"] = reason
     journal = document.get("journalCommand")
     if (

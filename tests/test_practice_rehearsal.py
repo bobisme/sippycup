@@ -57,8 +57,9 @@ class ScopeAnswersTests(unittest.TestCase):
         self.assertIn("valid_from: 2026-11-18T11:59:00Z", text)
         self.assertIn("valid_until: 2026-11-18T16:00:00Z", text)
         self.assertNotIn("password:", text)
-        for check in rehearsal.UDP_CHECKS:
+        for check in rehearsal.CHECKS:
             self.assertIn(check, text)
+        self.assertIn("max_requests: 33", text)
 
     def test_window_too_short_or_routable_address_is_refused(self) -> None:
         with self.assertRaises(rehearsal.CannotStart):
@@ -101,9 +102,93 @@ class CompileTests(unittest.TestCase):
             self.assertEqual(0, outcome.exit_code, outcome.as_dict())
             profile = load_profile(root / "target-profile.yaml")
             self.assertTrue(rehearse(profile, now=now).ready)
-            self.assertEqual(list(rehearsal.UDP_CHECKS), profile["security_checks"]["approved"])
+            self.assertEqual([*rehearsal.UDP_CHECKS, "srtp-policy"], profile["security_checks"]["approved"])
+            self.assertEqual(33, profile["security_checks"]["max_requests"])
             self.assertEqual("practice", profile["security_checks"]["account"])
             self.assertEqual(["127.0.0.2"], profile["target"]["approved_addresses"])
+
+    def compile_shape(self, shape_facts: dict, *, proxy: bool, media_approved: bool = True):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name) / "work" / "eng"
+        root.parent.mkdir()
+        initialize(root, title="t", owner="o")
+        (root / "practice-ca.crt").write_text(_pem())
+        now = datetime.now(timezone.utc)
+        live = {**shape_facts, "profile_valid_until_utc": (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+        shape = rehearsal.shape_for(live, proxy=proxy, media_approved=media_approved)
+        text = rehearsal.scope_answers(live, now=now, name="dress-rehearsal", ca_file="work/eng/practice-ca.crt",
+                                       shape=shape, checks=rehearsal.CHECKS if media_approved else ())
+        (root / "scope.yaml").write_text(text)
+        (root / "scope.yaml").chmod(0o600)
+        with mock.patch.dict(os.environ, {"SIPPYCUP_WORK_ROOT": str(root.parent)}):
+            outcome = compile_scope(root, now=now)
+        self.assertEqual(0, outcome.exit_code, outcome.as_dict())
+        import yaml
+
+        profile = load_profile(root / "target-profile.yaml")
+        self.assertTrue(rehearse(profile, now=now).ready)
+        campaign = yaml.safe_load((root / "campaign.yaml").read_text())
+        expectations = yaml.safe_load((root / "expectations.yaml").read_text())
+        return text, profile, campaign, expectations
+
+    def test_proxy_shape_compiles_with_signaling_and_media_on_different_addresses(self) -> None:
+        text, profile, campaign, expectations = self.compile_shape(PROXY_FACTS, proxy=True)
+        self.assertIn("networks: [127.0.0.3]", text)
+        self.assertIn("networks: [127.0.0.2]", text)
+        self.assertIn("realm: sippycup-proxy", text)
+        self.assertEqual("127.0.0.3", profile["target"]["host"])
+        self.assertEqual(["127.0.0.3", "127.0.0.2"], profile["target"]["approved_addresses"])
+        self.assertEqual([*rehearsal.UDP_CHECKS, "srtp-policy"], profile["security_checks"]["approved"])
+        self.assertEqual(["127.0.0.2/32", "127.0.0.3/32"], campaign["authorization"]["networks"])
+        tls = next(item for item in campaign["targets"] if item["signaling"]["transport"] == "tls")
+        self.assertEqual("sippycup-proxy", tls["signaling"]["tlsServerName"])
+        self.assertEqual({"username": "practice", "realm": "sippycup-proxy", "register": True}, tls["account"])
+        self.assertEqual({"127.0.0.3", "127.0.0.2", "127.0.0.1"}, set(expectations["capture"]["allowed_endpoints"]))
+
+    def test_stop_leg_answers_approve_only_the_signaling_address(self) -> None:
+        text, profile, campaign, expectations = self.compile_shape(PROXY_FACTS, proxy=True, media_approved=False)
+        self.assertIn("DELIBERATE MISTAKE", text)
+        self.assertNotIn("security_checks", text)
+        self.assertEqual(["127.0.0.3"], profile["target"]["approved_addresses"])
+        self.assertEqual(["127.0.0.3/32"], campaign["authorization"]["networks"])
+        self.assertNotIn("127.0.0.2", expectations["capture"]["allowed_endpoints"])
+
+
+PROXY_FACTS = {"address": "127.0.0.2", "proxy": {"address": "127.0.0.3", "dns_name": "sippycup-proxy"}}
+
+
+class ShapeTests(unittest.TestCase):
+    def test_direct_and_proxy_shapes(self) -> None:
+        direct = rehearsal.shape_for(PROXY_FACTS, proxy=False)
+        self.assertEqual(("127.0.0.2", ("127.0.0.2",), "sippycup-practice"),
+                         (direct.signaling, direct.media, direct.server_name))
+        proxy = rehearsal.shape_for(PROXY_FACTS, proxy=True)
+        self.assertEqual(("127.0.0.3", ("127.0.0.2",), "sippycup-proxy", "sippycup-proxy"),
+                         (proxy.signaling, proxy.media, proxy.server_name, proxy.realm))
+        stop = rehearsal.shape_for(PROXY_FACTS, proxy=True, media_approved=False)
+        self.assertEqual(("127.0.0.3",), stop.media)
+        with self.assertRaises(ValueError):
+            rehearsal.shape_for(PROXY_FACTS, proxy=False, media_approved=False)
+
+    def test_missing_or_unsafe_proxy_facts_are_refused(self) -> None:
+        with self.assertRaises(rehearsal.CannotStart):
+            rehearsal.shape_for({"address": "127.0.0.2"}, proxy=True)
+        with self.assertRaises(rehearsal.CannotStart):
+            rehearsal.shape_for({"address": "127.0.0.2", "proxy": {"address": "127.0.0.2", "dns_name": "sippycup-proxy"}},
+                                proxy=True)
+        with self.assertRaises(rehearsal.CannotStart):
+            rehearsal.shape_for({"address": "127.0.0.2", "proxy": {"address": "127.0.0.3", "dns_name": "evil\nx"}},
+                                proxy=True)
+        for address in ("10.0.0.5", "127.0.0.1"):
+            with self.subTest(address=address), self.assertRaises(practice.PracticeError):
+                rehearsal.shape_for({"address": "127.0.0.2", "proxy": {"address": address, "dns_name": "sippycup-proxy"}},
+                                    proxy=True)
+
+    def test_max_requests_is_exactly_the_declared_bounds(self) -> None:
+        self.assertEqual({"approved": list(rehearsal.UDP_CHECKS), "max_requests": 21},
+                         rehearsal.checks_section(rehearsal.UDP_CHECKS))
+        self.assertEqual(33, rehearsal.checks_section()["max_requests"])
 
 
 class CockpitAgreementTests(unittest.TestCase):
@@ -144,6 +229,47 @@ class CockpitAgreementTests(unittest.TestCase):
         for identifier in ("b", "c", "missing"):
             with self.subTest(identifier=identifier), self.assertRaises(rehearsal.RehearsalError):
                 rehearsal.find_action(model, identifier)
+
+
+class StopLegTests(unittest.TestCase):
+    REPORT = {
+        "integrityExceptions": [{"code": "media-peer-not-approved", "run": "R",
+                                 "detail": "media peer unapproved-address-1 is not an approved address; the "
+                                           "media-scope stop hung the call up after 3 RTP packets were sent to it"}],
+        "runs": [{"kind": "call", "verdict": "media-outside-scope",
+                  "details": {"media": {"toPeerPackets": 3, "peerApproved": False}}}],
+        "findings": [{"id": "obs-media-outside-scope", "severity": "info",
+                      "title": "Safety stop: media was negotiated to an address outside the approved scope"}],
+        "executiveSummary": {"rows": [{"title": "1 run was ended by a Sippycup safety stop (media-outside-scope), "
+                                                "not a target failure"}]},
+    }
+
+    def driver(self):
+        return rehearsal.Rehearsal(Path("."), runner=lambda *a: None, out=io.StringIO())
+
+    def test_a_correctly_presented_stop_passes(self) -> None:
+        self.assertEqual(3, self.driver().stop_report(json.loads(json.dumps(self.REPORT))))
+
+    def test_misleading_presentations_fail(self) -> None:
+        cases = {
+            "too many packets": lambda r: r["runs"][0]["details"]["media"].update(toPeerPackets=40),
+            "a target finding": lambda r: r["findings"][0].update(severity="low"),
+            "an oracle observation": lambda r: r["findings"].append({"id": "obs-oracle-assertion-failed"}),
+            "no exception": lambda r: r.update(integrityExceptions=[]),
+            "did not pass": lambda r: r["executiveSummary"]["rows"].__setitem__(0, {"title": "1 run did not pass"}),
+        }
+        for name, mutate in cases.items():
+            report = json.loads(json.dumps(self.REPORT))
+            mutate(report)
+            with self.subTest(name), self.assertRaises(rehearsal.RehearsalError):
+                self.driver().stop_report(report)
+
+    def test_the_cockpit_must_mark_the_stop(self) -> None:
+        run = {"kind": "call", "verdict": "media-outside-scope", "safetyStop": True,
+               "reason": "safety stop, not a target failure: ..."}
+        self.driver().require_stop_presented({"runs": [run]})
+        with self.assertRaises(rehearsal.RehearsalError):
+            self.driver().require_stop_presented({"runs": [{**run, "safetyStop": False}]})
 
 
 class SecretScanTests(unittest.TestCase):
@@ -197,7 +323,13 @@ class DriverTests(unittest.TestCase):
                                 cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("owner report: summary --forbid-file", result.stdout)
+        self.assertIn("12. safety stop: media address not approved", result.stdout)
         self.assertIn("Network activity: none", result.stdout)
+        proxy = subprocess.run([str(ROOT / "bin" / "sippycup"), "practice-target", "rehearsal", "--proxy", "--list"],
+                               cwd=ROOT, capture_output=True, text=True, check=False)
+        self.assertEqual(0, proxy.returncode, proxy.stderr)
+        self.assertIn("scope answers (proxy shape)", proxy.stdout)
+        self.assertIn("preflight to the proxy", proxy.stdout)
 
 
 if __name__ == "__main__":

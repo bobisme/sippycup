@@ -163,6 +163,20 @@ substituted. Exit 0 only when all three were written and the scope is clean; 1
 when some were skipped or the profile is pending; 2 for an invalid scope file
 or a refusal.
 
+### Signaling and media on different addresses
+
+Behind a proxy or SBC, answer `signaling.networks` and the targets with the
+proxy's address and `media.networks` with the media servers' literal
+addresses. The profile then approves both (the target first, then each
+single-host media address), the campaign authorizes both networks, and the
+expectations allow both, so the guided call, the campaign, and `srtp-policy`
+accept the media peer the SDP answer names. Leave the media address out and
+the guided call ends `media-outside-scope` as soon as the peer is known, a
+safety stop that the cockpit marks `[stop]` and the owner report discloses as
+an integrity exception with the RTP packets sent before the hangup.
+`./bin/sippycup practice-target rehearsal --proxy` rehearses exactly this
+shape and that stop (see `PRACTICE-TARGET.md`).
+
 ### What is not generated
 
 Hostnames (targets are literal addresses), media CIDRs larger than 1024

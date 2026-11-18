@@ -159,6 +159,7 @@ MARKERS: tuple[tuple[str, str], ...] = (
     ("[--]", "recommended, not required; or not applicable"),
     ("[!!]", "blocked, expired, stale, or failed"),
     ("[??]", "unknown or unreadable"),
+    ("[stop]", "a run Sippycup stopped itself to stay inside the scope (safety stop, not a target failure)"),
     ("[LIVE]", "sends traffic to a target; typed confirmation required"),
     ("[local]", "starts or builds a local container; no target traffic"),
     ("[offline]", "network-free"),

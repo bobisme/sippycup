@@ -87,11 +87,15 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
         "summary": "A TLS run could not verify the server certificate against the reviewed name and trust anchor; no SIP was sent on that connection.",
         "recommendation": "Serve a certificate chain that validates for the reviewed server name (or IP SAN) from the agreed trust anchor.",
     },
+    # A safety stop by Sippycup, not a target defect: behind a proxy or SBC
+    # the media address usually differs from the signaling address, and the
+    # usual cause is a written scope that omits it. The few RTP packets the
+    # softphone sent before the stop are reported as an integrity exception.
     "media-outside-scope": {
-        "severity": "low",
-        "title": "Media was negotiated to an address outside the approved scope",
-        "summary": "The far end offered a media address that was not approved; the call was hung up before media was sent there.",
-        "recommendation": "Confirm the media server addresses and add them to the written scope, or correct the advertised SDP connection address.",
+        "severity": "info",
+        "title": "Safety stop: media was negotiated to an address outside the approved scope",
+        "summary": "Sippycup hung the call up because the far end negotiated media to an address the written scope does not approve. This is a safety stop, not a target failure.",
+        "recommendation": "Confirm the media server addresses with the service owner and add them to the written scope (or have the advertised SDP connection address corrected), then repeat the call.",
     },
     "oracle-assertion-failed": {
         "severity": "info",
@@ -112,6 +116,10 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
         "recommendation": "Rerun the affected step after fixing capture placement; do not rely on the incomplete run's evidence.",
     },
 }
+
+
+# Verdicts where Sippycup itself stopped a run to stay inside the scope.
+SAFETY_STOPS = frozenset({"media-outside-scope"})
 
 
 class Unreadable(Exception):
@@ -1456,6 +1464,16 @@ def _ceiling_check(model: dict[str, Any], scope: _Scope) -> list[dict[str, Any]]
 # Observations, findings, limitations
 
 
+def _stop_detail(model: dict[str, Any]) -> str:
+    """How much media reached an unapproved peer before the media-scope stop."""
+    media = (model.get("details") or {}).get("media") or {}
+    sent = media.get("toPeerPackets")
+    if model.get("verdict") != "media-outside-scope" or not isinstance(sent, int):
+        return ""
+    noun = "RTP packet was" if sent == 1 else "RTP packets were"
+    return f"; the media-scope stop hung the call up after {sent} {noun} sent to it"
+
+
 def _observation(code: str, run: dict[str, Any], detail: str | None = None) -> dict[str, Any]:
     spec = OBSERVATIONS[code]
     return {
@@ -1480,7 +1498,11 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
     verdict = run.get("verdict")
     details = run.get("details", {})
     if run["kind"] == "call":
-        if verdict in OBSERVATIONS:
+        if verdict == "media-outside-scope":
+            sent = (details.get("media") or {}).get("toPeerPackets")
+            detail = f"RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else None
+            found.append(_observation(verdict, run, detail))
+        elif verdict in OBSERVATIONS:
             found.append(_observation(verdict, run))
         if verdict == "tls-name-pinning-failed":
             found.append(_observation("tls-not-verified", run))
@@ -1491,7 +1513,10 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
         if (preflight.get("statusCode") or 0) >= 500:
             found.append(_observation("preflight-server-error", run, f"Status {preflight['statusCode']}."))
         oracle = details.get("oracle") or {}
-        if oracle.get("verdict") == "fail" and (details.get("call") or {}).get("answered") and oracle.get("decidesVerdict"):
+        # A call the media-scope stop hung up fails the oracle's media
+        # assertions because of the stop itself; that is not a target finding.
+        if oracle.get("verdict") == "fail" and (details.get("call") or {}).get("answered") and oracle.get("decidesVerdict") \
+                and verdict != "media-outside-scope":
             found.append(_observation("oracle-assertion-failed", run, "Failed: " + ", ".join(oracle.get("failed") or []) + "."))
         if verdict in {"capture-failed", "capture-died"}:
             found.append(_observation("capture-incomplete", run))
@@ -1859,7 +1884,8 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             peer = model.pop("_mediaPeerRaw", None)
             if peer and not addresses.approved(peer):
                 model["integrity"].append(
-                    _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address")
+                    _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address"
+                               + _stop_detail(model))
                 )
             model["integrity"].extend(_window_check(run_scope, model, raw_targets))
             model["integrity"].extend(_ceiling_check(model, run_scope))
@@ -2116,7 +2142,10 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
     if len(findings) > 4:
         rows.append({"ref": "-", "severity": "none", "title": f"{len(findings) - 4} more finding{'s' if len(findings) != 5 else ''} in the Findings section", "where": "-", "source": "report", "runs": 0})
     passed = [r for r in runs if r.get("verdict") in ("pass", "succeeded", "no-findings")]
-    failed = [r for r in runs if r not in passed and r.get("kind") != "check"]
+    # A safety stop is Sippycup refusing to continue outside the scope, not a
+    # result about the target; it gets its own row.
+    stopped = [r for r in runs if r.get("verdict") in SAFETY_STOPS]
+    failed = [r for r in runs if r not in passed and r not in stopped and r.get("kind") != "check"]
     filler = []
     if not runs:
         filler.append({"ref": "-", "severity": "none", "title": "No runs were recorded", "where": "-", "source": "run results", "runs": 0})
@@ -2131,6 +2160,9 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
             verdicts[key] = verdicts.get(key, 0) + 1
         breakdown = ", ".join(f"{name} ({count})" for name, count in sorted(verdicts.items()))
         filler.append({"ref": "-", "severity": "none", "title": f"{len(failed)} run{'s' if len(failed) != 1 else ''} did not pass: {breakdown}", "where": "-", "source": "run results", "runs": len(failed)})
+    if stopped:
+        breakdown = ", ".join(sorted({str(r.get("verdict")) for r in stopped}))
+        filler.append({"ref": "-", "severity": "none", "title": f"{len(stopped)} run{'s were' if len(stopped) != 1 else ' was'} ended by a Sippycup safety stop ({breakdown}), not a target failure", "where": "-", "source": "run results", "runs": len(stopped)})
     filler.append({"ref": "-", "severity": "none", "title": f"{len(exceptions)} integrity exception{'s' if len(exceptions) != 1 else ''}", "where": "-", "source": "report re-check", "runs": len({e['run'] for e in exceptions if e['run']})})
     for row in filler:
         if len(rows) >= 3:

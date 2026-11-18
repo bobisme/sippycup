@@ -299,6 +299,14 @@ def _practice_facts(repo: Path, now: datetime) -> dict[str, Any]:
         try:
             connection = read_json(state / "connection.json")
             facts["address"] = connection.get("address")
+            # Every signaling address the practice namespace serves: Asterisk
+            # and, when present, the practice proxy (bn-2g0). An engagement
+            # whose target is either is reachable only through --practice.
+            proxy = connection.get("proxy") if isinstance(connection.get("proxy"), dict) else {}
+            facts["addresses"] = [
+                value for value in (connection.get("address"), proxy.get("address"))
+                if isinstance(value, str) and value
+            ]
             facts["authorization"] = authorization_window(
                 "approved", connection.get("started_utc"), connection.get("profile_valid_until_utc"), now
             )

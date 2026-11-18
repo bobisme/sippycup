@@ -413,9 +413,11 @@ the whole owner-facing chain, in the order you will use it on the real
 engagement, with the real public commands:
 
 ```sh
-./bin/sippycup practice-target rehearsal          # about 2 minutes
-./bin/sippycup practice-target rehearsal --list   # the stages; sends nothing
-make dress-rehearsal                              # the same, with the make image variables
+./bin/sippycup practice-target rehearsal            # about 90 s
+./bin/sippycup practice-target rehearsal --proxy    # the proxy shape, about 90 s
+./bin/sippycup practice-target rehearsal --list     # the stages; sends nothing
+make dress-rehearsal                                # the same, with the make image variables
+make dress-rehearsal-proxy                          # --proxy, with the make image variables
 ```
 
 | # | Stage | Commands |
@@ -428,9 +430,10 @@ make dress-rehearsal                              # the same, with the make imag
 | 6 | Preflight | `--practice preflight 127.0.0.2 5060 udp`; `--practice preflight 127.0.0.2 5061 tls --tls-ca DIR/practice-ca.crt --tls-server-name sippycup-practice` |
 | 7 | Guided call | the cockpit's `--practice call DIR/target-profile.yaml --dial echo --username practice` plus `--secret-file`, then `--dial dtmf --dtmf '159#'`; each with its `journal add` |
 | 8 | Campaign | the cockpit's `campaign plan` and `--practice campaign run ... --secret-env practice-password=SIPPYCUP_COCKPIT_SECRET` (UDP and TLS OPTIONS, UDP and TLS authenticated calls) |
-| 9 | Security checks | `checks plan`, then the cockpit's `--practice checks run DIR/target-profile.yaml` plus `--secret-file` (the seven UDP checks) |
+| 9 | Security checks | `checks plan`, then the cockpit's `--practice checks run DIR/target-profile.yaml` plus `--secret-file` (the seven UDP checks and `srtp-policy`) |
 | 10 | Evidence | each `journal add` and `evidence manifest` that the cockpit offers |
 | 11 | Owner report | the cockpit's `summary DIR --journal` plus `--forbid-file work/practice/account.password` |
+| 12 | Safety stop (throwaway engagement `DIR-stop`) | `journal init`, `scope init`, answers that approve only the proxy, `scope check`, `scope compile`, `rehearse`, the cockpit's `--practice call ... --dial echo` (must end `media-outside-scope`, exit 1), its `journal add`, `evidence manifest`, and the cockpit's `summary` |
 
 DIR is `work/practice/rehearsals/dress-STAMP-PID`. Where a stage says "the
 cockpit's", the rehearsal takes the exact argv from `./bin/sippycup go DIR
@@ -443,7 +446,63 @@ decoded from the capture in both directions; TLS verified as
 `sippycup-practice`; campaign `succeeded` with four steps and its run directory
 printed as a host path; every approved check ran to `passed` or `finding`;
 an owner report with zero integrity exceptions that labels the practice call
-as practice; and the practice password in no file of the engagement.
+as practice and carries exactly the check findings the checks run reported
+(including those of `srtp-policy`); and the practice password in no file of
+the engagement.
+
+The approved checks are the seven UDP checks plus `srtp-policy` (two
+1-second calls on a UDP first target: plain RTP, then a mandatory SDES
+offer). `security_checks.max_requests` is generated as exactly the sum of the
+declared bounds (33: 21 for the seven, 12 for `srtp-policy`), the same sum
+`scope check` compares it with.
+
+### Proxy shape (`--proxy`)
+
+The real engagement is most likely a proxy or SBC: signaling to one address,
+407 challenges in the proxy's realm, Record-Route, and media from other
+addresses. `--proxy` runs the same twelve stages, but the answers describe
+the practice proxy exactly as the owner of such a platform writes them:
+
+| Answer | Value |
+| --- | --- |
+| `signaling.networks`, `targets[].address` | `127.0.0.3` (the proxy), UDP 5060 and TLS 5061 |
+| `targets[].tls_server_name` | `sippycup-proxy` (`tls_ca_file`: the engagement's copy of the practice CA) |
+| `media.networks` | `127.0.0.2` (the practice address; it differs from the signaling address) |
+| `account.realm` | `sippycup-proxy` |
+
+Everything after that goes through what `scope compile` generated, unedited:
+the profile approves `127.0.0.3` and `127.0.0.2`, the campaign authorizes both
+networks, the expectations allow both. Preflight goes to the proxy (TLS
+verified as `sippycup-proxy`). In addition to the assertions above, every
+guided call must have signalled to `127.0.0.3` with its media peer on
+`127.0.0.2`, and `unauthenticated-invite` must have seen the proxy's 407.
+DIR is `work/practice/rehearsals/dress-proxy-STAMP-PID`.
+
+### The safety stop (stage 12)
+
+Both variants end with one deliberately failing leg, so you see the stop
+once before it happens on the real engagement. It uses a separate throwaway
+engagement, `DIR-stop`, so the main engagement's owner report stays clean.
+Its answers make the most likely owner mistake: media "on the same address
+as signaling", so only the proxy `127.0.0.3` is approved and the real media
+address `127.0.0.2` is not. The cockpit's guided call must end
+`media-outside-scope` (exit 1) with the media peer on `127.0.0.2` and at most
+10 RTP packets sent there before the hangup (typically 3). Then:
+
+- the cockpit lists the run as `[stop]` with the reason "safety stop, not a
+  target failure: the media peer ... is not an approved address, so the call
+  was hung up after N RTP packets; add the owner's media addresses to the
+  scope and compile again";
+- the owner report of `DIR-stop` lists it as an `info` observation titled
+  "Safety stop: media was negotiated to an address outside the approved
+  scope", no oracle observation, the executive summary row "1 run was ended
+  by a Sippycup safety stop (media-outside-scope), not a target failure", and
+  exactly one integrity exception, `media-peer-not-approved`, that discloses
+  the packets sent before the stop. `summary` therefore exits 1 there, which
+  the stage requires.
+
+The direct variant uses the same stop leg (only the proxy has a media address
+that differs from its signaling address).
 
 Output is one `[PASS]` or `[FAIL]` line per stage with the commands it ran
 (the password is never printed; the campaign's variable is shown as
@@ -462,7 +521,8 @@ Like the drill, it has no address, profile, or host option, and it reaches
 the target only through `--practice`. `make dress-rehearsal-gate` runs it
 through `tests/test_dress_rehearsal_gate.py` (opt-in with
 `SIPPYCUP_DRESS_REHEARSAL_GATE=1`) and also requires that the target is left
-as it was found.
+as it was found; `make dress-rehearsal-proxy-gate` runs the `--proxy` variant
+the same way (`SIPPYCUP_DRESS_REHEARSAL_GATE=proxy`, or `all` for both).
 
 ### Practice runs in the owner report
 
