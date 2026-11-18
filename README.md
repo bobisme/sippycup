@@ -147,6 +147,10 @@ Before a real engagement, `./bin/sippycup practice-target rehearsal` (or
 `make dress-rehearsal`) walks the whole owner-facing chain against the practice
 target, from `scope compile` to the owner report, and prints every command it
 ran with PASS or FAIL per stage.
+The same target also runs a Kamailio proxy on `127.0.0.3` in front of
+Asterisk (407 challenges, Record-Route, media on `127.0.0.2`), the shape of a
+typical SBC edge; `work/practice/target-profile-proxy.yaml` approves both
+addresses and `make practice-proxy-gate` runs every path through it.
 
 Do not casually add `--privileged`.
 

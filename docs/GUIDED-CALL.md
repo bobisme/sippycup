@@ -119,7 +119,12 @@ Registration and INVITE are always sent to the approved target. PJSUA is
 given a global outbound route to the target, so in-dialog requests do not
 follow a remote Contact elsewhere, and redirects (3xx) are refused. If the
 negotiated media peer is not an approved address, the call is hung up and
-the verdict is `media-outside-scope`.
+the verdict is `media-outside-scope`. The driver asks PJSUA for the media
+peer as soon as the call is answered (and every 0.1 s, at most five times,
+until it is known), so only the first few RTP packets reach an unapproved
+peer before the hang-up. Behind a proxy or SBC the media address usually
+differs from the signaling address; approve both (see the practice proxy in
+`docs/PRACTICE-TARGET.md`).
 
 ## DTMF
 

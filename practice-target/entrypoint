@@ -14,6 +14,12 @@ readonly templates=/usr/local/share/sippycup-practice/asterisk
 readonly address="${SIPPYCUP_PRACTICE_ADDRESS:-127.0.0.2}"
 readonly dns_name="${SIPPYCUP_PRACTICE_DNS_NAME:-sippycup-practice}"
 readonly account="${SIPPYCUP_PRACTICE_ACCOUNT:-practice}"
+# The practice proxy (bn-2g0): a Kamailio edge on its own loopback address
+# that forwards calls to Asterisk on ${address}.
+readonly kamailio_templates=/usr/local/share/sippycup-practice/kamailio
+readonly proxy_address="${SIPPYCUP_PRACTICE_PROXY_ADDRESS:-127.0.0.3}"
+readonly proxy_dns_name="${SIPPYCUP_PRACTICE_PROXY_DNS_NAME:-sippycup-proxy}"
+readonly proxy_realm="${SIPPYCUP_PRACTICE_PROXY_REALM:-sippycup-proxy}"
 
 fail() {
     printf 'sippycup-practice: %s\n' "$*" >&2
@@ -32,6 +38,20 @@ if [[ "${address}" == 127.0.0.1 ]]; then
 fi
 if [[ ! "${dns_name}" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
     fail "invalid practice DNS name"
+fi
+if [[ ! "${proxy_address}" =~ ^127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    fail "proxy address must be an IPv4 loopback literal: ${proxy_address}"
+fi
+for octet in "${BASH_REMATCH[@]:1}"; do
+    (( octet <= 255 )) || fail "invalid proxy address: ${proxy_address}"
+done
+if [[ "${proxy_address}" == 127.0.0.1 || "${proxy_address}" == "${address}" ]]; then
+    fail "the proxy address must differ from 127.0.0.1 and the practice address"
+fi
+if [[ ! "${proxy_dns_name}" =~ ^[a-z][a-z0-9-]{0,62}$ ]] \
+    || [[ ! "${proxy_realm}" =~ ^[a-z][a-z0-9-]{0,62}$ ]] \
+    || [[ "${proxy_dns_name}" == "${dns_name}" || "${proxy_realm}" == "${dns_name}" ]]; then
+    fail "invalid proxy DNS name or realm"
 fi
 if [[ ! "${account}" =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
     fail "invalid practice account name"
@@ -80,8 +100,31 @@ openssl x509 -req -in "${tls}/server.csr" \
     -CA "${tls}/ca.crt" -CAkey "${tls}/ca.key" -CAcreateserial \
     -days 2 -sha256 -extfile "${tls}/server.ext" \
     -out "${tls}/server.crt" 2>/dev/null
-rm -f -- "${tls}/ca.key" "${tls}/ca.srl" "${tls}/server.csr"
+# The proxy's certificate: same CA, distinct name (bn-2g0).
+openssl req -new -nodes -quiet \
+    -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -keyout "${tls}/proxy.key" -out "${tls}/proxy.csr" \
+    -subj "/O=Sippycup/CN=${proxy_dns_name}" 2>/dev/null
+printf '%s\n' \
+    "basicConstraints=critical,CA:FALSE" \
+    "keyUsage=critical,digitalSignature" \
+    "extendedKeyUsage=serverAuth" \
+    "subjectAltName=DNS:${proxy_dns_name},IP:${proxy_address}" \
+    >"${tls}/proxy.ext"
+openssl x509 -req -in "${tls}/proxy.csr" \
+    -CA "${tls}/ca.crt" -CAkey "${tls}/ca.key" -CAcreateserial \
+    -days 2 -sha256 -extfile "${tls}/proxy.ext" \
+    -out "${tls}/proxy.crt" 2>/dev/null
+rm -f -- "${tls}/ca.key" "${tls}/ca.srl" "${tls}/server.csr" "${tls}/proxy.csr"
 openssl verify -CAfile "${tls}/ca.crt" "${tls}/server.crt" >/dev/null
+openssl verify -CAfile "${tls}/ca.crt" "${tls}/proxy.crt" >/dev/null
+
+# A per-start random token known only to the proxy and Asterisk. The proxy
+# strips any client-supplied copy and adds it to the INVITEs it forwards;
+# Asterisk identifies the proxy trunk by it and accepts it only from the
+# proxy address (see pjsip.conf).
+trunk_token="$(openssl rand -hex 24)"
+[[ "${trunk_token}" =~ ^[0-9a-f]{48}$ ]] || fail "could not generate the trunk token"
 
 render() {
     local source="$1" destination="$2" text
@@ -90,6 +133,10 @@ render() {
     text="${text//@DNS_NAME@/${dns_name}}"
     text="${text//@ACCOUNT@/${account}}"
     text="${text//@RUNTIME@/${runtime_root}}"
+    text="${text//@PROXY_ADDRESS@/${proxy_address}}"
+    text="${text//@PROXY_DNS_NAME@/${proxy_dns_name}}"
+    text="${text//@PROXY_REALM@/${proxy_realm}}"
+    text="${text//@TRUNK_TOKEN@/${trunk_token}}"
     text="${text//@PASSWORD@/${password}}"
     printf '%s\n' "${text}" >"${destination}"
 }
@@ -97,7 +144,11 @@ render() {
 for template in "${templates}"/*.conf; do
     render "${template}" "${runtime_root}/etc/$(basename -- "${template}")"
 done
-unset password
+mkdir -p "${runtime_root}/etc/kamailio" "${runtime_root}/kamailio"
+for template in "${kamailio_templates}"/*.cfg; do
+    render "${template}" "${runtime_root}/etc/kamailio/$(basename -- "${template}")"
+done
+unset password trunk_token
 
 # Publish only public material back to the operator.
 
@@ -105,5 +156,13 @@ install -m 0644 -- "${tls}/ca.crt" "${state}/ca.crt.tmp"
 mv -f -- "${state}/ca.crt.tmp" "${state}/ca.crt"
 install -m 0644 -- "${tls}/server.crt" "${state}/server.crt.tmp"
 mv -f -- "${state}/server.crt.tmp" "${state}/server.crt"
+install -m 0644 -- "${tls}/proxy.crt" "${state}/proxy.crt.tmp"
+mv -f -- "${state}/proxy.crt.tmp" "${state}/proxy.crt"
+
+# The proxy runs beside Asterisk (bn-2g0): it forks its own workers, logs to
+# the container log, and uses small fixed memory pools.
+/usr/sbin/kamailio -f "${runtime_root}/etc/kamailio/kamailio.cfg" \
+    -Y "${runtime_root}/kamailio" -P "${runtime_root}/kamailio/kamailio.pid" \
+    -m 32 -M 4 -E -DD &
 
 exec /usr/sbin/asterisk -f -n -C "${runtime_root}/etc/asterisk.conf"

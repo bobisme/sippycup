@@ -202,5 +202,15 @@ softphone-gate:
 		PYTHONDONTWRITEBYTECODE=1 \
 		python3 -m unittest tests.test_softphone_gate -v
 
+# Live, loopback-only checks of every path through the practice proxy
+# (Kamailio on 127.0.0.3: 407, Record-Route, media on 127.0.0.2), about 90 s.
+# Opt-in like practice-gate; needs both images. See docs/PRACTICE-TARGET.md.
+.PHONY: practice-proxy-gate
+practice-proxy-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_PRACTICE_PROXY_GATE=1 SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		PYTHONDONTWRITEBYTECODE=1 \
+		python3 -m unittest tests.test_practice_proxy_gate -v
+
 web-security-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v

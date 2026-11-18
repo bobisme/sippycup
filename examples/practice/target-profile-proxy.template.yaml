@@ -1,0 +1,39 @@
+# Template only. `./bin/sippycup practice-target up` renders it into
+# work/practice/target-profile-proxy.yaml with the same four-hour validity
+# window as the other practice profiles. The placeholders below are not valid
+# values, so this checked-in file can never pass `rehearse`.
+#
+# The practice proxy (bn-2g0): signaling goes to the Kamailio proxy on
+# '@PROXY_ADDRESS@', which challenges INVITE with 407, Record-Routes, and
+# forwards the call to Asterisk on '@ADDRESS@'. Asterisk's SDP answer therefore
+# names '@ADDRESS@' as the media address, which differs from the signaling
+# address, so both are approved. Remove '@ADDRESS@' to see the media-scope stop.
+schema_version: sippycup.dev/target-profile/v1
+name: sippycup-local-practice-proxy
+target:
+  host: '@PROXY_ADDRESS@'
+  port: 5060
+  transport: udp
+  approved_addresses:
+    - '@PROXY_ADDRESS@'
+    - '@ADDRESS@'
+authorization:
+  status: approved
+  approved_by: sippycup practice-target up (local loopback practice only)
+  approval_id: '@APPROVAL_ID@'
+  valid_from: '@VALID_FROM@'
+  valid_until: '@VALID_UNTIL@'
+limits:
+  max_calls: 1
+  max_concurrency: 1
+  max_calls_per_second: 1
+  max_duration_seconds: 60
+capture:
+  interface: lo
+  output: work/practice/call-proxy.pcap
+features:
+  ice: false
+  turn: false
+  srtp: true
+  dtls_srtp: false
+  webrtc: false

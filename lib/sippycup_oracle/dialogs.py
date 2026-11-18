@@ -376,16 +376,31 @@ def _frame_belongs(
     return from_tag == caller_tag and to_tag is None
 
 
+def _address_pair(frame: FrameRecord) -> frozenset[str] | None:
+    source = _known(frame.source.address)
+    destination = _known(frame.destination.address)
+    if source is None or destination is None:
+        return None
+    return frozenset((str(source), str(destination)))
+
+
 def _dialog_from_root(
     roots: list[TransactionRecord],
     transactions: tuple[TransactionRecord, ...],
     callee_tag: str | None,
     source_frames: tuple[FrameRecord, ...],
+    caller_hop_only: bool = False,
 ) -> DialogRecord:
     initial = roots[0]
     assert initial.request is not None
     call_id = initial.key.call_id
     caller_tag = _tag(initial.request, "from_tag")
+    # A dialog relayed by a proxy is seen once per hop. Its record describes
+    # the caller's hop (caller <-> first hop), which is what the caller
+    # negotiated; the relayed copies are not counted twice.
+    caller_hop = frozenset(
+        (initial.key.flow.initiator_address, initial.key.flow.responder_address)
+    )
     included: list[TransactionRecord] = []
     frames: list[tuple[FrameRecord, TransactionRecord, bool]] = []
     for transaction in transactions:
@@ -397,6 +412,7 @@ def _dialog_from_root(
             frame
             for frame in transaction_frames
             if _frame_belongs(frame, call_id, caller_tag, callee_tag)
+            and (not caller_hop_only or _address_pair(frame) == caller_hop)
         ]
         if selected:
             included.append(transaction)
@@ -656,19 +672,49 @@ def reconstruct_dialogs(
         )
         roots_by_call.setdefault(root_key, []).append(transaction)
 
+    # A stateful proxy (not a B2BUA) relays the initial INVITE with the same
+    # Call-ID, From tag, and CSeq on a new flow that starts at the address the
+    # previous hop was sent to. Those relayed roots are the same dialog seen
+    # at the next hop, not a fork: merge them into the root group they
+    # continue so a Record-Routed call is reported as one dialog.
+    groups: list[tuple[tuple[str, str | None, FlowKey], list[TransactionRecord], list[TransactionRecord]]] = []
+    for root_key, roots in roots_by_call.items():
+        cseqs = {root.key.cseq_number for root in roots}
+        parent = None
+        for group in groups:
+            group_key, group_roots, relayed = group
+            if group_key[:2] != root_key[:2]:
+                continue
+            responders = {
+                item.key.flow.responder_address for item in (*group_roots, *relayed)
+            }
+            group_cseqs = {item.key.cseq_number for item in (*group_roots, *relayed)}
+            if root_key[2].initiator_address in responders and cseqs & group_cseqs:
+                parent = group
+                break
+        if parent is not None:
+            parent[2].extend(roots)
+        else:
+            groups.append((root_key, roots, []))
+
     dialogs: list[DialogRecord] = []
-    for roots in roots_by_call.values():
+    for _, roots, relayed in groups:
         callee_tags: set[str] = set()
-        for root in roots:
+        for root in (*roots, *relayed):
             for response in root.responses:
                 tag = _tag(response, "to_tag")
                 if tag is not None and _status_code(response) not in {401, 407}:
                     callee_tags.add(tag)
+        merged = bool(relayed)
         if callee_tags:
             for tag in sorted(callee_tags):
-                dialogs.append(_dialog_from_root(roots, transactions, tag, frame_tuple))
+                dialogs.append(
+                    _dialog_from_root(roots, transactions, tag, frame_tuple, merged)
+                )
         else:
-            dialogs.append(_dialog_from_root(roots, transactions, None, frame_tuple))
+            dialogs.append(
+                _dialog_from_root(roots, transactions, None, frame_tuple, merged)
+            )
 
     dialogs.sort(
         key=lambda dialog: (

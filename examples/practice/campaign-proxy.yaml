@@ -1,0 +1,85 @@
+# Campaign through the practice proxy (bn-2g0). `practice-target up` renders it
+# into work/practice/campaign-proxy.yaml. Signaling goes to the Kamailio proxy
+# on '@PROXY_ADDRESS@'; the proxy forwards calls to Asterisk on '@ADDRESS@',
+# whose SDP answer names '@ADDRESS@' as the media address, so both networks
+# are authorized.
+#
+# The call case registers (401 from the proxy) and is challenged with 407 on
+# the INVITE. The password is supplied at run time, never here:
+#   --secret-env practice-password=VARIABLE_HOLDING_THE_PASSWORD
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata:
+  name: local-practice-proxy
+authorization:
+  networks: ['@PROXY_ADDRESS@/32', '@ADDRESS@/32']
+  signalingPorts: [5060]
+  mediaPorts: {start: 20000, end: 20019}
+  transports: [udp, tcp]
+  credentialRefs: [practice-password]
+  ceilings:
+    # One call: the capture watchdog counts calls by INVITE Call-ID, so the
+    # INVITE re-sent after the 407 is not a second call.
+    calls: 1
+    packets: 2600
+    bytes: 900000
+    durationSeconds: 90
+    concurrentCalls: 1
+    packetsPerSecond: 400
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: proxy-udp
+    address: '@PROXY_ADDRESS@'
+    signaling: {transport: udp, port: 5060}
+    credentialRef: practice-password
+    account: {username: practice, register: true}
+  - name: proxy-tcp
+    address: '@PROXY_ADDRESS@'
+    signaling: {transport: tcp, port: 5060}
+cases:
+  - id: options-udp
+    type: options
+    target: proxy-udp
+    count: 1
+    budget:
+      packetsPerRun: 10
+      bytesPerRun: 10000
+      durationSecondsPerRun: 5
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+  - id: options-tcp
+    type: options
+    target: proxy-tcp
+    count: 1
+    budget:
+      packetsPerRun: 20
+      bytesPerRun: 20000
+      durationSecondsPerRun: 5
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+  - id: call-echo-proxy
+    type: call
+    target: proxy-udp
+    count: 1
+    dial: {user: echo}
+    budget:
+      packetsPerRun: 2000
+      bytesPerRun: 700000
+      durationSecondsPerRun: 15
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+      requireBidirectionalRtp: true
+expectations:
+  allowedSipStatuses: [100, 180, 200]
+  requireBidirectionalRtp: true
+evidence:
+  capture: true
+  retainPayload: false
+  directory: evidence/local-practice-proxy

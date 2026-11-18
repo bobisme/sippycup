@@ -1,0 +1,40 @@
+# Template only. `./bin/sippycup practice-target up` renders it into
+# work/practice/target-profile-proxy-tls.yaml. The placeholders below are not
+# valid values, so this checked-in file can never pass `rehearse`.
+#
+# TLS to the practice proxy (bn-2g0) on a pinned literal address. The proxy's
+# certificate is signed by the same per-`up` practice CA under its own name,
+# '@PROXY_DNS_NAME@'; the name is used only for SNI, verification, and the
+# SIP domain and is never resolved. The proxy forwards to Asterisk over UDP,
+# so it inserts two Record-Route entries; media comes from '@ADDRESS@'.
+schema_version: sippycup.dev/target-profile/v1
+name: sippycup-local-practice-proxy-tls
+target:
+  host: '@PROXY_ADDRESS@'
+  port: 5061
+  transport: tls
+  tls_server_name: '@PROXY_DNS_NAME@'
+  tls_ca_file: work/practice/ca.crt
+  approved_addresses:
+    - '@PROXY_ADDRESS@'
+    - '@ADDRESS@'
+authorization:
+  status: approved
+  approved_by: sippycup practice-target up (local loopback practice only)
+  approval_id: '@APPROVAL_ID@'
+  valid_from: '@VALID_FROM@'
+  valid_until: '@VALID_UNTIL@'
+limits:
+  max_calls: 1
+  max_concurrency: 1
+  max_calls_per_second: 1
+  max_duration_seconds: 60
+capture:
+  interface: lo
+  output: work/practice/call-proxy-tls.pcap
+features:
+  ice: false
+  turn: false
+  srtp: true
+  dtls_srtp: false
+  webrtc: false

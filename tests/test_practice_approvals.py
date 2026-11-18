@@ -65,14 +65,16 @@ class ArchiveTests(unittest.TestCase):
         current = (self.state / "target-profile.yaml").read_bytes()
         self.prepare(first + timedelta(hours=1))
         archive = sorted(path.name for path in (self.state / "approvals").iterdir())
+        names = ("target-profile-proxy-tls.yaml", "target-profile-proxy.yaml",
+                 "target-profile-tls.yaml", "target-profile.yaml")
         self.assertEqual(archive, [
-            "20261118T090000Z-target-profile-tls.yaml", "20261118T090000Z-target-profile.yaml",
-            "20261118T100000Z-target-profile-tls.yaml", "20261118T100000Z-target-profile.yaml",
+            f"{stamp}-{name}" for stamp in ("20261118T090000Z", "20261118T100000Z") for name in names
         ])
-        self.assertEqual((self.state / "approvals" / archive[1]).read_bytes(), current)
-        self.assertEqual(0o600, (self.state / "approvals" / archive[1]).stat().st_mode & 0o777)
+        kept = self.state / "approvals" / "20261118T090000Z-target-profile.yaml"
+        self.assertEqual(kept.read_bytes(), current)
+        self.assertEqual(0o600, kept.stat().st_mode & 0o777)
         practice.remove_secrets(self.project)
-        self.assertEqual(4, len(list((self.state / "approvals").iterdir())))
+        self.assertEqual(8, len(list((self.state / "approvals").iterdir())))
         text = "".join(path.read_text() for path in (self.state / "approvals").iterdir())
         self.assertNotIn("password", text.lower())
 
@@ -80,7 +82,7 @@ class ArchiveTests(unittest.TestCase):
         started = datetime(2026, 11, 18, 9, 0, tzinfo=timezone.utc)
         self.prepare(started)
         self.assertEqual([], practice.archive_approvals(self.state, started))
-        self.assertEqual(2, len(list((self.state / "approvals").iterdir())))
+        self.assertEqual(4, len(list((self.state / "approvals").iterdir())))
 
     def test_only_loopback_practice_profiles_are_practice_approvals(self) -> None:
         document = yaml.safe_load((FIXTURE / "target-profile.yaml").read_text())

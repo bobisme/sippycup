@@ -204,6 +204,19 @@ def parse_envelope(raw: bytes) -> tuple[dict[str, Any], str | None, dict[str, An
     return step, password, context
 
 
+def media_networks(context: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """The frozen authorization networks, which also bound the media peer."""
+    networks = context["authorization"].get("networks")
+    if networks is None:
+        return None
+    if not isinstance(networks, list) or not all(isinstance(item, str) for item in networks):
+        raise EnvelopeError("context authorization networks are invalid")
+    try:
+        return tuple(str(ipaddress.ip_network(item)) for item in networks)
+    except ValueError as error:
+        raise EnvelopeError("context authorization networks are invalid") from error
+
+
 def call_duration(step: Mapping[str, Any]) -> dict[str, Any]:
     """Clamp the call to the step budget; report requested and effective seconds."""
     budget = step["budget"]["durationSeconds"]
@@ -639,6 +652,9 @@ def run(
             allowed_media_addresses=tuple(
                 str(ipaddress.ip_address(item)) for item in destination["addresses"]
             ),
+            # bn-2g0: the frozen authorization networks also scope media, so a
+            # proxy's media servers on another approved address are allowed.
+            allowed_media_networks=media_networks(context),
             allowed_media_ports=(media["start"], media["end"]),
             pin_signaling=True,
             advertised_address=local_address(address, port),

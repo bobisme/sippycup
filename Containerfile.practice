@@ -146,12 +146,22 @@ RUN apt-get update \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
+# The practice proxy (bn-2g0): Debian's own Kamailio package (6.0 in trixie)
+# and its TLS module package; no database module is used.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        kamailio \
+        kamailio-tls-modules \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/sbin/kamailio -v | grep -q '^version: kamailio 6\.'
+
 COPY --from=asterisk-builder /out/usr/sbin/ /usr/sbin/
 COPY --from=asterisk-builder /out/usr/lib/ /usr/lib/
 # The configuration framework refuses options that have no XML documentation.
 COPY --from=asterisk-builder /out/var/lib/asterisk/documentation/ /var/lib/asterisk/documentation/
 COPY practice-target/entrypoint /usr/local/bin/sippycup-practice-entrypoint
 COPY practice-target/asterisk/ /usr/local/share/sippycup-practice/asterisk/
+COPY practice-target/kamailio/ /usr/local/share/sippycup-practice/kamailio/
 COPY media/canary-v1/callee_to_caller.pcmu /var/lib/asterisk/sounds/sippycup/canary.ulaw
 COPY media/canary-v1/callee_to_caller.pcma /var/lib/asterisk/sounds/sippycup/canary.alaw
 

@@ -138,6 +138,10 @@ class SoftphoneCall:
     answer_timeout_seconds: float = 30.0
     registration_timeout_seconds: float = 10.0
     allowed_media_addresses: tuple[str, ...] | None = None
+    # bn-2g0: networks (CIDR) the media peer may also lie in, for example a
+    # campaign's authorization networks when the media address differs from
+    # the signaling address (a proxy in front of media servers).
+    allowed_media_networks: tuple[str, ...] | None = None
     # Inclusive (start, end) range the negotiated remote RTP port must lie in.
     allowed_media_ports: tuple[int, int] | None = None
     pin_signaling: bool = True
@@ -359,6 +363,12 @@ def _validate(call: SoftphoneCall, password: str | None) -> str:
     if call.allowed_media_addresses is not None:
         for address in call.allowed_media_addresses:
             _literal_address(address)
+    if call.allowed_media_networks is not None:
+        for network in call.allowed_media_networks:
+            try:
+                ipaddress.ip_network(network)
+            except ValueError as error:
+                raise SoftphoneError(f"invalid media network: {network!r}") from error
     if call.allowed_media_ports is not None:
         ports = call.allowed_media_ports
         if (
@@ -532,11 +542,17 @@ def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
     # packet arrives; an unknown peer is unknown, not out of scope.
     if peer is None or _peer_address(peer) is None:
         return False
-    if (
-        call.allowed_media_addresses is not None
-        and _peer_address(peer) not in call.allowed_media_addresses
-    ):
-        return True
+    if call.allowed_media_addresses is not None or call.allowed_media_networks is not None:
+        address = _peer_address(peer)
+        in_addresses = (
+            call.allowed_media_addresses is not None and address in call.allowed_media_addresses
+        )
+        in_networks = call.allowed_media_networks is not None and any(
+            ipaddress.ip_address(address) in ipaddress.ip_network(network)
+            for network in call.allowed_media_networks
+        )
+        if not (in_addresses or in_networks):
+            return True
     if call.allowed_media_ports is not None:
         port = _peer_port(peer)
         start, end = call.allowed_media_ports
@@ -983,6 +999,8 @@ def place_call(
         confirmed_at: float | None = None
         disconnected = False
         quality_requested_at: float | None = None
+        scope_probes = 0
+        scope_probed_at: float | None = None
         stopping = False
         hangup_by: str | None = None
         # Each chunk is one legacy-console command pair: ``#`` (send RFC 2833
@@ -1106,6 +1124,25 @@ def place_call(
                     stopping = True
                     hang_up("answer_timeout")
             elif phase == "confirmed":
+                # bn-2g0: PJSUA prints the media peer only in a call dump, so
+                # with a media scope ask for one right away and then every
+                # 0.1 s until the peer is known (at most 5), instead of waiting
+                # 0.5 s while RTP flows to a possibly unapproved address.
+                if (
+                    (
+                        call.allowed_media_addresses is not None
+                        or call.allowed_media_networks is not None
+                        or call.allowed_media_ports is not None
+                    )
+                    and result.media_peer is None
+                    and quality_requested_at is None
+                    and scope_probes < 5
+                    and not stopping
+                    and (scope_probed_at is None or now >= scope_probed_at + 0.1)
+                ):
+                    send("dq")
+                    scope_probes += 1
+                    scope_probed_at = now
                 if quality_requested_at is None and confirmed_at is not None and now >= confirmed_at + 0.5:
                     send("dq")
                     quality_requested_at = now

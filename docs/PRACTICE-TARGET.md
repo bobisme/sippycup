@@ -20,7 +20,9 @@ authorize traffic to a real host.
   the core image builds SIPp and PJSIP. Only 30 modules are compiled: PJSIP
   signaling, registrar and Digest authentication, RTP, SRTP, the `Echo` and
   `Playback` applications, the `TIMEOUT()` function, `pbx_config`, G.711
-  codecs, and the PCM/WAV formats. The image is about 100 MB and builds in about a minute.
+  codecs, and the PCM/WAV formats. The image is about 165 MB (100 MB before
+  the Kamailio practice proxy, whose Debian package pulls in Python) and
+  builds in about a minute.
 - **Account:** one throwaway user, `practice`, realm `sippycup-practice`.
   `up` generates a new random password every time and writes it with mode
   0600 to `work/practice/account.password`. The password is never in argv,
@@ -121,6 +123,78 @@ privileges (sudo) for evidence. A shared bridge network would add a routable
 container address. Joining the target's namespace keeps everything inside one
 unreachable loopback and makes rootless capture work.
 
+## Practice proxy (second SIP stack)
+
+A real engagement target is rarely one Asterisk that challenges with 401 and
+puts signaling and media on one address. It is usually a proxy or SBC in
+front of media servers. The same practice container therefore also runs
+Kamailio (Debian 13's `kamailio` 6.0 package plus `kamailio-tls-modules`;
+no database module) on its own loopback address, `127.0.0.3` by default
+(`up --proxy-address P`). It is always on: it starts beside Asterisk in under
+a second, binds nothing on the Asterisk address, and the existing profiles,
+campaigns, gates, and drill never send to it.
+
+| | Direct Asterisk (`127.0.0.2`) | Proxy (`127.0.0.3`) |
+| --- | --- | --- |
+| Signaling | UDP/TCP 5060, TLS 5061 (`sippycup-practice`) | UDP/TCP 5060, TLS 5061 (`sippycup-proxy`, same per-`up` CA, IP SAN `127.0.0.3`) |
+| OPTIONS | 200 from Asterisk | 200 from the proxy itself |
+| REGISTER | 401, realm `sippycup-practice` | 401, realm `sippycup-proxy`; in-memory registrar in the proxy |
+| INVITE | 401 `WWW-Authenticate` | **407 `Proxy-Authenticate`**, realm `sippycup-proxy`, qop `auth` |
+| Routing | none | `Record-Route` (two entries when the transport changes); in-dialog requests (ACK, BYE, UPDATE, re-INVITE) must carry the proxy's `Route`, otherwise `404 Not Here` |
+| Media | `127.0.0.2:20000-20019` | the same: the SDP answer names `127.0.0.2`, which **differs from the signaling address** |
+| Flood | none | more than 60 requests in 2 s from one source get `503` with `Retry-After` (pike) |
+
+The account is the same (`practice`, `work/practice/account.password`); the
+destinations are the same, dialed at the proxy (`sip:echo@127.0.0.3`). The
+proxy forwards every authenticated INVITE to Asterisk over TLS (it verifies
+Asterisk's certificate against the per-`up` CA). `up` also writes
+`target-profile-proxy.yaml` and `target-profile-proxy-tls.yaml` (approved
+addresses: the proxy and the media address), `campaign-proxy.yaml` (OPTIONS
+on UDP and TCP and one softphone call, both networks authorized, one-call
+ceiling), `expectations-proxy.yaml`, and `proxy.crt`.
+
+```sh
+./bin/sippycup --practice preflight 127.0.0.3 5061 tls \
+  --tls-ca /work/practice/ca.crt --tls-server-name sippycup-proxy
+./bin/sippycup --practice call work/practice/target-profile-proxy.yaml \
+  --dial echo --username practice --secret-file work/practice/account.password
+./bin/sippycup --practice call work/practice/target-profile-proxy-tls.yaml \
+  --dial echo --srtp mandatory --username practice \
+  --secret-file work/practice/account.password
+```
+
+To see the media-scope stop, copy `target-profile-proxy.yaml`, remove
+`127.0.0.2` from `approved_addresses`, and place the same call: the verdict is
+`media-outside-scope` and the call is hung up as soon as PJSUA reports the
+media peer.
+
+### How Asterisk trusts the proxy
+
+Asterisk must accept calls the proxy already authenticated without accepting
+unauthenticated calls from anyone else. Everything here shares one loopback
+namespace, so any process can send from any `127.x` address, including the
+proxy's: trusting the source address alone would let any local client skip
+authentication. The decision:
+
+- At every container start the entrypoint generates a random 192-bit trunk
+  token. It exists only in the container's tmpfs (rendered `kamailio.cfg` and
+  `pjsip.conf`), never in `work/`, argv, or the container environment.
+- The proxy removes any `X-Sippycup-Trunk` header a client sends and adds its
+  own to the INVITEs it forwards. The trunk leg is TLS, so the token never
+  appears in a capture.
+- Asterisk identifies the endpoint `proxy-trunk` (no Digest auth) by that
+  header only (`endpoint_identifier_order = header,username,ip`, so it is
+  checked first), and the endpoint ACL denies it from every source except the
+  proxy address.
+- A request without the exact token, from any source including `127.0.0.3`,
+  is identified exactly as before and challenged with 401. The proxy gate
+  proves each case (forged token, no token from the proxy address, the real
+  token from another source: 401; the real token from the proxy address: no
+  challenge).
+
+Residual risk, accepted for a practice target: a process that can read the
+container's tmpfs and send from `127.0.0.3` can impersonate the proxy.
+
 ## Commands
 
 ```sh
@@ -157,6 +231,10 @@ All files are under the ignored `work/practice/` directory (mode 0700):
 | `phrase.wav` | The caller-to-callee canary, decoded, for PJSUA to play |
 | `connection.json` | Public connection facts |
 | `approvals/STAMP-target-profile.yaml`, `approvals/STAMP-target-profile-tls.yaml` | An immutable copy of each practice approval that `up` issued (STAMP is the `up` time). `down` keeps them; they hold no secret |
+| `proxy.crt` | The practice proxy's certificate (`sippycup-proxy`, IP SAN of the proxy address) |
+| `target-profile-proxy.yaml`, `target-profile-proxy-tls.yaml` | Approved profiles for the practice proxy: signaling to the proxy, approved addresses proxy and media address; the TLS one pins `sippycup-proxy` |
+| `campaign-proxy.yaml` | Campaign through the proxy: OPTIONS on UDP and TCP and one authenticated softphone call (407), both networks authorized |
+| `expectations-proxy.yaml` | Packet-oracle expectations for an echo call through the proxy |
 
 The templates are in `examples/practice/`. The checked-in profile template
 uses placeholders that cannot pass `rehearse`, so there is no standing
@@ -316,8 +394,9 @@ wrong password file under `work/practice/drills/`; each drill run keeps its
 evidence there.
 
 Not rehearsable here: `possible-nat-one-way-media` (needs a non-loopback
-target behind NAT), `media-outside-scope` (needs a server that advertises an
-unapproved media address), `tls-not-verified` (covered by the gate's TLS
+target behind NAT), `media-outside-scope` (not in the drill; rehearse it
+through the practice proxy with a profile that approves only the proxy, see
+"Practice proxy"), `tls-not-verified` (covered by the gate's TLS
 checks), `capture-*`, `authorization-lapsed`. A codec mismatch (`488` from a
 codec the caller does not offer) cannot be made: PJSUA always offers PCMA,
 G.722, speex, iLBC, GSM, and opus besides PCMU (the driver's `--codec` only
@@ -514,8 +593,57 @@ An opt-in gate for the softphone voice features, built on the practice gate
 `tests/test_softphone_gate.py` runs it only with `SIPPYCUP_SOFTPHONE_GATE=1`.
 It is not part of `make full-gate`.
 
+## Proxy gate
+
+```sh
+make practice-proxy-gate
+```
+
+An opt-in gate (about 90 s; same images and target lifecycle as the practice
+gate) for every path through the practice proxy. Evidence is kept in
+`work/practice/proxy-gate-<UTC>-<PID>/`. It:
+
+- requires the proxy facts and the rendered proxy profiles to be ready, with
+  the proxy and the media address approved;
+- runs the launcher preflight to the proxy over UDP, TCP, and TLS verified as
+  `sippycup-proxy`, and requires exit 5 when verified as `sippycup-practice`;
+- runs raw probes (`tools/practice_proxy_probe.py`): 407 for INVITE and 401
+  for REGISTER in realm `sippycup-proxy`, 404 for an in-dialog BYE without
+  the proxy's Route, a client-supplied trunk token stripped, and the trust
+  decision above (four refusals and one positive control);
+- places guided calls through the proxy: with registration (pass, one oracle
+  dialog, two INVITEs around the 407, every caller request including ACK and
+  BYE sent to the proxy, RTP only between the caller and `127.0.0.2`), with
+  `--no-register`, with DTMF `159#` (sent and echoed), to `drop` (the server
+  BYE arrives from the proxy), and over TLS pinned to `sippycup-proxy` with
+  `--srtp mandatory`;
+- requires `media-outside-scope` with at most 10 RTP packets to the media
+  address when a copy of the profile approves only the proxy;
+- runs `campaign-proxy.yaml` (one-call ceiling: the capture watchdog counts
+  the INVITE re-sent after the 407 as the same call) and a SIPp-runner
+  campaign whose unauthenticated call fails on the 407, which SIPp ACKs;
+- runs `checks run` against the proxy over UDP (unauthenticated INVITE
+  challenged with 407 and ACKed) and TLS (certificate verified for
+  `sippycup-proxy`).
+
+`tests/test_practice_proxy_gate.py` runs it only with
+`SIPPYCUP_PRACTICE_PROXY_GATE=1`. It is not part of `make full-gate`.
+
 ## Limits
 
+- Through the proxy, the SIPp runner fails exactly as it does against
+  Asterisk directly: it never authenticates (the password would be in SIPp's
+  argv), so its unauthenticated INVITE gets 407. SIPp itself handles the 407
+  at the protocol level (it ACKs it); only the PJSUA softphone runner places
+  authenticated calls.
+- The proxy forwards to Asterisk over TLS, so the trunk leg is not readable in
+  a capture. The oracle still merges a Record-Routed dialog seen on two
+  cleartext hops into one dialog (unit-tested), which matters for captures a
+  target owner provides from both sides of their SBC.
+- The proxy does not anchor media (no rtpengine), does not hide topology, and
+  is not a B2BUA: Call-ID and tags pass through unchanged. A B2BUA SBC would
+  change the Call-ID between legs; only the caller's leg is ever captured on a
+  real engagement.
 - The campaign manifest has OPTIONS cases only. The bundled SIPp runner
   refuses authenticated steps (SIPp would expose the password in argv), and
   the target challenges every unauthenticated INVITE, so an unauthenticated

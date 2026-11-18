@@ -542,9 +542,11 @@ range and networks, global expectations, `retainPayload`, and a mode-0700
   only to the private temporary directory, which is deleted, unless
   `retainPayload: true`, in which case `heard.wav` is kept in the step
   directory;
-- hangs up and fails when the negotiated media peer is not one of the step's
-  frozen addresses or its port is outside `authorization.mediaPorts`, so all
-  media stays inside the capture filter and its watchdog;
+- hangs up and fails when the negotiated media peer is neither one of the
+  step's frozen addresses nor inside `authorization.networks` (a proxy or SBC
+  usually answers with a media server's address, which must be authorized
+  there), or its port is outside `authorization.mediaPorts`, so all media
+  stays inside the capture filter and its watchdog;
 - treats `durationSecondsPerRun` as a hard limit: the call lasts the generated
   `duration` factor (5 seconds otherwise), clamped to the budget minus 3.5
   seconds of setup and teardown (4.5 with registration). It hangs up when 1.5

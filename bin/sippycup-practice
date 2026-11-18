@@ -7,6 +7,7 @@ readonly image="${SIPPYCUP_PRACTICE_IMAGE:-localhost/sippycup-practice:latest}"
 readonly container="${SIPPYCUP_PRACTICE_CONTAINER:-sippycup-practice}"
 readonly state_dir="${project_dir}/work/practice"
 readonly default_address="127.0.0.2"
+readonly default_proxy_address="127.0.0.3"
 
 usage() {
     cat <<'EOF'
@@ -21,6 +22,10 @@ Commands:
   build              Build the pinned optional practice image
   up [--address A]   Start the target on loopback address A (default 127.0.0.2)
                      with a fresh throwaway account, password, CA, and profile
+     [--proxy-address P]
+                     and the Kamailio practice proxy in front of it on loopback
+                     address P (default 127.0.0.3; 407 challenges,
+                     Record-Route, media on A)
   down               Stop and remove the target and delete its secret files
   status             Report whether the image is installed and the target is up
   info [--format json]
@@ -112,6 +117,7 @@ case "${command_name}" in
                 Containerfile.practice \
                 practice-target/entrypoint \
                 practice-target/asterisk/*.conf \
+                practice-target/kamailio/*.cfg \
                 media/canary-v1/callee_to_caller.pcmu \
                 media/canary-v1/callee_to_caller.pcma \
                 | sha256sum | cut -d ' ' -f 1
@@ -128,8 +134,18 @@ case "${command_name}" in
         ;;
     up)
         address="${default_address}"
+        proxy_address="${default_proxy_address}"
         while (( $# > 0 )); do
             case "$1" in
+                --proxy-address)
+                    (( $# >= 2 )) || fail "Missing value for --proxy-address" 2
+                    proxy_address="$2"
+                    shift 2
+                    ;;
+                --proxy-address=*)
+                    proxy_address="${1#--proxy-address=}"
+                    shift
+                    ;;
                 --address)
                     (( $# >= 2 )) || fail "Missing value for --address" 2
                     address="$2"
@@ -146,6 +162,10 @@ case "${command_name}" in
         done
         # Refuse a routable or otherwise unsafe bind before any side effect.
         address="$(helper validate-address "${address}")" || exit 2
+        proxy_address="$(helper validate-address "${proxy_address}")" || exit 2
+        if [[ "${proxy_address}" == "${address}" ]]; then
+            fail "--proxy-address must differ from --address" 2
+        fi
         validate_container_name
         runtime="$(runtime_path)"
         image_exists "${runtime}" || {
@@ -159,6 +179,7 @@ case "${command_name}" in
         helper prepare \
             --project-dir "${project_dir}" \
             --address "${address}" \
+            --proxy-address "${proxy_address}" \
             --container "${container}" \
             --image "${image}" >/dev/null
         # --network=none leaves only loopback in the target's namespace, so it
@@ -178,13 +199,20 @@ case "${command_name}" in
             --pids-limit=256 \
             --memory=512m \
             --env="SIPPYCUP_PRACTICE_ADDRESS=${address}" \
+            --env="SIPPYCUP_PRACTICE_PROXY_ADDRESS=${proxy_address}" \
             --volume="${state_dir}:/practice:z" \
             "${image}" >/dev/null
+        # The proxy is ready when its UDP and TLS sockets are bound (the
+        # kernel's socket tables use little-endian hexadecimal addresses).
+        IFS=. read -r o1 o2 o3 o4 <<<"${proxy_address}"
+        proxy_hex="$(printf '%02X%02X%02X%02X' "${o4}" "${o3}" "${o2}" "${o1}")"
         ready=0
         for _ in $(seq 1 60); do
             if "${runtime}" exec "${container}" \
                 asterisk -C /run/sippycup-practice/etc/asterisk.conf \
                 -rx 'core waitfullybooted' >/dev/null 2>&1 \
+                && "${runtime}" exec "${container}" grep -q " ${proxy_hex}:13C4 " /proc/net/udp \
+                && "${runtime}" exec "${container}" grep -q " ${proxy_hex}:13C5 00000000:0000 0A " /proc/net/tcp \
                 && [[ -s "${state_dir}/ca.crt" ]]
             then
                 ready=1
