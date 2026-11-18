@@ -286,6 +286,16 @@ class GatingTests(GuidedCallCase):
         self.assertNotIn("softphone", fakes.events)
         self.assertEqual(fakes.events.count("preflight"), 1)
         self.assertIn("no call placed", value["networkActivity"])
+        # The fixture target is not loopback: no practice hint.
+        self.assertFalse(any("--practice" in note for note in value["notes"]))
+
+    def test_preflight_failure_on_a_loopback_target_points_at_practice(self):
+        _state, verdict, _code, notes = guided._classify_core(
+            cancelled_signal=None, stop_reason=None, preflight_ok=False, softphone=None, oracle=None,
+            media_required=True, network_mode="private", host="127.0.0.3",
+        )
+        self.assertEqual("preflight-failed", verdict)
+        self.assertTrue(any("./bin/sippycup --practice" in note for note in notes), notes)
 
     def test_capture_death_during_preflight_is_a_hard_failure(self):
         fakes = Fakes()

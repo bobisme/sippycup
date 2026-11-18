@@ -558,6 +558,13 @@ def _slug(name: str) -> str:
     return _SLUG.sub("-", name).strip("-.")[:48] or "profile"
 
 
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _network_note(mode: str, host: str) -> str:
     loopback = ipaddress.ip_address(host).is_loopback
     if loopback:
@@ -1044,6 +1051,13 @@ def _classify_core(
     if stop_reason is not None:
         return "failed", stop_reason, EXIT_NOT_PASS, notes
     if preflight_ok is False:
+        if _is_loopback(host):
+            notes.append(
+                f"{host} is a loopback address: the practice target answers only inside its own "
+                "namespace, so run the command as ./bin/sippycup --practice ... (without --practice "
+                "nothing listens there); with --practice, compare the port with "
+                "./bin/sippycup practice-target info."
+            )
         return "failed", "preflight-failed", EXIT_NOT_PASS, notes
     if softphone is None:
         return "failed", "call-not-placed", EXIT_NOT_PASS, notes
