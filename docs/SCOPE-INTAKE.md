@@ -172,6 +172,15 @@ for a destination that should reject, capture settings other than the profile
 defaults, and anything about test classes beyond `options` and `call`. A
 profile represents one target; the manifest carries all of them.
 
+The one exception is the `security_checks` answer. When `test_scope.allowed_classes`
+includes `security-checks`, `scope check` validates `security_checks.approved`
+against the reviewed catalog. It also checks each check's prerequisites
+against the first target, and the summed request bounds against
+`security_checks.max_requests`, `limits.packets`, and `limits.calls`.
+`scope compile` then copies the list into the profile, with the account
+username, the first destination's user, and (for a TLS first target) the
+approved cleartext signaling ports. See `SECURITY-CHECKS.md`.
+
 ### Staleness and hand edits
 
 The profile and manifest reject unknown fields, and the expectations loader

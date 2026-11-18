@@ -74,6 +74,13 @@ _sippycup() {
                     -- "${current}")
             )
             ;;
+        checks)
+            COMPREPLY=(
+                $(compgen -W \
+                    "list explain plan run --only --secret-env --secret-file --run-root --fail-on --continue-after-finding --format --dry-run --help" \
+                    -- "${current}")
+            )
+            ;;
         practice-target)
             COMPREPLY=(
                 $(compgen -W \

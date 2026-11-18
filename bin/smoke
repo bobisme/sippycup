@@ -41,6 +41,7 @@ commands=(
     sippycup-options
     sippycup-assert
     sippycup-call
+    sippycup-checks
     sippycup-chaos
     sippycup-diff
     sippycup-evidence
@@ -98,6 +99,7 @@ import sippycup_resilience
 import sippycup_oracle
 import sippycup_softphone
 import sippycup_workbench.call
+import sippycup_checks.runner
 import sippycup_torture
 import sippycup_tui
 import sippycup_webrtc
@@ -121,6 +123,7 @@ first_party_help=(
     call-integration-selftest
     sippycup-assert
     sippycup-call
+    sippycup-checks
     sippycup-chaos
     sippycup-diff
     sippycup-envelope

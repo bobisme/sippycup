@@ -16,6 +16,7 @@ class Question:
     fields: tuple[str, ...]
     applies: Callable[[dict[str, Any]], bool] = lambda document: True
     answered: Callable[[dict[str, Any]], bool] | None = None
+    details: Callable[[], list[str]] | None = None
 
 
 def _uses_tls(document: dict[str, Any]) -> bool:
@@ -59,6 +60,12 @@ def _destinations_answered(document: dict[str, Any]) -> bool:
         isinstance(item, dict) and all(present(item.get(key)) for key in ("name", "user", "expect"))
         for item in destinations
     )
+
+
+def _security_checks_text() -> list[str]:
+    from sippycup_checks.scope_support import question_text
+
+    return question_text().splitlines()
 
 
 QUESTIONS: tuple[Question, ...] = (
@@ -134,6 +141,9 @@ QUESTIONS: tuple[Question, ...] = (
     Question("evidence", "Evidence",
              "How long may we retain captures and logs, and what are your disclosure expectations for findings (private, coordinated, public after remediation)?",
              ("evidence.retention_days", "evidence.disclosure")),
+    Question("security_checks", "Security checks", _security_checks_text()[0],
+             ("security_checks.approved", "security_checks.max_requests"),
+             details=lambda: _security_checks_text()[1:]),
 )
 
 
@@ -192,6 +202,8 @@ def render_questions(report: Report | None = None) -> str:
             state = question_state(report, question)
             tag = f" [{'x' if state == 'answered' else ' ' if state == 'unanswered' else 'n/a'}] ({state})"
         lines.append(f"{number}. {question.text}{tag}")
+        if question.details is not None:
+            lines.extend(question.details())
         lines.append("")
     if marked:
         lines.append("Legend: [x] answered, [ ] unanswered, [n/a] not applicable. Values are not shown.")

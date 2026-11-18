@@ -30,6 +30,9 @@ The registry makes execution location explicit:
   where rootless capture works, and rewrites `work/...` paths to `/work/...`.
   It rejects `--admin`. `call --dry-run` and `call --help` run from the
   checkout without a container.
+- `checks run` follows the same rules as `call`: a private container, `--admin`
+  rejected, and `--practice` composes. `checks list`, `explain`, and `plan` run
+  from the checkout and are network-free. See `SECURITY-CHECKS.md`.
 - Commands that take `--secret-env NAME` (or `REF=NAME`) receive only that
   variable in the container, forwarded with the runtime's name-only
   `--env NAME` form so the value never appears in a command line.
@@ -55,6 +58,7 @@ Examples:
 ./bin/sippycup --isolated --admin chaos capabilities
 ./bin/sippycup selftest /work/selftest.pcap
 ./bin/sippycup call work/engagement/profile.yaml --dial 1001 --dry-run
+./bin/sippycup checks plan work/engagement/profile.yaml
 ./bin/sippycup webrtc validate examples/webrtc/offline-scenario.json
 ./bin/sippycup webrtc signaling-self-test
 ```

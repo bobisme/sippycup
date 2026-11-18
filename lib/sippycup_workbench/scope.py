@@ -137,6 +137,8 @@ SPEC: dict[str, Any] = {
     "test_scope": {"allowed_classes": None, "exclusions": None},
     "contact": {"name": None, "channel": None, "can_stop_test": None},
     "evidence": {"retention_days": None, "disclosure": None},
+    # Optional owner-approved posture checks (see docs/SECURITY-CHECKS.md).
+    "security_checks": {"approved": None, "max_requests": None},
 }
 
 _SECRET_WORDS = {
@@ -1079,6 +1081,14 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
               f"media networks span more than {MAX_ENDPOINTS} addresses; the oracle allowlist "
               "takes literal addresses only, so expectations are not generated",
               (EXPECTATIONS,), "warning")
+
+    # optional owner-approved security posture checks (absent = none approved)
+    from sippycup_checks.scope_support import validate_scope
+
+    for code, kind, field_name, message, severity in validate_scope(
+        document, targets=targets, destinations=valid_dest, classes=classes, limits=limits
+    ):
+        v.add(code, kind, field_name, message, (PROFILE,), severity)
     return v.findings
 
 

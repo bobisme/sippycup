@@ -158,5 +158,15 @@ practice-gate:
 		PYTHONDONTWRITEBYTECODE=1 \
 		python3 -m unittest tests.test_practice_gate -v
 
+# Live posture checks against the practice target (opt-in, loopback only):
+# runs every runnable check and asserts the expected outcome per check.
+.PHONY: checks-gate checks-test
+checks-test:
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_checks -v
+
+checks-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		PYTHONDONTWRITEBYTECODE=1 python3 tools/checks_gate.py
+
 web-security-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v

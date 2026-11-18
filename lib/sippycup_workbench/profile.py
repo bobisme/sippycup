@@ -26,6 +26,8 @@ _TOP_LEVEL_FIELDS = {
     "limits",
     "capture",
     "features",
+    # Optional: the owner-approved posture checks (see docs/SECURITY-CHECKS.md).
+    "security_checks",
 }
 _SECTION_FIELDS = {
     "target": {
@@ -400,6 +402,18 @@ def rehearse(
         warnings.append("TURN is enabled without ICE; confirm this is intentional")
     if features.get("dtls_srtp") and not features.get("srtp"):
         errors.append("DTLS-SRTP requires features.srtp")
+
+    # Optional security_checks section: default deny, unknown ids refused.
+    security_checks = document.get("security_checks")
+    if security_checks is not None:
+        from sippycup_checks.catalog import validate_section
+
+        errors.extend(validate_section(security_checks, target))
+        if isinstance(security_checks, dict):
+            facts["security_checks"] = {
+                "approved": list(security_checks.get("approved") or []),
+                "max_requests": security_checks.get("max_requests"),
+            }
 
     facts.update(
         {
