@@ -258,5 +258,15 @@ class CockpitTerminalTests(unittest.TestCase):
         self.assertTrue(terminal.restored())
 
 
+class WrapTests(unittest.TestCase):
+    def test_wrap_breaks_between_words_and_cuts_only_long_tokens(self) -> None:
+        sys.path.insert(0, str(ROOT / "lib"))
+        from sippycup_cockpit.tui import _wrap
+
+        lines = _wrap(["generate the target profile, campaign manifest, and oracle expectations"], 30)
+        self.assertEqual(["generate the target profile,", "    campaign manifest, and", "    oracle expectations"], lines)
+        self.assertEqual(["x" * 20, "    " + "x" * 5], _wrap(["x" * 25], 20))
+
+
 if __name__ == "__main__":
     unittest.main()

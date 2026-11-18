@@ -433,8 +433,13 @@ def _wrap(lines: list[str], width: int) -> list[str]:
     for line in lines:
         for part in str(line).split("\n"):
             while len(part) > width:
-                out.append(part[:width])
-                part = "    " + part[width:]
+                # Break at the last space so words and paths stay whole;
+                # only a token longer than half the width is cut.
+                cut = part.rfind(" ", 0, width + 1)
+                if cut <= width // 2:
+                    cut = width
+                out.append(part[:cut].rstrip())
+                part = "    " + part[cut:].lstrip(" ")
             out.append(part)
     return out
 
