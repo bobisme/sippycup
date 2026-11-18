@@ -37,6 +37,9 @@ def _image_line(image: dict[str, Any]) -> str:
     if image.get("present") is False:
         return f"[!!] {image.get('image')} is not built ({image.get('detail', '')})".rstrip(" ()")
     if image.get("stale"):
+        if not image.get("inputsChanged"):
+            return (f"[!!] {image.get('image')} built {image.get('created')} was built from different sources "
+                    "than this checkout; rebuild")
         return (f"[!!] {image.get('image')} built {image.get('created')} is OLDER than the last code change "
                 f"({image.get('inputsChanged')}); rebuild")
     marker = "[ok]" if image.get("present") else "[??]"
