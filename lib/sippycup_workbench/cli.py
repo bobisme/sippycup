@@ -337,6 +337,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="run zero-network environment checks")
     doctor.add_argument("--workdir", default="/work" if Path("/work").is_dir() else "work")
     doctor.add_argument("--format", choices=("human", "json"), default="human")
+    # The in-container half of `./bin/sippycup ready` (loopback capture and a
+    # route lookup; nothing is sent to any target).
+    doctor.add_argument("--ready-probe", action="store_true", help=argparse.SUPPRESS)
+    doctor.add_argument("--route-to", help=argparse.SUPPRESS)
+    doctor.add_argument("--route-port", type=int, default=5060, help=argparse.SUPPRESS)
 
     init = sub.add_parser("init", help="create a safe pending target profile")
     init.add_argument("output")
@@ -473,6 +478,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cleanup_main(arguments[1:])
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "doctor" and args.ready_probe:
+            from .doctor import ready_probe
+
+            print(json.dumps(ready_probe(args.workdir, args.route_to, args.route_port), sort_keys=True))
+            return 0
         if args.command == "doctor":
             value = diagnose(args.workdir)
             _emit(value, args.format)

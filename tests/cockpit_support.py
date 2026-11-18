@@ -137,8 +137,24 @@ def write_scope(root: Path, text: str) -> Path:
     return path
 
 
+def write_go(root: Path, *, now: datetime, verdict: str = "GO", profile_sha256: str | None = None) -> Path:
+    """Record a `ready` result for the engagement's current profile (as `./bin/sippycup ready` does)."""
+    from sippycup_cockpit.ready import READY_VERSION, file_sha256, record
+
+    result = {
+        "apiVersion": READY_VERSION, "generatedAt": iso(now), "verdict": verdict,
+        "engagement": f"work/{root.name}", "sourceAddress": "127.0.0.1",
+        "profileSha256": profile_sha256 or file_sha256(root / "target-profile.yaml"),
+        "blocking": 0 if verdict == "GO" else 1, "warnings": 0, "checks": [],
+    }
+    path = record(result, root)
+    assert path is not None
+    return path
+
+
 def compiled_engagement(repo: Path, *, now: datetime, account: bool = False, name: str = "eng",
-                        checks: bool = False) -> Path:
+                        checks: bool = False, go: bool = True) -> Path:
+    """A compiled engagement; ``go`` also records a GO from `ready` for its profile."""
     from sippycup_workbench.scope_derive import compile_scope
 
     root = make_engagement(repo, name)
@@ -147,6 +163,8 @@ def compiled_engagement(repo: Path, *, now: datetime, account: bool = False, nam
     outcome = compile_scope(root, now=now)
     if outcome.exit_code != 0:
         raise AssertionError(outcome.as_dict())
+    if go:
+        write_go(root, now=now)
     return root
 
 

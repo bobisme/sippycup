@@ -70,6 +70,8 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "one-call",
                 "status",
                 "scope",
+                "ready",
+                "stop",
                 "capture",
                 "preflight",
                 "call",
@@ -346,6 +348,21 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                         )
                         self.assertNotIn("--cap-add=NET_RAW", arguments)
                         self.assertNotIn("--cap-add=NET_BIND_SERVICE", arguments)
+
+    def test_every_container_carries_the_checkout_and_command_labels_for_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            environment = {"SIPPYCUP_RUNTIME": str(runtime)}
+            for argv, command in ((("doctor",), "doctor"), (("--isolated", "--", "true"), "advanced"),
+                                  (("call", "work/x.yaml", "--dial", "1"), "call")):
+                with self.subTest(command=command):
+                    result = run_cli(*argv, env=environment)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    arguments = result.stdout.splitlines()
+                    self.assertIn(f"--label=dev.sippycup.checkout={ROOT.resolve()}", arguments)
+                    self.assertIn(f"--label=dev.sippycup.command={command}", arguments)
+                    self.assertLess(arguments.index(f"--label=dev.sippycup.command={command}"),
+                                    arguments.index(os.environ.get("SIPPYCUP_IMAGE", "localhost/sippycup:latest")))
 
     def test_container_options_reuse_packaged_direct_command(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:

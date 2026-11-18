@@ -50,6 +50,12 @@ _sippycup() {
         doctor)
             COMPREPLY=($(compgen -W "--host --cleanup --apply --kind --min-age --image --format json human" -- "${current}"))
             ;;
+        ready)
+            COMPREPLY=($(compgen -W "--secret-file --secret-env --margin --min-free-mb --image --format json text --no-record --no-container --help" -- "${current}"))
+            ;;
+        stop)
+            COMPREPLY=($(compgen -W "--dry-run --grace --include-practice --engagement --format json text --help" -- "${current}"))
+            ;;
         capture)
             COMPREPLY=(
                 $(compgen -W \

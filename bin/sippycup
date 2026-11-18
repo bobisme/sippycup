@@ -202,6 +202,7 @@ resolve_runtime() {
 run_container() {
     local target="$1"
     shift
+    set_stop_labels
     local runtime runtime_name
     runtime="$(resolve_runtime)"
     runtime_name="$(basename -- "${runtime}")"
@@ -284,6 +285,7 @@ EOF
         "${devices[@]}" \
         "${confinement[@]}" \
         --hostname=sippycup \
+        "${stop_labels[@]}" \
         --env=SIPPYCUP_NETWORK_MODE="${network_mode}" \
         "${secret_environment[@]}" \
         --volume="${mount}" \
@@ -391,6 +393,7 @@ EOF
     if [[ "${runtime_name}" == docker || "${runtime_name}" == nerdctl ]]; then
         identity=(--user="$(id -u):$(id -g)")
     fi
+    set_stop_labels
     local -a live_caps=(--cap-drop=ALL)
     if [[ "${enable_one_call}" == 1 ]]; then
         live_caps+=(--cap-add=NET_RAW)
@@ -415,6 +418,7 @@ EOF
         --pids-limit=64 \
         --tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m \
         --hostname=sippycup-live \
+        "${stop_labels[@]}" \
         --env=SIPPYCUP_MCP_LIVE_INPUT_ROOT=/live-inputs \
         --env=SIPPYCUP_MCP_LIVE_TRUST_ROOT=/trust \
         --env=SIPPYCUP_MCP_LIVE_STATE_ROOT=/state \
@@ -428,6 +432,17 @@ EOF
 }
 
 load_registry
+
+# Every container this launcher starts carries the checkout and the public
+# command, so `./bin/sippycup stop` can find exactly this checkout's senders
+# and nothing else (docs/COCKPIT.md, Emergency stop).
+declare -a stop_labels=()
+set_stop_labels() {
+    stop_labels=(
+        "--label=dev.sippycup.checkout=${project_dir}"
+        "--label=dev.sippycup.command=${command_name:-advanced}"
+    )
+}
 
 isolated=0
 admin=0

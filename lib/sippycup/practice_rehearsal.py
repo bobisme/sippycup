@@ -631,7 +631,8 @@ class Rehearsal:
     def scope(self) -> None:
         self.write_answers(self.shape)
         self.compile_scope()
-        self.cockpit("first-call")
+        # Stage 4 waits for the go/no-go check (`ready`) of this profile.
+        self.cockpit("rehearse")
 
     def write_answers(self, shape: Shape | None, *, checks: tuple[str, ...] = CHECKS) -> None:
         assert self.engagement is not None
@@ -685,6 +686,17 @@ class Rehearsal:
                          f"rehearse does not show the media network for review: {result.stdout.strip()[-400:]}")
             self.fact(f"rehearse shows it for review: {shown[0]}")
         self.command([LAUNCHER, "checks", "plan", f"{self.eng}/target-profile.yaml"])
+        self.go_no_go(self.cockpit("rehearse"))
+        self.cockpit("first-call")
+
+    def go_no_go(self, model: dict[str, Any] | None = None) -> None:
+        """The cockpit's go/no-go action, with the password source the calls will use."""
+        argv = list(find_action(model, "ready")["argv"]) if model is not None else [LAUNCHER, "ready", self.eng]
+        result = self.command([*argv, "--secret-file", PASSWORD_FILE])
+        self.require("VERDICT: GO" in result.stdout, f"ready did not say GO: {result.stdout.strip()[-600:]}")
+        marks = [line.split("]", 1)[0] + "]" for line in result.stdout.splitlines() if line.startswith("[")]
+        self.fact(f"ready: GO ({len(marks)} lines: {marks.count('[GO]')} GO, {marks.count('[WARN]')} WARN, "
+                  f"{marks.count('[INFO]')} INFO); recorded under {self.eng}/readiness/")
 
     def preflight(self) -> None:
         assert self.shape is not None
@@ -928,6 +940,7 @@ class Rehearsal:
     def rehearse_only(self) -> None:
         result = self.command([LAUNCHER, "rehearse", f"{self.eng}/target-profile.yaml"])
         self.require("Ready: yes" in result.stdout, "rehearse did not report Ready: yes")
+        self.go_no_go()
 
     def require_stop_presented(self, model: dict[str, Any]) -> None:
         """The cockpit must call the stopped call a safety stop, not a target failure."""
@@ -1076,7 +1089,7 @@ STAGE_TITLES = (
     "new engagement: journal init, scope init",
     "practice call from the cockpit (stage 2)",
     "scope answers: scope check, scope compile",
-    "rehearse the compiled profile (no traffic)",
+    "rehearse the compiled profile and the go/no-go check (no traffic)",
     "preflight: UDP and verified TLS",
     "guided call (pass) and a DTMF call",
     "campaign plan and run",

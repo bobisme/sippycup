@@ -18,6 +18,15 @@ confirmation panel (typed approval token for LIVE actions). It sends no traffic
 itself. Its `--plain` and `--format json` modes are read-only; see
 [COCKPIT.md](COCKPIT.md).
 
+`./bin/sippycup ready DIR` is the go/no-go check right before the first live
+packet (host-side; one loopback-only capture inside a local container, nothing
+to the target; exit 0 GO, 1 NO-GO). `./bin/sippycup stop` is the emergency
+stop: it ends every container and host process this checkout started (SIGTERM,
+then SIGKILL after `--grace`), proves silence, and never touches evidence or
+other containers (`--dry-run` lists only). Every container `./bin/sippycup`
+starts carries the labels `dev.sippycup.checkout` and `dev.sippycup.command`
+for it. See [COCKPIT.md](COCKPIT.md).
+
 These discovery commands do not resolve a target, start a container, or make a
 network connection. The JSON output follows
 `schemas/commands-v1.schema.json` and always reports `networkActivity: false`.

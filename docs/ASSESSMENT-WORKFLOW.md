@@ -135,6 +135,17 @@ manifest, and oracle expectations from the scope file; review them, then run
 `rehearse` and `campaign plan` on them as usual. If the scope changes, `status`
 reports the derivatives as stale until you compile again.
 
+Right before the first live packet, run the go/no-go check:
+`./bin/sippycup ready work/ENGAGEMENT --secret-file work/ENGAGEMENT/account.password`.
+It sends nothing to the target and gives one GO or NO-GO, with the fixing
+command for each NO-GO: journal and scope state, `rehearse`, the approval
+window against a margin (local time and UTC), the host clock, the image, a
+loopback-only capture in the live commands' container mode, free disk, the
+password source, the TLS trust anchor, and the route to the target. Give
+the owner the source address it prints if they allowlist by address. Record
+the GO with the `journal add` command it prints. The cockpit's LIVE actions
+start only after a GO for the current profile. See `COCKPIT.md`.
+
 ### 4. Baseline
 
 Begin with one OPTIONS transaction and one manual or automated call. Capture
@@ -169,6 +180,15 @@ Stop immediately on an authorization ceiling, capture failure, unexpected
 destination, service instability, privacy concern, or Quad's request. Record
 the reason as a journal decision. Do not delete an interrupted run; its
 evidence manifest truthfully marks missing artifacts.
+
+When the owner says "stop now", run `./bin/sippycup stop` (from any terminal
+on this host). It sends SIGTERM to every Sippycup sender this checkout
+started, so calls end with BYE or CANCEL and unregister and each run records
+`cancelled`; it kills what is still running after the grace period, then
+proves that nothing is left (`Silence: PROVED`, exit 0). It never touches
+evidence, other containers, or the practice target. Record the line it
+prints with `journal add`. `stop --dry-run` shows what it would stop. See
+`COCKPIT.md`.
 
 ### 7. Analyze and validate
 

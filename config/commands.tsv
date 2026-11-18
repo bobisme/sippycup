@@ -13,6 +13,7 @@ rehearse|workbench|rehearse|sippycup-workbench|Preparation|offline|Validate targ
 one-call|workbench|one-call|sippycup-workbench|Preparation|offline|Render a bounded one-call plan without executing it
 status|workbench|status|sippycup-workbench|Preparation|offline|Recommend only safe offline engagement actions
 scope|workbench|scope|sippycup-workbench|Preparation|offline|Record the owner's scope once and compile the profile, campaign, and expectations
+ready|host|sippycup-ready||Preparation|local-network|Go/no-go check right before the first live packet; sends nothing to the target
 capture|host|capture||Execution|network|Capture only explicitly scoped host or network traffic
 preflight|container||sippycup-preflight|Execution|network|Send one bounded SIP OPTIONS preflight
 call|container-private|sippycup-call|sippycup-call|Execution|network|Place one guided baseline call with scoped capture and offline evidence
@@ -21,6 +22,7 @@ matrix|container-private|sippycup-matrix|sippycup-matrix|Execution|network|Plan 
 campaign|direct|campaign|campaign|Execution|network|Plan or execute a safety-gated call campaign
 media|direct|sippycup-media|sippycup-media|Execution|network|Plan analyze or send negotiated RTP media
 media-echo|direct|sippycup-media-echo|sippycup-media-echo|Execution|local-network|Run the bounded RTP echo fixture
+stop|host|sippycup-stop||Execution|local-network|Emergency stop: end every Sippycup sender from this checkout and prove silence
 assert|direct|sippycup-assert|sippycup-assert|Analysis|offline|Evaluate a capture against call-path expectations
 triage|workbench|triage|sippycup-workbench|Analysis|offline|Summarize a capture without disclosing payload values
 report|host|report||Analysis|offline|Generate a read-only report for a work-directory capture
