@@ -612,6 +612,10 @@ EOF
             printf '%s rejects --admin; it never needs NET_ADMIN.\n' "${command_name}" >&2
             exit 2
         fi
+        # checks list|explain|plan read only the catalog and the profile.
+        if [[ "${command_name}" == checks && ( $# == 0 || "${1}" == list || "${1}" == explain || "${1}" == plan ) ]]; then
+            exec "${project_dir}/bin/${host_target}" "$@"
+        fi
         for argument in "$@"; do
             if [[ "${argument}" == --dry-run || "${argument}" == -h || "${argument}" == --help ]]; then
                 exec "${project_dir}/bin/${host_target}" "$@"

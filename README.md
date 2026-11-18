@@ -182,6 +182,21 @@ triage, and assertions, with a new private run directory:
 
 See `docs/GUIDED-CALL.md` for credentials, verdicts, and the emergency stop.
 
+`checks` runs owner-approved, low-volume posture checks (banners, TLS,
+cleartext signaling, unauthenticated REGISTER/INVITE, Digest quality, user
+enumeration, and nonce replay). Each check has a declared request bound, and
+each writes into `findings.json`. Nothing runs unless the profile's
+`security_checks.approved` list names it:
+
+```sh
+./bin/sippycup checks list
+./bin/sippycup checks plan work/voice-assessment/profile.yaml
+./bin/sippycup checks run work/voice-assessment/profile.yaml --secret-env ACCOUNT_PASSWORD
+```
+
+See `docs/SECURITY-CHECKS.md` for the catalog, the approval rules, the
+findings format, and the non-goals.
+
 Create a private, hash-chained engagement journal before testing:
 
 ```sh

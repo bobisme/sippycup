@@ -165,6 +165,19 @@
         "retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650},
         "disclosure": {"enum": ["private", "coordinated", "public-after-remediation", null]}
       }
+    },
+    "security_checks": {
+      "description": "Optional owner-approved posture checks (docs/SECURITY-CHECKS.md); absent approves none.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "approved": {
+          "type": ["array", "null"],
+          "uniqueItems": true,
+          "items": {"enum": ["banner-disclosure", "options-methods", "tls-certificate", "tls-protocols", "cleartext-signaling", "unauthenticated-register", "digest-quality", "unauthenticated-invite", "user-enumeration", "nonce-replay"]}
+        },
+        "max_requests": {"type": ["integer", "null"], "minimum": 1, "maximum": 200}
+      }
     }
   }
 }

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/findings-v1.schema.json",
+  "title": "Sippycup security posture findings v1",
+  "description": "findings.json written by ./bin/sippycup checks run. Evidence quotes only non-secret protocol facts: never credentials, never a full nonce, and no subscriber identifier beyond the reviewed account name.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "target", "generatedAt", "checks", "findings"],
+  "properties": {
+    "apiVersion": {"const": "sippycup.dev/findings/v1"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["address", "port", "transport", "serverName"],
+      "properties": {
+        "address": {"type": "string", "description": "the literal approved address every packet went to"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "transport": {"enum": ["udp", "tcp", "tls"]},
+        "serverName": {"type": ["string", "null"], "description": "reviewed TLS server name (SNI and verification only; never resolved)"}
+      }
+    },
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "requestsSent", "summary"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "status": {"enum": ["passed", "finding", "skipped", "error", "not-approved"]},
+          "requestsSent": {"type": "integer", "minimum": 0},
+          "summary": {"type": "string"}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "ordered by severity, most severe first",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "checkId", "title", "severity", "confidence", "summary", "evidence", "remediation", "references"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*\\.[a-z0-9-]+$"},
+          "checkId": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "title": {"type": "string"},
+          "severity": {"enum": ["info", "low", "medium", "high"]},
+          "confidence": {"enum": ["low", "medium", "high"]},
+          "summary": {"type": "string"},
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "detail"],
+              "properties": {
+                "kind": {"type": "string"},
+                "detail": {"type": "string", "maxLength": 200},
+                "artifact": {"type": "string"}
+              }
+            }
+          },
+          "remediation": {"type": "string"},
+          "references": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

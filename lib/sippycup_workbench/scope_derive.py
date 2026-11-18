@@ -460,6 +460,11 @@ def compile_scope(
         problem: str | None
         if artifact == PROFILE:
             profile = _build_profile(doc, report)
+            from sippycup_checks.scope_support import profile_section
+
+            security_checks = profile_section(doc)
+            if security_checks is not None:
+                profile["security_checks"] = security_checks
             result.profile_status = profile["authorization"]["status"]
             data = _dump(profile)
             problem = _validate_profile(data, profile["authorization"]["status"] == "approved", instant)
