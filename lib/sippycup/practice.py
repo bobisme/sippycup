@@ -42,6 +42,23 @@ DESTINATIONS = {
     "busy": "rejects before answer with 486 Busy Here (alias 486)",
     "decline": "rejects before answer with 603 Decline (alias 603)",
 }
+# Destinations that misbehave on purpose (bn-20l); `practice-target drill`
+# rehearses each one. Shown by `practice-target info` after the four above.
+FAULT_DESTINATIONS = {
+    "noanswer": "rings (180) and never answers; the caller's answer timeout fires",
+    "late": "rings for 12 s, then answers and echoes (--answer-timeout both sides)",
+    "silent": "answers and sends no RTP at all while still receiving",
+    "silence": "answers and sends RTP that is digital silence (packets flow, no audio)",
+    "drop": "answers, echoes for 3 s, then hangs up from the server side (BYE from the peer)",
+    "unavailable": "rejects before answer with 503 Service Unavailable",
+    "forbidden": "rejects before answer with 403 Forbidden",
+    "ratelimit": "rejects before answer with 429 Too Many Requests",
+    "earlymedia": "183 Session Progress with 3 s of early media, then answers and echoes",
+}
+FAULT_ACCOUNTS = {
+    "practice-srtp": "same password; demands SDES-SRTP, so a plain-RTP offer gets 488 (dial any destination)",
+}
+DESTINATIONS.update(FAULT_DESTINATIONS)
 UNAUTHENTICATED_POLICY = (
     "Every INVITE and REGISTER without valid Digest credentials is challenged "
     "with 401 Unauthorized; OPTIONS is answered 200 OK without credentials; "
@@ -286,6 +303,7 @@ def connection_facts(
             name: {"uri": f"sip:{name}@{address}", "behavior": behavior}
             for name, behavior in DESTINATIONS.items()
         },
+        "fault_accounts": dict(FAULT_ACCOUNTS),
         "unauthenticated": UNAUTHENTICATED_POLICY,
         "files": files,
         "container_files": {
@@ -442,6 +460,10 @@ def render_facts_human(facts: dict[str, Any]) -> str:
     ]
     for name, destination in facts["destinations"].items():
         lines.append(f"  {destination['uri']:<26} {destination['behavior']}")
+    lines.append(f"  {'sip:<anything else>@' + facts['address']:<26} 404 Not Found after authentication (notfound)")
+    for name, behavior in facts.get("fault_accounts", {}).items():
+        lines.append(f"  account {name:<18} {behavior}")
+    lines.append("  Rehearse every failure verdict: ./bin/sippycup practice-target drill")
     lines.extend(
         (
             f"Unauthenticated: {facts['unauthenticated']}",

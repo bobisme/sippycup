@@ -26,6 +26,11 @@ Commands:
   info [--format json]
                      Print connection facts (addresses, ports, account user,
                      and file locations; never the password)
+  drill [NAME|all] [--format json] [--list]
+                     Rehearse failure verdicts: place the guided call against
+                     destinations that misbehave on purpose (no answer, late
+                     answer, one-way media, hang-up, 403/429/503, ...) and
+                     compare each verdict with the correct one (about 3 minutes)
   help               Show this help
 
 `up` refuses any address outside 127.0.0.0/8 and 127.0.0.1 itself (the
@@ -264,6 +269,15 @@ case "${command_name}" in
             fail "the practice target is not up; run ./bin/sippycup practice-target up"
         fi
         helper info --project-dir "${project_dir}" --format "${format}"
+        ;;
+    drill)
+        # Guided calls against destinations that misbehave on purpose. The
+        # drill has no address option; it reaches only the practice target
+        # through --practice, which fails closed unless that target is up.
+        validate_container_name
+        PYTHONDONTWRITEBYTECODE=1 \
+            PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+            exec python3 -m sippycup.practice_drill --project-dir "${project_dir}" "$@"
         ;;
     *)
         printf 'Unknown practice-target command: %s\n' "${command_name}" >&2

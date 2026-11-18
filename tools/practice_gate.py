@@ -34,6 +34,10 @@ class GateFailure(AssertionError):
     """A practice-gate check failed."""
 
 
+class _OnlyFaults(Exception):
+    """Control flow: SIPPYCUP_PRACTICE_GATE_ONLY=faults runs just the fault drill checks."""
+
+
 @dataclass
 class Gate:
     project: Path = ROOT
@@ -843,9 +847,18 @@ class Gate:
         self.record("SRTP echo is non-silent",
                     activity["active_fraction"] > 0.2 and activity["peak"] > 2000, activity)
 
+    # -- fault destinations (bn-20l): the drill, wire behavior, and verdicts --
+    def check_faults(self) -> None:
+        import practice_faults
+
+        practice_faults.check_faults(self)
+
     def execute(self) -> dict[str, Any]:
         try:
             self.ensure_target()
+            if os.environ.get("SIPPYCUP_PRACTICE_GATE_ONLY") == "faults":
+                self.check_faults()
+                raise _OnlyFaults
             self.check_profile()
             self.check_sipsak_absent()
             self.check_preflight()
@@ -859,6 +872,9 @@ class Gate:
             self.check_tls_name()
             self.check_tls_campaign()
             self.check_srtp()
+            self.check_faults()
+            ok = True
+        except _OnlyFaults:
             ok = True
         except GateFailure:
             ok = False

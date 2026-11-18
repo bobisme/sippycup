@@ -17,10 +17,10 @@ authorize traffic to a real host.
   and its bundled pjproject 2.17. Debian 13 does not package Asterisk, so
   `Containerfile.practice` builds the pinned upstream release from source and
   checks the SHA-256 of both the Asterisk and the pjproject tarballs, the way
-  the core image builds SIPp and PJSIP. Only 29 modules are compiled: PJSIP
+  the core image builds SIPp and PJSIP. Only 30 modules are compiled: PJSIP
   signaling, registrar and Digest authentication, RTP, SRTP, the `Echo` and
-  `Playback` applications, `pbx_config`, G.711 codecs, and the PCM/WAV
-  formats. The image is about 100 MB and builds in about a minute.
+  `Playback` applications, the `TIMEOUT()` function, `pbx_config`, G.711
+  codecs, and the PCM/WAV formats. The image is about 100 MB and builds in about a minute.
 - **Account:** one throwaway user, `practice`, realm `sippycup-practice`.
   `up` generates a new random password every time and writes it with mode
   0600 to `work/practice/account.password`. The password is never in argv,
@@ -41,7 +41,23 @@ authorize traffic to a real host.
   | `tone` | `601` | Answers, plays the `media/canary-v1` callee-to-caller canary three times, hangs up |
   | `busy` | `486` | Rejects before answer with `486 Busy Here` |
   | `decline` | `603` | Rejects before answer with `603 Decline` |
-  | anything else | | `404 Not Found` after authentication |
+  | anything else (`notfound`) | | `404 Not Found` after authentication; the drill dials `nobody-home` |
+
+  Destinations that misbehave on purpose (rehearsed by
+  `./bin/sippycup practice-target drill`; see "Rehearse failures"):
+
+  | Destination | Behavior | Wire behavior |
+  | --- | --- | --- |
+  | `noanswer` | Rings and never answers | `180 Ringing`, no final response; the caller's answer timeout fires and its CANCEL ends the channel |
+  | `late` | Rings 12 s, then answers and echoes | `180`, then `200 OK` about 12 s after the INVITE |
+  | `silent` | Answers and sends no audio | `200 OK`; the server sends zero RTP packets while it still receives (`Answer()` then `Wait()` writes no frames) |
+  | `silence` | Answers and plays digital silence | `200 OK`; RTP both ways, every server payload byte is `0xFF` (u-law silence) |
+  | `drop` | Answers, echoes for 3 s, hangs up | `200 OK`, then `BYE` from the server (`TIMEOUT(absolute)`) |
+  | `unavailable` | Rejects before answer | `503 Service Unavailable` |
+  | `forbidden` | Rejects before answer | `403 Forbidden` |
+  | `ratelimit` | Rejects before answer | `429 Too Many Requests` (`PJSIPHangup(429)`) |
+  | `earlymedia` | 3 s of early media, then answers and echoes | `183 Session Progress` with SDP and RTP before the `200 OK` |
+  | account `practice-srtp` | Same password; demands SDES-SRTP | `488 Not Acceptable Here` for the guided call's plain-RTP offer; dial any destination as this user |
 
 - **Unauthenticated requests:** every INVITE and REGISTER without valid
   Digest credentials is challenged with `401 Unauthorized`, whether it claims
@@ -258,6 +274,53 @@ Run each step from the repository root. Use two terminals for the capture.
    ./bin/sippycup practice-target down
    ```
 
+## Rehearse failures
+
+On the real engagement things go wrong, and the failure verdicts are only
+useful if you have seen them before. The drill places the guided call
+(`./bin/sippycup --practice call`) against each fault destination with the
+right options and prints, per scenario, what the server did, the verdict
+Sippycup reported, the expected verdict, `PASS` or `MISMATCH`, the run
+directory, and the `./bin/sippycup explain call.VERDICT` text:
+
+```sh
+./bin/sippycup practice-target up
+./bin/sippycup practice-target drill              # all scenarios, about 2 minutes
+./bin/sippycup practice-target drill silent       # one scenario
+./bin/sippycup practice-target drill all --format json
+./bin/sippycup practice-target drill --list       # scenarios and estimates, sends nothing
+```
+
+The scenarios are `echo` (healthy control), `noanswer`, `late` (patient
+caller, `--answer-timeout 20`), `late-impatient` (`--answer-timeout 6`),
+`silent`, `silence`, `drop`, `unavailable`, `forbidden`, `ratelimit`, `busy`,
+`decline`, `notfound`, `earlymedia`, `srtp-required`, `badpassword` (wrong
+password: `registration-failed`), and `closedport` (a copy of the generated
+profile whose port is 5099: `preflight-failed`). An estimate is printed first;
+the drill exits 0 only when every verdict and exit code matches, 1 on a
+mismatch, 2 when it could not start (nothing sent).
+
+The drill cannot be pointed anywhere else: it has no address or profile
+option, reads the generated practice facts, requires the profile to name only
+that IPv4 loopback address under the `LOCAL-PRACTICE-ONLY` approval, and
+reaches the target only through `--practice`, which fails closed unless the
+named container is the running, labelled, network-less practice target. The
+`closedport` and `badpassword` scenarios write a copy of that profile and a
+wrong password file under `work/practice/drills/`; each drill run keeps its
+evidence there.
+
+Not rehearsable here: `possible-nat-one-way-media` (needs a non-loopback
+target behind NAT), `media-outside-scope` (needs a server that advertises an
+unapproved media address), `tls-not-verified` (covered by the gate's TLS
+checks), `capture-*`, `authorization-lapsed`. A codec mismatch (`488` from a
+codec the caller does not offer) cannot be made: PJSUA always offers PCMA,
+G.722, speex, iLBC, GSM, and opus besides PCMU (the driver's `--codec` only
+raises a codec's priority), and the image has only the G.711 codecs, so
+`srtp-required` produces the same `488` verdict from the other common cause.
+`hold` (a server-initiated re-INVITE with `sendonly`) is not possible with the
+dialplan applications in the minimal module set: `StartMusicOnHold` does not
+send a re-INVITE.
+
 ## Regression gate
 
 ```sh
@@ -322,6 +385,14 @@ already up and removes only what it started. With no sudo, it:
 - places an SDES-SRTP echo call and requires `RTP/SAVP` with `a=crypto` in
   the offer and answer and a non-silent recording.
 
+- runs the whole fault drill and proves each scenario twice from the run's own
+  capture: the server's wire behavior (no RTP from the peer for `silent`, every
+  server payload `0xFF` for `silence`, BYE from the peer about 3 s after the
+  answer for `drop`, the final 503/403/429/486/603/404/488, `183` and early RTP
+  before the `200` for `earlymedia`, `180` then `200` about 12 s later for
+  `late`, CANCEL from the caller for `noanswer`) and the verdict with its exit
+  code. `make practice-drill-gate` runs only these checks.
+
 Evidence and a `summary.json` are kept in `work/practice/gate-<UTC>-<PID>/`.
 Under unittest, `tests/test_practice_gate.py` runs only with
 `SIPPYCUP_PRACTICE_GATE=1` and skips when an image is absent; the make target
@@ -341,7 +412,9 @@ sets `SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1` so a missing image fails it.
   resolver could not leave it either; the gate also requires the name not to
   resolve outside PJSUA's pinned namespace.
 - Only IPv4 loopback is supported. IPv6, NAT behavior, DTLS-SRTP, WebRTC,
-  video, DTMF verification, hold, and transfer are not exercised.
+  video, DTMF verification, hold, and transfer are not exercised. Hold and a
+  codec mismatch are not available as fault destinations (see "Rehearse
+  failures").
 - The target answers one realistic shape of SIP edge (Asterisk with
   `force_rport` off). A real service can still differ in codecs, timers,
   authentication, and routing.

@@ -125,6 +125,9 @@ make practice-gate
 ```
 
 See `docs/PRACTICE-TARGET.md` for the step-by-step rehearsal and its limits.
+To learn what failures look like, `./bin/sippycup practice-target drill` places the
+guided call against destinations that misbehave on purpose (no answer, one-way
+media, a hang-up from the server, 403/429/503) and explains each verdict.
 
 Do not casually add `--privileged`.
 

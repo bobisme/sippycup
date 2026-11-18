@@ -168,5 +168,14 @@ checks-gate:
 	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
 		PYTHONDONTWRITEBYTECODE=1 python3 tools/checks_gate.py
 
+# Only the fault-destination drill and its wire/verdict checks (about 2 minutes);
+# `practice-gate` runs the same checks after everything else.
+.PHONY: practice-drill-gate
+practice-drill-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_PRACTICE_GATE=1 SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		SIPPYCUP_PRACTICE_GATE_ONLY=faults PYTHONDONTWRITEBYTECODE=1 \
+		python3 -m unittest tests.test_practice_gate -v
+
 web-security-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v
