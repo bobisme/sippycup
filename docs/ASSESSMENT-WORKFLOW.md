@@ -7,6 +7,10 @@ from becoming the accidental source of truth.
 No command in this document authorizes traffic. Quad's written scope and
 validity window remain mandatory.
 
+For a guided path through these steps, run `./bin/sippycup go`; the cockpit
+derives the stage from the same files and starts the same commands. See
+[COCKPIT.md](COCKPIT.md).
+
 ## Sources of truth
 
 | Record | Purpose | Mutation model |

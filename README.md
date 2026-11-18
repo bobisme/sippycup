@@ -12,6 +12,21 @@ Use it only against the exact staging addresses and credentials covered by
 your test authorization. Keep carrier trunks and unrelated networks out of
 scope.
 
+## Start here
+
+```sh
+make build
+./bin/sippycup go
+```
+
+`./bin/sippycup go` is the operator cockpit. It shows where the engagement
+stands (scope, authorization countdown, target, image, practice target,
+journal, runs), walks the eight stages from an empty engagement to a report,
+and starts the next public command after a confirmation panel. LIVE actions
+need the last four characters of the approval id; the cockpit never bypasses a
+gate. `--plain` prints the dashboard once; `--format json` gives the model.
+See [docs/COCKPIT.md](docs/COCKPIT.md).
+
 ## Build and enter
 
 ```sh

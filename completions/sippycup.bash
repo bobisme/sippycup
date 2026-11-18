@@ -74,6 +74,11 @@ _sippycup() {
                     -- "${current}")
             )
             ;;
+        go)
+            COMPREPLY=(
+                $(compgen -d -W "--plain --line --format --no-runtime --image --help" -- "${current}")
+            )
+            ;;
         *)
             COMPREPLY=($(compgen -W "--help" -- "${current}"))
             ;;
