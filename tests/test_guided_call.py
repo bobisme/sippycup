@@ -818,6 +818,17 @@ class SecretTests(GuidedCallCase):
         secret_file.unlink()
         self.assert_no_secret_in_tree(self.work, SECRET)
 
+    def test_username_without_a_password_source_is_refused_before_any_side_effect(self):
+        # A REGISTER without a password can only fail and costs one credentialed
+        # attempt on the owner's account; refuse it before anything starts.
+        fakes = Fakes()
+        with self.assertRaisesRegex(guided.CallError, "--username needs the account password"):
+            self.run_call(fakes, username="alice")
+        self.assertEqual(fakes.events, [])
+        self.assertEqual(self.run_directories(), [])
+        code, _value = self.run_call(fakes, username="alice", register=False)
+        self.assertEqual(code, 0)
+
     def test_unsafe_password_is_refused_before_any_side_effect(self):
         environ = {"PASS": "has space"}
         fakes = Fakes()

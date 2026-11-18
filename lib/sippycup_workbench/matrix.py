@@ -349,6 +349,11 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
     if not plan["ready"]:
         plan["state"] = "blocked"
         return EXIT_REFUSED, plan
+    if options.username and options.register and not (options.secret_env or options.secret_file):
+        raise MatrixError(
+            "--username needs the account password: add --secret-env NAME or "
+            "--secret-file work/PATH (or --no-register for an account that is not registered)"
+        )
     # Resolve the secret once: the variable leaves this process's
     # environment, and each call receives it only in its private mapping.
     secret: tuple[str, str] | None = None

@@ -1815,6 +1815,13 @@ def _execute(
 
     srtp = srtp_mode(options, document)
     password, scrub_names = resolve_password(options, deps.environ, work_root)
+    if options.username and options.register and password is None:
+        # A REGISTER without a password can only fail, and it costs one
+        # credentialed attempt on the owner's account (lockout counters).
+        raise CallError(
+            "--username needs the account password: add --secret-env NAME or "
+            "--secret-file work/PATH (or --no-register for an account that is not registered)"
+        )
     secrets = [password] if password else []
 
     profile_path = Path(options.profile)

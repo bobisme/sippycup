@@ -412,6 +412,10 @@ class MatrixTests(unittest.TestCase):
         code, value = matrix.run(self.options(**values), deps)
         return code, value, calls, environ
 
+    def test_run_refuses_a_username_without_a_password_source(self):
+        with self.assertRaisesRegex(matrix.MatrixError, "--username needs the account password"):
+            self.fake_run(["pass"] * 6, username="alice")
+
     def test_run_is_sequential_through_the_guided_call_and_writes_matrix_json(self):
         code, value, calls, environ = self.fake_run(["pass"] * 3 + ["pass", "pass", "call-media-not-acceptable"],
                                                      username="alice", secret_env="LAB_PASSWORD")

@@ -11,7 +11,7 @@ from typing import Any
 
 from sippycup_torture.exit_gate import run_exit_gate, validate_review
 
-from .journal import JournalError, verify
+from .journal import JournalError, _load_metadata, verify
 from .profile import ProfileError, load_profile, rehearse
 from .scope import SCOPE_FILE, inspect as inspect_scope
 from .scope_derive import derivative_state
@@ -353,6 +353,12 @@ def assess(
             "warnings": warnings,
             "nextActions": actions,
         }
+    # Name the engagement's recorded owner in the advice, not a fixed name.
+    try:
+        owner = str(_load_metadata(root)["owner"]).strip() or "the service owner"
+    except (JournalError, KeyError):
+        owner = "the service owner"
+    owner_s = f"{owner}'" if owner.endswith("s") else f"{owner}'s"
     scope_facts, scope_blockers, scope_warnings, scope_actions = _scope_facts(root, now)
     facts["scope"] = scope_facts
     blockers.extend(scope_blockers)
@@ -437,10 +443,10 @@ def assess(
                 actions.append(
                     _action(
                         "complete-target-authorization",
-                        "Obtain and record Quad's exact live scope",
+                        f"Obtain and record {owner_s} exact live scope",
                         "; ".join(rehearsal.errors),
                         instruction=(
-                            "Update the ignored target profile only from Quad's "
+                            f"Update the ignored target profile only from {owner_s} "
                             "written approval, then rehearse it again."
                         ),
                     )
@@ -487,14 +493,14 @@ def assess(
         actions.append(
             _action(
                 "create-torture-defaults-review",
-                "Generate Quad's torture-defaults review packet",
+                f"Generate {owner_s} torture-defaults review packet",
                 "Technical safety passed, but the service owner has not reviewed the defaults.",
                 argv=[
                     "./bin/sippycup",
                     "torture",
                     "review-template",
                     "--reviewer",
-                    "Quad",
+                    owner,
                     "--output",
                     str(selected_review),
                 ],
@@ -510,7 +516,7 @@ def assess(
                 actions.append(
                     _action(
                         "complete-torture-defaults-review",
-                        "Have Quad complete the defaults review",
+                        f"Have {owner} complete the defaults review",
                         "; ".join(review["errors"]),
                         argv=[
                             "./bin/sippycup",
@@ -609,7 +615,7 @@ def assess(
                 ),
             )
         )
-    if run_facts["count"] == 0 and facts["profile"]["ready"]:
+    if run_facts["count"] == 0 and call_facts["count"] == 0 and facts["profile"]["ready"]:
         actions.append(
             _action(
                 "prepare-baseline-record",
@@ -617,7 +623,7 @@ def assess(
                 "Start with one reviewed call before adversarial cases.",
                 instruction=(
                     "Do not execute traffic automatically. Review the one-call "
-                    "plan with Quad during the approved window."
+                    f"plan with {owner} during the approved window."
                 ),
             )
         )
