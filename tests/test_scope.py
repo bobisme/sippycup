@@ -862,6 +862,9 @@ class NetworkFreeTests(ScopeTestCase):
 
         with (
             mock.patch.object(socket, "socket", forbidden),
+            # socketpair() creates raw descriptors before it calls socket(), so
+            # leaving it unpatched leaks them when the forbidden socket() raises.
+            mock.patch.object(socket, "socketpair", forbidden),
             mock.patch.object(socket, "getaddrinfo", forbidden),
             mock.patch.object(socket, "gethostbyname", forbidden),
             mock.patch.object(socket, "create_connection", forbidden),

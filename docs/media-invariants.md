@@ -45,6 +45,16 @@ clock units using the configured tolerance.
 RTCP sender SSRC and network direction correlate reports to RTP streams.
 Ambiguous or absent matches remain typed unknowns.
 
+## Media after teardown
+
+`media.timing` fails when RTP is seen before the answer or after teardown.
+The party that sends BYE must stop media at its BYE. The party that receives
+the BYE cannot stop earlier than the BYE reaches it, and its 2xx often comes
+from a signaling element while a separate media element is still being told
+to stop, so its media is late only more than 250 ms after its 2xx to the BYE.
+When the capture has no 2xx for the BYE, or the direction of a stream is
+unknown, the BYE time applies with no grace.
+
 ## Encryption and incomplete data
 
 SRTP/SRTCP receives transport-only analysis: direction, endpoints, timing, and

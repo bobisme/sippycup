@@ -47,6 +47,10 @@ The registry makes execution location explicit:
   `--env NAME` form so the value never appears in a command line.
 - `doctor` inspects the prepared image by default. `doctor --host` is the
   explicit local inventory.
+- `doctor --cleanup` lists Sippycup's own leftovers and `doctor --cleanup --apply`
+  removes them (host-side, dry run by default): stale private `/dev/shm`
+  directories, stopped Sippycup containers, dangling Sippycup image builds. It
+  never touches `work/`. See `./bin/sippycup doctor --cleanup --help`.
 - `mcp` runs in a fixed offline container: no network, no Linux capabilities,
   read-only root and work files, and no `--isolated`/`--admin` broadening.
 - Adding `--isolated` or `--admin` before a packaged first-party command runs

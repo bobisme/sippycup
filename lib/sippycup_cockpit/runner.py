@@ -68,6 +68,10 @@ class RunningProcess:
                 chunk = b""
             if not chunk:
                 self._selector.unregister(self.popen.stdout)
+                # EOF: release the pipe and the epoll descriptor now rather
+                # than leaving them to the garbage collector (ResourceWarning).
+                self.popen.stdout.close()
+                self._selector.close()
                 self._open = False
                 break
             self._buffer += chunk

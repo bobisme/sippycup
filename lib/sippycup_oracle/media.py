@@ -697,6 +697,11 @@ def _result(
     )
 
 
+# How long the party that received a BYE may keep sending media after it
+# answered the BYE with a 2xx before media.timing calls it late.
+TEARDOWN_GRACE = Decimal("0.25")
+
+
 def evaluate_invariants(
     frames: Iterable[FrameRecord],
     dialog: DialogRecord,
@@ -1091,8 +1096,12 @@ def evaluate_invariants(
     # The party that sends BYE must stop media when it sends it. The other
     # party cannot know before the BYE reaches it, so its packets are late
     # only after it answered the BYE with a 2xx (packets already in flight
-    # are not a violation). Without an observed BYE request and 2xx, or for
-    # packets of unknown direction, the earliest teardown applies.
+    # are not a violation). The 2xx often comes from a signaling element
+    # while a separate media element is still being told to stop, and on
+    # loopback a reply packet can trail the 2xx by microseconds, so the BYE
+    # receiver gets TEARDOWN_GRACE after its 2xx. Without an observed BYE
+    # request and 2xx, or for packets of unknown direction, the earliest
+    # teardown applies with no grace, and the BYE sender is never excused.
     receiver_teardown = teardown
     bye_requests = sorted(
         (time, item.event)
@@ -1115,7 +1124,7 @@ def evaluate_invariants(
             and time >= teardown
         ]
         if answered:
-            receiver_teardown = min(answered)
+            receiver_teardown = min(answered) + TEARDOWN_GRACE
 
     def _teardown_for(stream: RtpStream) -> Decimal | None:
         if (

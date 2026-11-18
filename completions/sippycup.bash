@@ -48,7 +48,7 @@ _sippycup() {
             COMPREPLY=($(compgen -W "--format json" -- "${current}"))
             ;;
         doctor)
-            COMPREPLY=($(compgen -W "--host --format json human" -- "${current}"))
+            COMPREPLY=($(compgen -W "--host --cleanup --apply --kind --min-age --image --format json human" -- "${current}"))
             ;;
         capture)
             COMPREPLY=(

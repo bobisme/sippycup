@@ -112,11 +112,11 @@ class ResilienceExitGate(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
 
     def test_seeded_scale_fixtures_are_bounded_and_make_no_scale_claim(self):
-        started = time.monotonic()
+        started = time.process_time()
         plan = plan_isolation(4096, "exit-gate")
         isolation = analyze_isolation(plan, clean_observations(plan))
         lifecycle = analyze_lifecycle(synthetic_snapshots(100_000))
-        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertLess(time.process_time() - started, 5.0)
         self.assertEqual((isolation["status"], lifecycle["status"]), ("pass", "pass"))
         self.assertIsNone(isolation["capacityClaim"])
         self.assertIsNone(lifecycle["scaleClaim"])

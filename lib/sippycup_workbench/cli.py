@@ -452,6 +452,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .summary_cli import main as summary_main
 
         return summary_main(arguments[1:])
+    if arguments[:1] == ["cleanup"]:
+        # `./bin/sippycup doctor --cleanup`: list or remove Sippycup leftovers.
+        from .cleanup import main as cleanup_main
+
+        return cleanup_main(arguments[1:])
     args = build_parser().parse_args(argv)
     try:
         if args.command == "doctor":

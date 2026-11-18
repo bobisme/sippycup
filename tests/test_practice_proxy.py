@@ -258,7 +258,7 @@ class TeardownTimingTests(unittest.TestCase):
         self.assertEqual(timing.verdict, Verdict.PASS)
 
     def test_peer_media_after_accepting_the_bye_is_late(self) -> None:
-        timing = self.timing(rtp_frame(301, "0.65", caller_to_callee=False, sequence=12, timestamp=320))
+        timing = self.timing(rtp_frame(301, "0.90", caller_to_callee=False, sequence=12, timestamp=320))
         self.assertEqual(timing.verdict, Verdict.FAIL)
         self.assertEqual({item.frame_number.value for item in timing.evidence}, {301})
 

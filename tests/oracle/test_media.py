@@ -236,9 +236,16 @@ class MediaInvariantTests(unittest.TestCase):
         )
         result = assertions(evaluate_invariants(in_flight, baseline_dialog()))
         self.assertEqual(result["media.timing"].verdict, Verdict.PASS)
+        # Just after the 2xx (a media element still being told to stop) is
+        # inside the grace; the grace never covers the BYE sender.
+        trailing = good_media() + (
+            rtp_frame(313, "0.84", caller_to_callee=False, sequence=30, timestamp=4800),
+        )
+        result = assertions(evaluate_invariants(trailing, baseline_dialog()))
+        self.assertEqual(result["media.timing"].verdict, Verdict.PASS)
         late = good_media() + (
             rtp_frame(311, "0.55", caller_to_callee=True, sequence=30, timestamp=4800),
-            rtp_frame(312, "0.65", caller_to_callee=False, sequence=31, timestamp=4960),
+            rtp_frame(312, "0.90", caller_to_callee=False, sequence=31, timestamp=4960),
         )
         result = assertions(evaluate_invariants(late, baseline_dialog()))
         self.assertEqual(result["media.timing"].verdict, Verdict.FAIL)
