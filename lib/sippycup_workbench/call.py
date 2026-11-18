@@ -914,6 +914,13 @@ def _refine(
     return state, verdict, code, notes
 
 
+def _payload_counts(types: Any) -> str:
+    """Render {'8': 200} as "200 packets pt 8" for the human summary."""
+    if not isinstance(types, dict) or not types:
+        return "none seen"
+    return ", ".join(f"{count} packets pt {payload}" for payload, count in sorted(types.items(), key=lambda item: str(item[0])))
+
+
 def classify(
     *,
     cancelled_signal: int | None,
@@ -2415,7 +2422,7 @@ def render_human(value: dict[str, Any]) -> str:
                 else ""
             )
             + (
-                f"; RTP pt to peer {types['outbound']}, from peer {types['inbound']}"
+                f"; RTP to peer {_payload_counts(types['outbound'])}, from peer {_payload_counts(types['inbound'])}"
                 if types
                 else ""
             )
