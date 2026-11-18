@@ -75,7 +75,7 @@ stop_conditions:
   packet_loss_percent: null           # 0..100
 
 test_scope:
-  allowed_classes: [options, call]    # compile generates options and call baseline cases
+  allowed_classes: [options, call, security-checks]   # compile generates options and call baseline cases
   exclusions: [none]                  # explicit exclusions; write [none] if there are none
 
 contact:
@@ -86,3 +86,8 @@ contact:
 evidence:
   retention_days: null
   disclosure: null                    # private | coordinated | public-after-remediation
+
+security_checks:                      # optional (question 24): absent approves no posture check
+  approved: [banner-disclosure, options-methods]   # ids from ./bin/sippycup checks list; also add
+                                      # security-checks to test_scope.allowed_classes
+  max_requests: 2                     # the owner's request ceiling; at least the sum of the bounds

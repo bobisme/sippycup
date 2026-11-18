@@ -45,6 +45,11 @@ Calls start at least 1 s apart, and further apart when a profile's
 
 ## Running
 
+`run` prints one line on standard error as each cell starts and ends
+(`Matrix: cell 3/8 udp/PCMA/srtp off: calling ...`, then its verdict), and
+the grid when the run ends. A `--username` without `--secret-env` or
+`--secret-file` (or `--no-register`) is refused before anything starts.
+
 Every cell is one complete guided call with every one of its gates: the
 profile gate and the authorization re-check before the preflight and before
 the call, scoped capture that must be running before anything is sent, one

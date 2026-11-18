@@ -174,7 +174,7 @@
         "approved": {
           "type": ["array", "null"],
           "uniqueItems": true,
-          "items": {"enum": ["banner-disclosure", "options-methods", "tls-certificate", "tls-protocols", "cleartext-signaling", "unauthenticated-register", "digest-quality", "unauthenticated-invite", "user-enumeration", "nonce-replay"]}
+          "items": {"enum": ["banner-disclosure", "options-methods", "tls-certificate", "tls-protocols", "cleartext-signaling", "unauthenticated-register", "digest-quality", "unauthenticated-invite", "user-enumeration", "nonce-replay", "srtp-policy"]}
         },
         "max_requests": {"type": ["integer", "null"], "minimum": 1, "maximum": 200}
       }

@@ -314,6 +314,12 @@ contact:
 evidence:
   retention_days: null
   disclosure: null       # private | coordinated | public-after-remediation
+# Optional (question 24): only when the owner approves posture checks. Uncomment,
+# list the approved ids (./bin/sippycup checks list), and add security-checks to
+# test_scope.allowed_classes. scope check says what max_requests must cover.
+# security_checks:
+#   approved: [banner-disclosure, options-methods]
+#   max_requests: 2
 """
 
 

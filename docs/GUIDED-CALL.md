@@ -69,7 +69,7 @@ already carries the service owner's approval.
 | `--answer-timeout SECONDS` | Hang up (CANCEL) if the call is not answered in time. Default 30, maximum 120. |
 | `--play FILE` | A 16-bit PCM WAV beneath `work/`, such as the agreed canary phrase. Default: a generated two-tone WAV with no recorded voice. |
 | `--codec NAME[,NAME]` | Offer only these codecs (plus telephone-event), first preferred; repeatable or comma-separated, case-insensitive. Names: `PCMU`, `PCMA`, `G722`, `GSM`, `iLBC`, `opus`, `speex/8000`, `speex/16000`, `speex/32000`. Default: the profile's `media.codecs`, else PCMU preferred among all PJSUA codecs. See "Codec control". |
-| `--username USER` | Account for registration and digest challenges. |
+| `--username USER` | Account for registration and digest challenges. Needs `--secret-env` or `--secret-file` (or `--no-register`): a REGISTER without a password can only fail and costs one credentialed attempt, so it is refused (exit 2) before anything starts. |
 | `--realm REALM` | Digest realm. Default `*`. |
 | `--no-register` | Answer INVITE challenges without sending REGISTER. |
 | `--secret-env NAME` | Read the password from environment variable NAME (preferred). |
@@ -109,6 +109,14 @@ image:
   soon as PJSUA has read it and again when the call ends;
 - the password and every `Authorization` and `Proxy-Authorization` header
   value are redacted from the persisted softphone log and console.
+
+To keep the password in a file instead (the cockpit's `file PATH` choice),
+create it without the value reaching shell history (type the password, then
+Enter) and pass `--secret-file work/ENGAGEMENT/account.password`:
+
+```sh
+(umask 077; IFS= read -rs P; printf '%s' "$P" > work/ENGAGEMENT/account.password; unset P)
+```
 
 `--secret-file` reads a regular, non-symlink file beneath `work/` whose mode
 grants no group or other access. A password that contains whitespace, quotes,
@@ -333,7 +341,6 @@ identifiers; use the evidence privacy workflow before sharing anything.
 | `capture-failed`, `capture-died`, `authorization-lapsed`, `internal-error` | The run stopped for safety; see `notes` in the result. | 1 |
 | `cancelled` | Ctrl-C or SIGTERM. | 130 / 143 |
 | `blocked` | Refused before anything started; no run directory. | 2 |
-
 | `tls-not-verified` | TLS verification failed or was not confirmed; PJSUA sent no SIP request on that connection. | 1 |
 | `tls-name-pinning-failed` | The reviewed name could not be pinned to the literal address; PJSUA was not started. | 1 |
 | `srtp-not-negotiated` | `--srtp mandatory`, and the call did not negotiate SDES-SRTP. | 1 |

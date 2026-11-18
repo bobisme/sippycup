@@ -1390,7 +1390,7 @@ def verify_frozen_plan(plan: dict[str, Any], manifest_bytes: bytes) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="campaign")
+    parser = argparse.ArgumentParser(prog="sippycup campaign")
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser(
         "plan", help="validate, resolve, and print a side-effect-free frozen plan"
@@ -1441,22 +1441,30 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser(
         "run", help="execute a reviewed plan with capture and traffic watchdogs"
     )
-    run.add_argument("plan", type=Path)
-    run.add_argument("--manifest", type=Path, required=True)
-    run.add_argument("--run-root", type=Path, default=Path("work/runs"))
-    run.add_argument("--interface", default="any")
-    run.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME")
+    run.add_argument("plan", type=Path, help="the frozen plan from campaign plan --output")
+    run.add_argument("--manifest", type=Path, required=True,
+                        help="the exact manifest the plan was frozen from")
+    run.add_argument("--run-root", type=Path, default=Path("work/runs"),
+                        help="directory for the new run directory (default work/runs; use work/ENGAGEMENT/runs)")
+    run.add_argument("--interface", default="any",
+                        help="capture interface (default any; lo with --practice)")
+    run.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME",
+                        help="read credential REF from environment variable NAME (repeatable)")
     run.add_argument("--secret-fd", action="append", default=[], metavar="REF=FD")
     run.add_argument("--secret-provider")
     run.add_argument("--error-format", choices=("human", "json"), default="human")
     execute = commands.add_parser(
         "execute", help="run a frozen plan with capture, preflight, evidence, and SIP tools"
     )
-    execute.add_argument("plan", type=Path)
-    execute.add_argument("--manifest", type=Path, required=True)
-    execute.add_argument("--run-root", type=Path, default=Path("work/runs"))
-    execute.add_argument("--interface", default="any")
-    execute.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME")
+    execute.add_argument("plan", type=Path, help="the frozen plan from campaign plan --output")
+    execute.add_argument("--manifest", type=Path, required=True,
+                        help="the exact manifest the plan was frozen from")
+    execute.add_argument("--run-root", type=Path, default=Path("work/runs"),
+                        help="directory for the new run directory (default work/runs; use work/ENGAGEMENT/runs)")
+    execute.add_argument("--interface", default="any",
+                        help="capture interface (default any; lo with --practice)")
+    execute.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME",
+                        help="read credential REF from environment variable NAME (repeatable)")
     execute.add_argument("--secret-fd", action="append", default=[], metavar="REF=FD")
     execute.add_argument("--secret-provider")
     execute.add_argument(

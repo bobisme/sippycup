@@ -122,8 +122,9 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
             print(f"Practice target profile: installed ({practice['image']})")
         else:
             print(
-                "Practice target profile: not installed; "
-                "install: ./bin/sippycup practice-target build"
+                "Practice target profile: no build record in work/practice "
+                "(build: ./bin/sippycup practice-target build; "
+                "check: ./bin/sippycup practice-target status)"
             )
         print(f"Practice target: {'up' if practice.get('up') else 'down'} "
               "(live check: ./bin/sippycup practice-target status)")

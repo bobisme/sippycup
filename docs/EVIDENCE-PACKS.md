@@ -12,6 +12,17 @@ artifact before writing anything.
 ./bin/sippycup pack export-ci evidence.tar ci-results
 ```
 
+`--image-digest` names the toolbox image that produced the run. Use the ID of
+the image you ran (the cockpit's `p` run action does the same):
+
+```sh
+ID=$(podman image inspect --format '{{.Id}}' localhost/sippycup:latest)
+./bin/sippycup pack create work/ENGAGEMENT/runs/RUN work/ENGAGEMENT/packs/RUN.tar --image-digest "sha256:$ID"
+```
+
+A pack holds one run directory (a guided call, a campaign run, or a checks
+run); make one per run you hand over.
+
 The archive contains `pack-manifest.json`, the evidence manifest, and exactly
 the artifacts declared by that evidence manifest. The pack manifest uses
 `sippycup.dev/evidence-pack/v1`; its schema is

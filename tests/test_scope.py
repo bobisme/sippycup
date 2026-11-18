@@ -943,6 +943,13 @@ class CommandWiringTests(unittest.TestCase):
 
 
 class SchemaAndExampleTests(ScopeTestCase):
+    def test_schema_security_check_ids_match_the_runnable_catalog(self) -> None:
+        from sippycup_checks.catalog import CHECKS
+
+        schema = json.loads((ROOT / "schemas" / "scope-v1.schema.json").read_text())
+        enum = schema["properties"]["security_checks"]["properties"]["approved"]["items"]["enum"]
+        self.assertEqual(sorted(enum), sorted(item.id for item in CHECKS if item.state == "runnable"))
+
     def test_schema_properties_match_the_validator_spec(self) -> None:
         schema = json.loads((ROOT / "schemas" / "scope-v1.schema.json").read_text())
         self.assertFalse(schema["additionalProperties"])

@@ -35,6 +35,7 @@ approved profile.
 | `test_scope` | `allowed_classes` (the baseline generates `options` and `call`), `exclusions` (write `[none]` for none) |
 | `contact` | `name`, `channel`, `can_stop_test` |
 | `evidence` | `retention_days`, `disclosure` (`private`, `coordinated`, `public-after-remediation`) |
+| `security_checks` | optional: `approved` (check ids from `./bin/sippycup checks list`), `max_requests`; also add `security-checks` to `test_scope.allowed_classes` (see "The one exception" below) |
 
 Per-target TLS server names, dial destinations with expected behavior, the
 account identity and credential reference, and expected media protection and
@@ -220,6 +221,18 @@ ranges in the profile's `approved_addresses` (they go to the media-only
 for a destination that should reject, capture settings other than the profile
 defaults, and anything about test classes beyond `options` and `call`. A
 profile represents one target; the manifest carries all of them.
+
+A guided call or a call matrix over a second target (for example the TLS
+target next to a UDP first target) needs a profile for it, and compile writes
+only the first. Copy the generated profile to a new name in the same
+directory (for example `target-profile-tls.yaml`), change only `name`,
+`target.port`, `target.transport`, and for TLS add `target.tls_server_name`
+and `target.tls_ca_file` exactly as the scope's second target says, then run
+`rehearse` on the copy. Keep the approval, window, addresses, and limits
+unchanged. The copy is not a managed derivative, so compile neither updates
+nor refuses because of it: copy it again after every `scope compile`.
+`summary` checks its runs against the scope like any other run.
+[FIRST-ENGAGEMENT.md](FIRST-ENGAGEMENT.md) shows the copy step.
 
 The one exception is the `security_checks` answer. When `test_scope.allowed_classes`
 includes `security-checks`, `scope check` validates `security_checks.approved`

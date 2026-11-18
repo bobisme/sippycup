@@ -139,8 +139,9 @@ if [[ "${transport}" == tls ]]; then
     if (( tls_unverified != 0 )); then
         printf 'TLS:       UNVERIFIED (--tls-unverified)\n'
     else
+        # Spell the CA the way the operator sees it on the host (work/...).
         printf 'TLS:       verify as %s%s\n' "${verify_name}" \
-            "${tls_ca:+ with extra CA ${tls_ca}}"
+            "${tls_ca:+ with extra CA ${tls_ca/#\/work\//work/}}"
     fi
 fi
 printf '\n'
