@@ -289,6 +289,17 @@ class GatingTests(GuidedCallCase):
         # The fixture target is not loopback: no practice hint.
         self.assertFalse(any("--practice" in note for note in value["notes"]))
 
+    def test_codec_note_is_silent_without_captured_rtp_and_readable_with_it(self):
+        empty = {"negotiated": "PCMU", "negotiatedPayloadType": 0,
+                 "wire": {"mediaUsesNegotiated": False, "rtpPayloadTypes": {"outbound": {}, "inbound": {}}}}
+        self.assertEqual([], guided._codec_notes(empty, "media-outside-scope"))
+        mixed = {"negotiated": "PCMU", "negotiatedPayloadType": 0,
+                 "wire": {"mediaUsesNegotiated": False,
+                          "rtpPayloadTypes": {"outbound": {"0": 10, "8": 2}, "inbound": {}}}}
+        (note,) = guided._codec_notes(mixed, "fail")
+        self.assertIn("(outbound: pt 0 x10, pt 8 x2)", note)
+        self.assertNotIn("{", note)
+
     def test_loopback_preflight_note_points_at_practice(self):
         self.assertIn("./bin/sippycup --practice", guided._loopback_preflight_note("127.0.0.3"))
         self.assertTrue(guided._is_loopback("127.0.0.3"))

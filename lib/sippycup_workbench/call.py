@@ -1631,9 +1631,20 @@ def _codec_notes(codec: dict[str, Any], verdict: str) -> list[str]:
             f"The offer listed codecs beyond the requested {requested}: {', '.join(codec.get('offered') or [])}."
         )
     wire = codec.get("wire") or {}
-    if wire.get("mediaUsesNegotiated") is False:
+    types = wire.get("rtpPayloadTypes")
+    seen = (
+        {direction: counts for direction, counts in types.items() if counts}
+        if isinstance(types, dict) else types
+    )
+    if wire.get("mediaUsesNegotiated") is False and seen:
+        if isinstance(seen, dict):
+            seen = "; ".join(
+                f"{direction}: " + ", ".join(f"pt {pt} x{count}" for pt, count in sorted(counts.items()))
+                if isinstance(counts, dict) else f"{direction}: {counts}"
+                for direction, counts in sorted(seen.items())
+            )
         notes.append(
-            f"RTP on the media port used payload types {wire.get('rtpPayloadTypes')}, not only the "
+            f"RTP on the media port used payload types ({seen}), not only the "
             f"negotiated {codec.get('negotiated')} (payload type {codec.get('negotiatedPayloadType')})."
         )
     return notes
