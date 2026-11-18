@@ -73,3 +73,5 @@
 1794970381941988	sippycup-2u2m2v	itc:AQ		item.assign	bn-2s8	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:Rw1nHoc79HC1rmb9xmahgbcR_wcSwphqAHG3ZrSjYSo
 1794970381954128	sippycup-2u2m2v	itc:AQ		item.move	bn-20l	{"state":"doing"}	blake3:ZFooH7107Zj2UIve6A-PnG53ZTWfePnwQWDueKWj0Go
 1794970381957241	sippycup-2u2m2v	itc:AQ		item.assign	bn-20l	{"action":"assign","agent":"sippycup-2u2m2v"}	blake3:smO_lqOSf1TqjNYLGZG-bO9pliR35dxXUOke7m5eC5c
+1794971288202062	sippycup-2u2m2v	itc:AQ		item.comment	bn-20j	{"body":"Merged to main. Lead verification: 648 host tests; smoke, campaign-selftest, call-selftest, campaign-softphone-selftest exit 0 on the merged tree; on a real practice call the evidence manifest reports no missing files and the lint no longer flags the redacted softphone log; journal init accepts an existing directory. The 'status unknown' registration item moved to bn-19a."}	blake3:jbAQKEtlgRfJ0TiV9IpZ2_kiH121yknbW2x61Mf6WT0
+1794971288218944	sippycup-2u2m2v	itc:AQ		item.move	bn-20j	{"state":"done"}	blake3:6uldji6lpZHQ8vRHiLDzSk0Rqhi-DK-Esgk1gFqmIIw
