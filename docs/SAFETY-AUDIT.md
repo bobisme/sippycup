@@ -21,12 +21,12 @@ which has no route off the host. No external host was contacted.
 | 2 | Critical | The media-scope check read PJSUA's `peer=`, which is where RTP came *from*. A far end whose SDP names an unapproved address (media-level `c=`, `a=rtcp`, or a re-INVITE) received the whole call's RTP and RTCP with no alarm, if it sent no RTP or sent it from an approved address. | Fixed (detect and stop) |
 | 3 | Medium | SIGHUP (closing the terminal) killed `call`, `checks`, `matrix` and campaigns at once: no BYE, no unregistration (REGISTER stays for 300 s), no `result.json`. | Fixed |
 | 4 | Low | `approved_addresses` accepted a YAML integer (`2130706433` is 127.0.0.1), non-canonical spellings, and unspecified, multicast or broadcast addresses. | Fixed |
-| 5 | High | `campaign run` has no approval window and no approval status. A frozen plan runs after `valid_until`, after revocation, and a long campaign can cross the window's end. | Reported |
+| 5 | High | `campaign run` has no approval window and no approval status. A frozen plan runs after `valid_until`, after revocation, and a long campaign can cross the window's end. | Fixed (bn-3vxl) |
 | 6 | Medium | Ceilings are per process and per invocation. Two commands at once (two terminals, or the cockpit and a shell) each get the full ceiling, and `max_calls` is not a budget across repeated `call` runs. | Reported |
 | 7 | Medium | Some senders are not bound to a profile at all: `preflight HOST`, `media send`, `shell` and `--`. They are documented that way. | Reported (procedure) |
 | 8 | Medium | No kernel egress filter. Findings 1 and 2 are now caught within one poll interval, but a few packets still leave before the stop, and a host name in a far-end URI or SDP causes a DNS lookup first. | Reported (design) |
-| 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Reported |
-| 10 | Low | Campaign `authorization.networks` has no size limit (`0.0.0.0/0` is accepted); media networks are capped at 1024 addresses. | Reported |
+| 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Fixed (bn-3vxl) |
+| 10 | Low | Campaign `authorization.networks` has no size limit (`0.0.0.0/0` is accepted); media networks are capped at 1024 addresses. | Fixed (bn-3vxl) |
 | 11 | Low | A profile with unquoted timestamps (which `scope` documents as fine) makes `call` stop with `internal-error` (`datetime is not JSON serializable`) before any packet. Fails closed. | Reported |
 
 ## Fixes
@@ -96,6 +96,66 @@ test process died with exit 129).
 (`str(ip_address(a)) == a`) that are single unicast hosts. A reviewer reads
 exactly the address that is used. Tests: `tests/test_safety_audit.py`.
 
+### 5: campaigns are bound to the approval window
+
+The manifest and the frozen plan now carry the window
+(`authorization.approval`: `id`, `validFrom`, `validUntil`), which `scope
+compile` writes from the scope. The details are in `CAMPAIGN-MANIFEST.md`,
+"Approval window". In short:
+
+- `campaign plan` refuses a window that has already ended (nothing is
+  written) and warns when the planned duration cannot fit.
+- `campaign run` refuses before any secret, directory, capture or packet when
+  it is outside the window or when the preflights and the first step cannot
+  fit. It checks again before every preflight and before every step, with
+  that step's own planned duration. When the window ends between steps, it
+  stops before the next step, records `authorization_lapsed` in
+  `events.jsonl` and `result.json`, and exits 1.
+- A `scope.yaml` beside the manifest is read at each of those checks. A
+  status other than `approved`, or an approval that differs from the plan,
+  refuses the run or stops it before the next step. This is how a revocation
+  reaches a campaign.
+- The manifest lock covers the window: a plan whose window was edited or
+  removed is refused.
+- A manifest with no window and no scope file beside it still runs (the
+  self-tests and older manifests are of that kind), with a `WARNING` on
+  standard error from `plan` and `run`, `approvalWindow.bound: false` in
+  `result.json`, a warning in `ready` and the cockpit, and a limitation in
+  the owner report.
+
+Verified by `tests/test_campaign_window.py` (37 tests with an injected
+clock; no test sleeps for the window) and on the practice bench: a
+four-call softphone campaign against the practice Asterisk on 127.0.0.2,
+planned with a window that ended 27 s later. Calls 1 and 2 completed. Before
+call 3 (15 s budget, 13 s left) the campaign stopped: `Campaign:
+AUTHORIZATION_LAPSED (2 of 4 step(s) completed; exit 1)`. The run's capture
+holds 1050 packets, 531 of them to 127.0.0.2. The last packet to 127.0.0.2
+is the unregistration of call 2 at 21:33:42.146; the stop was recorded at
+21:33:43.177 and the window ended at 21:33:57. No packet in either direction
+follows the stop, and the capture holds 4 INVITE packets (two calls, each
+INVITE sent once and once again with credentials). No step was running at
+the stop, so there was no teardown to observe after it.
+
+### 9: campaign artifacts are private
+
+`campaign run` now works with umask 077, creates a new run root with mode
+0700, and sets every directory of the run to 0700 and every file to 0600 at
+the end. On the practice bench (tcpdump and PJSUA run inside the practice
+namespace), all 24 to 32 paths of each run were 0700 or 0600, `capture.pcap`
+included, and `diagnose`, `ladder`, `evidence`, `summary` and the dress
+rehearsals read the runs as before. An existing `runs/` directory keeps its
+mode: keep the engagement directory 0700 (as `journal init` creates it).
+
+### 10: campaign signaling networks have a breadth rule
+
+`authorization.networks` is refused when a network contains the unspecified
+address (`0.0.0.0/0`, `::/0`, `0.0.0.0/8`, ...), when its IPv4 networks hold
+more than 16,777,216 addresses together (one `/8`), or its IPv6 networks more
+than one `/64`. Both the planner and the runtime validator of the frozen
+plan apply it. The cap is the widest shape the shipped manifests use (the
+isolated self-test authorizes `127.0.0.0/8`), so it stops "any", not a
+careless range; `scope check` still warns above a `/16`.
+
 ## Guardrails verified sound, and how
 
 | Guardrail | How it was checked |
@@ -114,13 +174,15 @@ exactly the address that is used. Tests: `tests/test_safety_audit.py`.
 
 ## Residual risks the operator must manage by procedure
 
-1. **Campaigns have no approval window (finding 5).** Before `campaign run`,
-   check the profile's window by hand (or start from the cockpit, which
-   refuses unless the profile is ready). Do not start a campaign whose
-   planned duration could cross `valid_until`. Delete `plan.json` when an
-   approval is revoked. Recommended fix (owner: campaign code): freeze
-   `authorization.validUntil` and the approval id into the plan and check them
-   before every step.
+1. **A campaign manifest without a window is not bound (finding 5, fixed
+   for generated manifests).** A manifest from `scope compile` carries the
+   window, and `campaign run` enforces it and reads `scope.yaml` beside the
+   manifest for a revocation. A hand-written manifest with no
+   `authorization.approval` and no scope file beside it still runs, with a
+   `WARNING`. For such a plan, check the written window by hand. A
+   revocation reaches a campaign through `scope.yaml` only: set
+   `authorization.status: revoked` there, or press Ctrl-C. It takes effect
+   before the next step, not inside a running step.
 2. **Ceilings are per process (finding 6).** Run one sender at a time, from one
    terminal, and do not repeat `call` beyond what the owner approved:
    `max_calls` limits one matrix or campaign run, not the engagement.
@@ -152,8 +214,10 @@ exactly the address that is used. Tests: `tests/test_safety_audit.py`.
    `conmon`, the container's `tini`, and the Python command, which other
    processes of the same user can read. On a shared host prefer
    `--secret-file`.
-9. **Campaign artifacts are world-readable (finding 9).** Keep the engagement
-   directory mode 0700 (as `journal init` creates it).
+9. **Run roots made before this fix keep their mode (finding 9, fixed).**
+   New campaign runs are 0700/0600. A `runs/` directory that already exists
+   is not changed: keep the engagement directory mode 0700 (as `journal
+   init` creates it).
 10. **A far end that advertises a private address in its SDP now stops the
     call.** An SBC behind NAT often writes its private address (for example
     10.x) in `c=`. PJSUA sends RTP there until it switches to the address RTP
@@ -190,5 +254,6 @@ secrets sampler read `/proc/*/cmdline` and `/proc/*/environ` every 0.1 s during
 the rehearsal.
 
 The unit tests that pin the fixes are `tests/test_scope_watch.py`,
-`tests/test_safety_audit.py`, `tests/test_guided_call.py` (SignalTests) and
-`tests/test_runtime.py` (RuntimeSignalTests).
+`tests/test_safety_audit.py`, `tests/test_guided_call.py` (SignalTests),
+`tests/test_runtime.py` (RuntimeSignalTests) and, for findings 5, 9 and 10,
+`tests/test_campaign_window.py`.

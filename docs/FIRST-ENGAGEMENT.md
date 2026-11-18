@@ -180,6 +180,11 @@ When they are right, the output contains these lines:
     and the next command. Read the plan before you run it.
   - `run` prints `Campaign: SUCCEEDED (3 of 3 step(s) completed; exit 0)`
     and a `Record it:` line.
+- The plan is bound to the approval window from `scope.yaml`. `run` checks
+  the window before every step and stops before a step that could end after
+  it (`Campaign: AUTHORIZATION_LAPSED`, exit 1). After any change to the
+  approval in `scope.yaml`, run `scope compile`, move `plan.json` aside, and
+  plan again.
 - Use `--interface lo` only with `--practice`. Against the owner's target,
   leave out `--interface` (the default is `any`).
 
@@ -290,6 +295,9 @@ Each row is an error or verdict seen in this walk-through:
 | `PREFLIGHT-FAILED` `no_response: timeout`, target on 127.x | `--practice` is missing | Add `--practice` (the call prints this hint). |
 | `Guided call: MEDIA-OUTSIDE-SCOPE` (exit 1) | media address (or network) not in the scope | Stop. Ask the owner to approve the media address. |
 | `Guided call: BLOCKED` / `BLOCK: authorization has expired (valid_until ...)` | window ended | Ask the owner for a new written window, record it, and run `scope compile`. |
+| `campaign: error: refusing to plan: the approval window has ended` / `refusing to run: ...` (exit 2) | window ended, not open yet, too short for the first step, or the approval in `scope.yaml` was revoked or changed | Nothing was sent. Ask the owner for a new written window, record it, run `scope compile`, then `campaign plan` again. |
+| `Campaign: AUTHORIZATION_LAPSED` (exit 1) and `Safety stop on our side` | the window ended (or the approval was revoked) between two steps | The completed steps are valid. Ask the owner for a new window before you send the rest. |
+| `campaign: WARNING: this campaign plan is not bound to an approval window` | the manifest has no `authorization.approval` (hand-written or old) | Generate the manifest with `scope compile` and plan again. |
 | `ERROR scope.window_not_started` / `scope.window_expired` | window is in the future or in the past | Same: wait, or ask for a new window. |
 | `ERROR scope.malformed [targets[0].address]: ... (no hostnames)` | hostname instead of an address | Ask for the literal IP. Ignore the follow-on errors until this one is fixed. |
 | `WARN scope.network_too_broad` / `scope.media_not_enumerable` | media network such as a /8 | Confirm the range with the owner. Prefer the smallest range. |

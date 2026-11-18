@@ -177,7 +177,8 @@ Derived observations and their severity:
 | `tls-not-verified` | low | A TLS run did not verify the server |
 | `media-outside-scope` | low | A call verdict is `media-outside-scope` |
 | `oracle-assertion-failed` | info | The oracle failed on an answered, non-TLS call |
-| `campaign-stopped` | info | A campaign ended in any state but `succeeded` |
+| `campaign-window-ended` | info | A campaign ended `authorization_lapsed`: Sippycup stopped it before a step because the approval window ended, was too short for that step, or the approval was withdrawn (a safety stop, not a target failure) |
+| `campaign-stopped` | info | A campaign ended in any other state but `succeeded` |
 | `capture-incomplete` | low | Capture failed or died during a run |
 
 ## Independent re-check
@@ -195,8 +196,9 @@ from the recorded artifacts, and lists any exception at the top:
 | `ceiling-exceeded` | Recorded packets, bytes, calls, or call time exceed the frozen ceiling |
 | `unapproved-address-in-artifact` | A run artifact's text named an address outside the approved set |
 
-Windows come from the scope file and target profiles (campaign manifests have
-none); a campaign is checked against the windows of the records that approve
+Windows come from the scope file and target profiles. A campaign manifest's
+`authorization.approval` window is what `campaign run` enforced, but it has no
+status, so the report does not use it as a window record; a campaign is checked against the windows of the records that approve
 its addresses. A call or checks run whose recorded `profile.json` equals one
 of the practice approvals that `practice-target up` archived in
 `work/practice/approvals/` (loopback-only, `LOCAL-PRACTICE-ONLY`) is checked

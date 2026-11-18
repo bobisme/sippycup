@@ -35,7 +35,9 @@
     "exitCode": {"type": "integer"},
     "error": {"type": "string", "minLength": 1},
     "signal": {"enum": ["SIGINT", "SIGTERM"]},
-    "reason": {"type": "string", "minLength": 1}
+    "reason": {"type": "string", "minLength": 1},
+    "detail": {"type": "string", "minLength": 1},
+    "notStartedStep": {"type": "integer", "minimum": 1}
   },
   "allOf": [
     {

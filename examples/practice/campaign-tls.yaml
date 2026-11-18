@@ -18,6 +18,12 @@ metadata:
   name: local-practice-tls
 authorization:
   networks: ['@ADDRESS@/32']
+  # The practice approval window of this `up` (the same one the practice
+  # profiles carry): campaign run sends nothing outside it.
+  approval:
+    id: '@APPROVAL_ID@'
+    validFrom: '@VALID_FROM@'
+    validUntil: '@VALID_UNTIL@'
   signalingPorts: [5061]
   mediaPorts: {start: 20000, end: 20019}
   transports: [tls]

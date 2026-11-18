@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import approval as approval_rules
 from . import capture_scope
 
 try:
@@ -910,6 +911,7 @@ def compile_plan(
         {
             "networks",
             "mediaNetworks",
+            "approval",
             "signalingPorts",
             "mediaPorts",
             "transports",
@@ -936,6 +938,18 @@ def compile_plan(
             raise ManifestError(f"documentation-only network {text!r} is a placeholder")
         networks.append(network)
     networks.sort(key=lambda item: (item.version, int(item.network_address), item.prefixlen))
+    # bn-3vxl: no "any" network and a documented total (see sippycup.approval).
+    try:
+        approval_rules.check_network_breadth(networks)
+        # Optional, frozen only when the manifest states it, so manifests
+        # without an approval window keep their plan bytes.
+        approval = (
+            approval_rules.manifest_approval(authorization["approval"])
+            if "approval" in authorization
+            else None
+        )
+    except approval_rules.ApprovalError as error:
+        raise ManifestError(str(error)) from error
     media_networks = (
         _media_networks(authorization["mediaNetworks"])
         if "mediaNetworks" in authorization
@@ -1322,6 +1336,13 @@ def compile_plan(
         [str(item) for item in networks],
         media_networks,
     )
+    if approval is not None:
+        assumptions.append(
+            "traffic is sent only inside the owner's approval window ("
+            + (f"from {approval['validFrom']} " if "validFrom" in approval else "")
+            + f"until {approval['validUntil']}); campaign run checks it before any packet and "
+            "before every step, and starts no step that could end after it"
+        )
     if media_networks is not None:
         assumptions.append(
             "media (never signaling) may also flow to and from authorization.mediaNetworks "
@@ -1339,6 +1360,7 @@ def compile_plan(
         "authorization": {
             "networks": [str(item) for item in networks],
             **({"mediaNetworks": media_networks} if media_networks is not None else {}),
+            **({"approval": approval} if approval is not None else {}),
             "signalingPorts": port_terms,
             "mediaPorts": {"start": media_start, "end": media_end},
             "transports": sorted(transports),
@@ -1635,6 +1657,22 @@ def _print_run_summary(args: argparse.Namespace, result: Any, run_directory: Pat
         f"{len(plan.get('steps', []))} step(s) completed; exit {result.exit_code})",
         f"Run directory: {shown} (result.json, events.jsonl, capture.pcap, report.txt)",
     ]
+    if result.state == approval_rules.LAPSED:
+        detail = ""
+        try:
+            stop = json.loads((Path(run_directory) / "result.json").read_text(encoding="utf-8"))[
+                "approvalWindow"
+            ]["stop"]
+            detail = str(stop["detail"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        lines.append(
+            "Safety stop on our side, not a platform failure: the approval no longer covers "
+            f"the next step, so Sippycup stopped before sending it"
+            + (f" ({detail})" if detail else "")
+            + ". Steps already completed are in the run directory; "
+            f"{len(plan.get('steps', [])) - result.completed_steps} step(s) were not sent."
+        )
     if (Path(run_directory).parent.parent / "engagement.json").is_file():
         lines.append(
             f"Record it: ./bin/sippycup journal add {engagement} --kind action "
@@ -1642,6 +1680,147 @@ def _print_run_summary(args: argparse.Namespace, result: Any, run_directory: Pat
             f"--evidence {relative}/evidence-manifest.json"
         )
     print("\n".join(lines), file=sys.stderr)
+
+
+def _warn(args: argparse.Namespace, code: str, message: str) -> None:
+    """A warning on standard error; never changes the exit status."""
+    if getattr(args, "error_format", "human") == "json":
+        print(
+            json.dumps(
+                {
+                    "apiVersion": "sippycup.dev/warning/v1",
+                    "kind": "CampaignWarning",
+                    "code": code,
+                    "message": message,
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+    else:
+        print(f"campaign: {message}", file=sys.stderr)
+
+
+def plan_window_check(
+    plan: dict[str, Any], now: Any = None
+) -> tuple[str | None, list[tuple[str, str]]]:
+    """``(refusal, warnings)`` for a freshly compiled plan against the clock.
+
+    Refuses a plan whose approval window has already ended. Planning before
+    the window opens is allowed. Warns when the plan has no window, when the
+    window is not open yet, and when the planned duration cannot fit in what
+    remains.
+    """
+    window = approval_rules.plan_window(plan)
+    if not window.bound:
+        return None, [("window_unbound", approval_rules.UNBOUND_WARNING)]
+    instant = now or approval_rules.utc_now()
+    refusal = approval_rules.window_refusal(window, instant)
+    if refusal is not None and refusal.kind == "expired":
+        return (
+            f"{refusal.message}. No plan was written and nothing was sent.",
+            [],
+        )
+    warnings: list[tuple[str, str]] = []
+    planned = plan.get("plannedTotals", {}).get("durationSeconds", 0)
+    assert window.valid_until is not None
+    if refusal is not None:
+        warnings.append(
+            ("window_not_open", f"WARNING: {refusal.message}. campaign run refuses until then.")
+        )
+    else:
+        remaining = int((window.valid_until - instant).total_seconds())
+        if planned >= remaining:
+            warnings.append(
+                (
+                    "window_too_short",
+                    f"WARNING: the planned duration ({planned} s) cannot fit in what remains of "
+                    f"the approval window ({remaining} s, valid until "
+                    f"{approval_rules.stamp(window.valid_until)}). campaign run will stop before "
+                    "the first step that could end after the window; ask the owner to extend "
+                    "the window or plan fewer steps.",
+                )
+            )
+    return None, warnings
+
+
+def _run_command(args: argparse.Namespace) -> int:
+    from sippycup.integration import AuthorizationLapsed, execute_campaign, resolve_secrets
+    from sippycup.runtime import RuntimeError as CampaignRuntimeError
+    from sippycup.runtime import load_plan
+
+    try:
+        plan = load_plan(args.plan)
+        manifest_bytes = args.manifest.read_bytes()
+        verify_frozen_plan(plan, manifest_bytes)
+        env_names = _parse_assignments(args.secret_env, "--secret-env")
+        raw_fds = _parse_assignments(args.secret_fd, "--secret-fd")
+        try:
+            fds = {reference: int(value) for reference, value in raw_fds.items()}
+        except ValueError as error:
+            raise ManifestError("--secret-fd values must be integers") from error
+        # The approval window is checked before any secret is read; the
+        # executor checks it again before it creates anything.
+        gate = approval_rules.WindowGate(plan, manifest_path=args.manifest)
+        refusal = gate.refusal()
+        if refusal is not None:
+            raise AuthorizationLapsed(refusal.message)
+        if not gate.window.bound:
+            _warn(args, "window_unbound", approval_rules.UNBOUND_WARNING)
+        else:
+            planned = plan["plannedTotals"]["durationSeconds"]
+            fits = approval_rules.window_refusal(gate.window, gate.clock(), planned, "the whole plan")
+            if fits is not None:
+                _warn(
+                    args,
+                    "window_too_short",
+                    f"WARNING: {fits.message}. The campaign will stop before the first step "
+                    "that could end after the window.",
+                )
+        references = sorted(
+            {
+                step["credentialRef"]
+                for step in plan["steps"]
+                if step.get("credentialRef") is not None
+            }
+        )
+        secrets = resolve_secrets(
+            references,
+            env_names=env_names,
+            fds=fds,
+            provider=args.secret_provider,
+        )
+        result, run_directory = execute_campaign(
+            plan,
+            manifest_bytes=manifest_bytes,
+            run_root=args.run_root,
+            interface=args.interface,
+            secret_values=secrets,
+            secret_env_names=list(env_names.values()),
+            manifest_path=args.manifest,
+        )
+    except AuthorizationLapsed as error:
+        _emit_error(
+            args,
+            approval_rules.LAPSED,
+            f"refusing to run: {error}. Nothing was sent and no run directory was created.",
+        )
+        return 2
+    except (ManifestError, CampaignRuntimeError, OSError) as error:
+        _emit_error(args, "invalid_plan_or_runtime", str(error))
+        return 2
+    print(operator_path(run_directory))
+    _print_run_summary(args, result, run_directory, plan)
+    if result.exit_code:
+        _emit_error(
+            args,
+            result.state,
+            f"campaign ended in state {result.state!r}",
+            exitCode=result.exit_code,
+            completedSteps=result.completed_steps,
+            runDirectory=str(run_directory),
+        )
+    return result.exit_code
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1688,108 +1867,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(args.report_output)
         return 0
-    if args.command == "run":
-        from sippycup.integration import execute_campaign, resolve_secrets
-        from sippycup.runtime import RuntimeError as CampaignRuntimeError
-        from sippycup.runtime import load_plan
-
-        try:
-            plan = load_plan(args.plan)
-            manifest_bytes = args.manifest.read_bytes()
-            verify_frozen_plan(plan, manifest_bytes)
-            env_names = _parse_assignments(args.secret_env, "--secret-env")
-            raw_fds = _parse_assignments(args.secret_fd, "--secret-fd")
-            try:
-                fds = {reference: int(value) for reference, value in raw_fds.items()}
-            except ValueError as error:
-                raise ManifestError("--secret-fd values must be integers") from error
-            references = sorted(
-                {
-                    step["credentialRef"]
-                    for step in plan["steps"]
-                    if step.get("credentialRef") is not None
-                }
-            )
-            secrets = resolve_secrets(
-                references,
-                env_names=env_names,
-                fds=fds,
-                provider=args.secret_provider,
-            )
-            result, run_directory = execute_campaign(
-                plan,
-                manifest_bytes=manifest_bytes,
-                run_root=args.run_root,
-                interface=args.interface,
-                secret_values=secrets,
-                secret_env_names=list(env_names.values()),
-            )
-        except (ManifestError, CampaignRuntimeError, OSError) as error:
-            _emit_error(args, "invalid_plan_or_runtime", str(error))
-            return 2
-        print(operator_path(run_directory))
-        _print_run_summary(args, result, run_directory, plan)
-        if result.exit_code:
-            _emit_error(
-                args,
-                result.state,
-                f"campaign ended in state {result.state!r}",
-                exitCode=result.exit_code,
-                completedSteps=result.completed_steps,
-                runDirectory=str(run_directory),
-            )
-        return result.exit_code
-    if args.command == "execute":
-        from sippycup.integration import execute_campaign, resolve_secrets
-        from sippycup.runtime import RuntimeError as CampaignRuntimeError
-        from sippycup.runtime import load_plan
-
-        try:
-            plan = load_plan(args.plan)
-            manifest_bytes = args.manifest.read_bytes()
-            verify_frozen_plan(plan, manifest_bytes)
-            env_names = _parse_assignments(args.secret_env, "--secret-env")
-            raw_fds = _parse_assignments(args.secret_fd, "--secret-fd")
-            try:
-                fds = {reference: int(value) for reference, value in raw_fds.items()}
-            except ValueError as error:
-                raise ManifestError("--secret-fd values must be integers") from error
-            references = sorted(
-                {
-                    step["credentialRef"]
-                    for step in plan["steps"]
-                    if step.get("credentialRef") is not None
-                }
-            )
-            secrets = resolve_secrets(
-                references,
-                env_names=env_names,
-                fds=fds,
-                provider=args.secret_provider,
-            )
-            result, run_directory = execute_campaign(
-                plan,
-                manifest_bytes=manifest_bytes,
-                run_root=args.run_root,
-                interface=args.interface,
-                secret_values=secrets,
-                secret_env_names=list(env_names.values()),
-            )
-        except (ManifestError, CampaignRuntimeError, OSError) as error:
-            _emit_error(args, "invalid_plan_or_runtime", str(error))
-            return 2
-        print(operator_path(run_directory))
-        _print_run_summary(args, result, run_directory, plan)
-        if result.exit_code:
-            _emit_error(
-                args,
-                result.state,
-                f"campaign ended in state {result.state!r}",
-                exitCode=result.exit_code,
-                completedSteps=result.completed_steps,
-                runDirectory=str(run_directory),
-            )
-        return result.exit_code
+    if args.command in {"run", "execute"}:
+        return _run_command(args)
     try:
         manifest, digest = load_manifest(args.manifest)
         pinned = _parse_overrides(args.resolve)
@@ -1817,6 +1896,12 @@ def main(argv: list[str] | None = None) -> int:
     except (ManifestError, OSError) as error:
         _emit_error(args, "invalid_manifest", str(error))
         return 2
+    refused, warnings = plan_window_check(plan)
+    if refused is not None:
+        _emit_error(args, approval_rules.LAPSED, f"refusing to plan: {refused}")
+        return 2
+    for code, message in warnings:
+        _warn(args, code, message)
     if args.output is not None:
         try:
             _write_plan_atomic(args.output, plan)

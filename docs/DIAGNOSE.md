@@ -141,6 +141,10 @@ engagement's own profiles by name, host, port, and transport first.
   `softphone.log`, and draws the run's capture. A failed preflight, a timed-out
   or interrupted run, and a step that failed without a structured result are
   each named for what they are.
+  A run that ended `authorization_lapsed` is a safety stop on our side (the
+  approval window ended, was too short for the next step, or the approval
+  was revoked): the page says how many steps completed and were not sent,
+  and the one next step is to ask the owner for a new written window.
 - **Checks.** Counts findings by severity and checks by status. Findings point at
   their side (they describe the target) and are marked as candidates to
   confirm; checks that errored with nothing answering are not findings, and the

@@ -12,6 +12,9 @@ The normative structural schema is
 The planner additionally enforces relationships JSON Schema cannot express:
 
 - Every resolved address must be contained by an approved CIDR.
+- `authorization.networks` cannot be "any": see "Signaling breadth rule".
+- An optional `authorization.approval` binds the plan and every run to the
+  owner's approval window: see "Approval window".
 - Target transports, signaling ports, and credential references must be
   authorized.
 - Case targets must exist, case identifiers must be unique, and planned
@@ -75,6 +78,106 @@ addresses"). `signalingPorts`, `mediaPorts`, `transports`, and
 `credentialRefs` constrain how those destinations may be used. Credential
 references are opaque names; never put passwords, tokens, or private keys in
 a manifest.
+
+### Signaling breadth rule
+
+`authorization.networks` is refused when:
+
+- a network contains the unspecified address (`0.0.0.0/0`, `0.0.0.0/8`,
+  `::/0`, `::/64`, ...), or
+- the IPv4 networks together hold more than 16,777,216 addresses (one `/8`),
+  or the IPv6 networks together hold more than one `/64`.
+
+The message names the network or the total and says `name the service's own
+addresses or ranges`. The numbers are the widest shapes the shipped manifests
+use (the isolated self-test authorizes loopback `127.0.0.0/8`; the Ferivox
+example one lab `/24` and one IPv6 `/64`). They stop a copied "any", not a
+careless range: `scope check` still warns about a signaling network wider
+than an IPv4 `/16` or an IPv6 `/48`, and media-only networks keep their
+tighter rule of 1024 addresses. `runtime.py` applies the same rule again to
+the frozen plan, so a plan edited to `0.0.0.0/0` is refused before anything
+runs.
+
+### Approval window
+
+```yaml
+authorization:
+  approval:
+    id: CHG-1234                          # optional: the owner's approval id
+    validFrom: "2026-11-20T08:00:00Z"     # optional
+    validUntil: "2026-11-20T12:00:00Z"    # required when approval is present
+```
+
+Timestamps are RFC 3339 with a timezone (`Z` or an offset). `scope compile`
+writes this block from the scope's `authorization` answers. The plan freezes
+it as `plan.authorization.approval` in UTC with whole seconds (a fraction
+rounds to the narrower window), and the manifest lock covers it: a plan whose
+window was edited or removed fails `campaign run`.
+
+What each command does with it:
+
+| When | Behavior |
+|---|---|
+| `campaign plan`, window already ended | Refuses with exit 2: `refusing to plan: the approval window has ended (valid until ...)`. No plan is written, on disk or on standard output. |
+| `campaign plan`, window not open yet | Plans, and warns that `campaign run` refuses until it opens. |
+| `campaign plan`, planned duration longer than what remains | Plans, and warns: `WARNING: the planned duration (60 s) cannot fit in what remains of the approval window (39 s, ...)`. |
+| `campaign run`, outside the window, or too little left for the preflights plus the first step | Refuses with exit 2 before any secret is read: `refusing to run: ... Nothing was sent and no run directory was created.` |
+| `campaign run`, before every preflight and before EVERY step | Checks the window again with that step's `durationSecondsPerRun`. A step is not started unless it would end before `validUntil` (the end is exclusive, as for the guided call). |
+| The window ends between steps | The campaign stops before the next step. Steps already completed stay valid. `events.jsonl` ends with `campaign.failed` carrying `reason: authorization_lapsed`, `detail`, and `notStartedStep`; `result.json` has `state: authorization_lapsed`, `exitCode: 1`, and `approvalWindow.stop` (`kind`, `detail`, `before`, `step`, `at`). The command exits 1. |
+| The clock passes `validUntil` while a step runs | Cannot happen through admission. If the clock is changed, the running step is stopped like any other emergency stop (BYE and unregistration), with the same state. |
+
+`result.json` always records what the run was held to:
+
+```json
+"approvalWindow": {"bound": true, "source": "plan", "approvalId": "CHG-1234",
+                   "validFrom": "2026-11-20T08:00:00Z", "validUntil": "2026-11-20T12:00:00Z"}
+```
+
+**A scope file beside the manifest.** When the manifest's directory holds a
+`scope.yaml` (an engagement directory), `campaign run` reads its
+`authorization` section before the run and again before every preflight and
+step:
+
+- a `status` other than `approved` (for example `revoked`) refuses or stops
+  the campaign: `the scope file beside the manifest (scope.yaml) says the
+  authorization is revoked, not approved`;
+- an approval id or window that differs from the one frozen in the plan
+  refuses or stops it: run `scope compile`, then `campaign plan` again, and
+  review the new plan;
+- a scope file that cannot be read, or that is a symlink, refuses (fail
+  closed);
+- a plan without a window is held to the scope file's window
+  (`"source": "scope-file"`).
+
+So to withdraw an approval during an engagement, set `authorization.status:
+revoked` in `scope.yaml`: no new campaign starts, and a running campaign
+stops before its next step.
+
+**A manifest without a window** (hand-written, or generated before this
+field existed) and with no scope file beside it still plans and runs. It is
+not bound to any window. `campaign plan` and `campaign run` then print on
+standard error:
+
+```text
+campaign: WARNING: this campaign plan is not bound to an approval window. Nothing stops it
+after the owner's approval ends or is revoked: check the written window yourself before and
+during the run. To bind it, add authorization.approval (validUntil) to the manifest, or
+generate the manifest with scope compile, and plan again.
+```
+
+`result.json` records `"approvalWindow": {"bound": false, ...}`, `ready`
+warns (`the frozen campaign plan is NOT bound to an approval window`), the
+cockpit's confirmation screen shows the same warning, and the owner report
+lists the run under its limitations (`campaign-window-unbound`). The plan
+bytes of such a manifest are exactly what they were before the field existed
+(golden digests in `tests/test_softphone_runner.py`). The practice manifests
+that `practice-target up` renders carry the practice approval's window.
+
+`diagnose` on a lapsed run says `safety stop`, attributes it to our side with
+high confidence, and gives one next step: ask the owner for a new written
+window. The cockpit marks the run `[stop]`, and the owner report lists it as
+the observation `campaign-window-ended` (a safety stop, not a target
+failure). The window uses the wall clock: keep NTP on.
 
 ### Media on other addresses
 
@@ -708,8 +811,10 @@ numbers define ordering; timestamps are informational. Runner stdout and
 stderr are recorded as `step.output` events up to `--output-limit` bytes
 (256 KiB by default), after which output is drained and discarded with a
 single truncation event. This bounds both in-memory buffering and persisted
-untrusted output. Exit statuses are 0 for success, 1 for child/start failure,
-124 for a deadline, 130 for SIGINT, 143 for SIGTERM, and 2 for invalid input.
+untrusted output. Exit statuses are 0 for success, 1 for child/start failure
+or an approval-window stop (`authorization_lapsed`), 124 for a deadline, 130
+for SIGINT, 143 for SIGTERM, and 2 for invalid input or a run refused because
+it is outside the approval window.
 
 Before starting a child, the runtime independently revalidates the complete
 frozen plan: exact keys and lowercase enums, unique arrays, authorization
@@ -755,7 +860,10 @@ Isolated traffic leaves through the runtime's NAT. Signaling and the bounded
 preflight use symmetric response routing, but media returns only if the
 target sends RTP to the observed source address.
 
-It creates a collision-safe UTC run directory with mode 0700, starts `tcpdump`
+It creates a collision-safe UTC run directory with mode 0700 (and the run
+root with mode 0700 when it creates it), writes every file in it with mode
+0600 (`capture.pcap` and the runners' files included; the process runs with
+umask 077 and tightens the tree again at the end), starts `tcpdump`
 and waits for its output file before any packet is sent, sends one bounded SIP
 OPTIONS preflight to every used frozen destination, and only then dispatches
 steps: `call` steps to SIPp, `options` steps to the in-tree OPTIONS client. A

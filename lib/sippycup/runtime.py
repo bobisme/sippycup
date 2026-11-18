@@ -130,6 +130,7 @@ class CampaignSupervisor:
         external_stop: Callable[[], str | None] | None = None,
         runner_for: Callable[[dict[str, Any]], Sequence[str]] | None = None,
         output_limit_for: Callable[[dict[str, Any]], int] | None = None,
+        step_gate: Callable[[dict[str, Any]], tuple[str, str] | None] | None = None,
     ) -> None:
         if not runner:
             raise RuntimeError("runner command must not be empty")
@@ -156,6 +157,10 @@ class CampaignSupervisor:
         # the integration layer; the command line never supplies it.
         self.runner_for = runner_for or (lambda _step: self.runner)
         self.output_limit_for = output_limit_for or (lambda _step: self.output_limit)
+        # Admission control asked immediately before every step starts: a
+        # ``(reason, detail)`` answer ends the campaign before that step sends
+        # anything (the approval window, see sippycup.approval).
+        self.step_gate = step_gate or (lambda _step: None)
         self._last_call_start: float | None = None
         self._external_reason: str | None = None
         self._cancel_signal: int | None = None
@@ -236,6 +241,9 @@ class CampaignSupervisor:
         )
         try:
             for step in steps:
+                refused = self.step_gate(step)
+                if refused is not None:
+                    return self._not_admitted(step, refused, completed)
                 external_reason = self.external_stop()
                 if external_reason is not None:
                     self.events.emit(
@@ -276,6 +284,11 @@ class CampaignSupervisor:
                             return RunResult(EXIT_TIMEOUT, "timed_out", completed)
                         time.sleep(0.01)
                     self._last_call_start = self.monotonic()
+                # Asked again immediately before the step starts: the call
+                # rate wait above takes time.
+                refused = self.step_gate(step)
+                if refused is not None:
+                    return self._not_admitted(step, refused, completed)
                 outcome = self._run_step(step, global_deadline)
                 if outcome == "success":
                     completed += 1
@@ -462,6 +475,21 @@ class CampaignSupervisor:
             return "failed"
         self.events.emit("step.succeeded", "succeeded", step=step_number)
         return "success"
+
+    def _not_admitted(
+        self, step: dict[str, Any], refused: tuple[str, str], completed: int
+    ) -> RunResult:
+        """End the campaign before ``step`` starts; nothing of it was sent."""
+        reason, detail = refused
+        self.events.emit(
+            "campaign.failed",
+            "failed",
+            completedSteps=completed,
+            reason=reason,
+            detail=detail,
+            notStartedStep=step["index"],
+        )
+        return RunResult(EXIT_FAILED, reason, completed)
 
     def _cancelled(self, completed: int) -> RunResult:
         assert self._cancel_signal is not None
@@ -840,7 +868,9 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         }
         # Optional, media only: present only when the manifest states it, so
         # plans frozen without it validate exactly as before.
-        | ({"mediaNetworks"} if "mediaNetworks" in authorization else set()),
+        | ({"mediaNetworks"} if "mediaNetworks" in authorization else set())
+        # Optional approval window, frozen only when the manifest states it.
+        | ({"approval"} if "approval" in authorization else set()),
     )
     raw_networks = _unique_array(authorization["networks"], "authorization.networks")
     networks = []
@@ -852,6 +882,14 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         except ValueError as error:
             raise RuntimeError(f"invalid authorized network {value!r}") from error
         networks.append(network)
+    from sippycup import approval as approval_rules
+
+    try:
+        approval_rules.check_network_breadth(networks)
+        if "approval" in authorization:
+            approval_rules.frozen_approval(authorization["approval"])
+    except approval_rules.ApprovalError as error:
+        raise RuntimeError(f"plan authorization is invalid: {error}") from error
     media_networks = (
         _validate_media_networks(authorization["mediaNetworks"])
         if "mediaNetworks" in authorization
@@ -1131,6 +1169,7 @@ def run_plan(
     external_stop: Callable[[], str | None] | None = None,
     runner_for: Callable[[dict[str, Any]], Sequence[str]] | None = None,
     output_limit_for: Callable[[dict[str, Any]], int] | None = None,
+    step_gate: Callable[[dict[str, Any]], tuple[str, str] | None] | None = None,
 ) -> RunResult:
     campaign = _validate_plan(plan)["metadata"]["name"]
     with EventWriter(event_path, campaign) as events:
@@ -1146,6 +1185,7 @@ def run_plan(
             external_stop=external_stop,
             runner_for=runner_for,
             output_limit_for=output_limit_for,
+            step_gate=step_gate,
         )
         previous: dict[int, Any] = {}
 

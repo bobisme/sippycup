@@ -370,6 +370,21 @@ def _campaign_summary(run: Path, document: dict[str, Any], summary: dict[str, An
         notes[0] if notes else
         (f"last event {last.get('event')}" if isinstance(last, dict) and last.get("event") else None)
     )
+    window = document.get("approvalWindow") if isinstance(document.get("approvalWindow"), dict) else {}
+    if window.get("bound") is True:
+        facts.append(("Approval window", f"held to the window ending {window.get('validUntil')}"))
+    elif window.get("bound") is False:
+        facts.append(("Approval window", "NOT bound: the plan carries no approval window"))
+    if state == "authorization_lapsed":
+        # Sippycup stopped the campaign to stay inside the approval; the
+        # target did nothing wrong.
+        stop = window.get("stop") if isinstance(window.get("stop"), dict) else {}
+        summary["safetyStop"] = True
+        summary["reason"] = (
+            "safety stop, not a target failure: the approval no longer covered the next step"
+            + (f" ({stop.get('detail')})" if isinstance(stop.get("detail"), str) else "")
+            + "; ask the owner for a new window"
+        )
 
 
 def _findings_summary(document: dict[str, Any], summary: dict[str, Any], run: Path | None = None) -> None:

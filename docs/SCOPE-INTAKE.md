@@ -131,6 +131,10 @@ Generates, atomically and mode 0600, into the engagement directory:
 - `campaign.yaml`, a baseline manifest: one `options` and one `call` case per
   approved target (a `call` case only for a target that has a destination),
   with the campaign ceilings and stop conditions taken directly from the scope.
+  The scope's `approval_id`, `valid_from`, and `valid_until` become the
+  manifest's `authorization.approval` (`id`, `validFrom`, `validUntil`, in
+  UTC), so `campaign plan` and `campaign run` are bound to the same window as
+  the profile (see `CAMPAIGN-MANIFEST.md`, "Approval window").
   Per-case budgets are conservative upper bounds: OPTIONS gets 4 packets, 4096
   bytes, 3 seconds; a call gets the smaller of 20 seconds and what the ceilings
   leave, about 100 packets per second per direction plus signaling at 256 bytes
@@ -161,8 +165,8 @@ If part of the scope is unanswered, only the artifacts that depend on it are
 skipped, and the output says which and why; the profile is written as
 `pending` whenever its own structural inputs exist. The campaign manifest also
 depends on the authorization answers because a manifest carries no approval of
-its own. Nothing is invented: no placeholder host, approval, or limit is ever
-substituted. Exit 0 only when all three were written and the scope is clean; 1
+its own (only its window, copied from these answers). Nothing is invented: no
+placeholder host, approval, or limit is ever substituted. Exit 0 only when all three were written and the scope is clean; 1
 when some were skipped or the profile is pending; 2 for an invalid scope file
 or a refusal.
 
@@ -270,6 +274,17 @@ profile from `init` (`scope.derivative_unmanaged`), makes compile refuse and
 write nothing; `--force` overwrites it. The sidecar is an aid against honest
 mistakes, not a tamper-proof seal: anyone who can edit the derivatives can edit
 the sidecar.
+
+### Revoking or changing an approval
+
+`campaign run` reads `scope.yaml` beside the manifest before the run and
+before every step. Set `authorization.status: revoked` there and no campaign
+starts, and a running one stops before its next step
+(`authorization_lapsed`). After any change to the approval id or window,
+run `scope compile`, move the old `plan.json` aside, and run `campaign plan`
+again: a plan frozen from the old window is refused. `call`, `matrix`, and
+`checks` read the profile instead, so always run `scope compile` after the
+change.
 
 ## Advisor
 
