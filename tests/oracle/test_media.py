@@ -229,32 +229,6 @@ class MediaInvariantTests(unittest.TestCase):
         frames = {item.frame_number.value for item in result["media.timing"].evidence}
         self.assertEqual(frames, {300, 301})
 
-    def test_peer_media_already_in_flight_when_bye_leaves_is_not_a_timing_failure(self) -> None:
-        # The baseline caller sends BYE at 0.5. A packet the callee sent a
-        # fraction of a millisecond later was already on the wire (this is
-        # the intermittent loopback call-selftest failure).
-        in_flight = good_media() + (
-            rtp_frame(310, "0.5002", caller_to_callee=False, sequence=12, timestamp=320),
-        )
-        result = assertions(evaluate_invariants(in_flight, baseline_dialog()))
-        self.assertEqual(result["media.timing"].verdict, Verdict.PASS)
-        # Only the other side is excused, and only briefly.
-        for number, arrival, caller_to_callee in (
-            (311, "0.5002", True),
-            (312, "0.55", False),
-        ):
-            with self.subTest(frame=number):
-                late = good_media() + (
-                    rtp_frame(
-                        number, arrival, caller_to_callee=caller_to_callee,
-                        sequence=12, timestamp=320,
-                    ),
-                )
-                result = assertions(evaluate_invariants(late, baseline_dialog()))
-                self.assertEqual(result["media.timing"].verdict, Verdict.FAIL)
-                frames = {item.frame_number.value for item in result["media.timing"].evidence}
-                self.assertEqual(frames, {number})
-
     def test_renegotiated_payload_change_is_not_an_unexpected_transition(self) -> None:
         dialog = reconstruct_dialogs(scenario_frames("renegotiation")).dialogs[0]
         media = (

@@ -94,11 +94,6 @@ class AssertionResult:
         return self.id
 
 
-# Media sent by the side that did not send BYE can still arrive this soon
-# after the BYE request (one-way delay plus the peer's own packet timer).
-TEARDOWN_IN_FLIGHT_GRACE_MS = Decimal("20")
-
-
 @dataclass(frozen=True, slots=True)
 class MediaExpectations:
     require_bidirectional: bool = True
@@ -1083,14 +1078,13 @@ def evaluate_invariants(
         if item.event == "invite"
     ]
     invite_times = [item for item in invite_times if item is not None]
-    teardown_events = [
-        (_evidence_time(item.evidence), item.event)
+    teardown_times = [
+        _evidence_time(item.evidence)
         for item in dialog.transitions
         if item.event.startswith("bye_")
         or item.event in {"local_bye", "remote_bye"}
     ]
-    teardown_events = [item for item in teardown_events if item[0] is not None]
-    teardown_times = [item[0] for item in teardown_events]
+    teardown_times = [item for item in teardown_times if item is not None]
     first_answer = min(answer_times) if answer_times else None
     first_invite = min(invite_times) if invite_times else None
     teardown = min(teardown_times) if teardown_times else None
@@ -1102,27 +1096,6 @@ def evaluate_invariants(
         and _evidence_time(packet.evidence) is not None
         and _evidence_time(packet.evidence) < first_answer
     ]
-    # Media the *other* side had already sent when the BYE request left is
-    # still in flight, so it may legitimately be captured a moment after the
-    # BYE. Only that side, and only within a small fixed window, is excused;
-    # anything from the BYE sender after its own BYE always fails.
-    bye_request = min(
-        (item for item in teardown_events if item[1] in {"local_bye", "remote_bye"}),
-        key=lambda item: item[0],
-        default=None,
-    )
-    in_flight_direction = (
-        MediaDirection.CALLEE_TO_CALLER
-        if bye_request is not None and bye_request[1] == "local_bye"
-        else MediaDirection.CALLER_TO_CALLEE
-        if bye_request is not None
-        else None
-    )
-    in_flight_until = (
-        bye_request[0] + TEARDOWN_IN_FLIGHT_GRACE_MS / Decimal(1000)
-        if bye_request is not None
-        else None
-    )
     after_teardown = [
         packet
         for stream in streams
@@ -1130,12 +1103,6 @@ def evaluate_invariants(
         if teardown is not None
         and _evidence_time(packet.evidence) is not None
         and _evidence_time(packet.evidence) > teardown
-        and not (
-            stream.direction is in_flight_direction
-            and bye_request is not None
-            and teardown == bye_request[0]
-            and _evidence_time(packet.evidence) <= in_flight_until
-        )
     ]
     setup_ms = (
         (first_answer - first_invite) * Decimal(1000)
