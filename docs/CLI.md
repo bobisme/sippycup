@@ -12,6 +12,12 @@ drive routing, help, activity labels, and machine-readable discovery.
 ./bin/sippycup version
 ```
 
+`./bin/sippycup go [DIR]` is the guided operator cockpit: a host-side
+dashboard and checklist that starts other public commands only after a
+confirmation panel (typed approval token for LIVE actions). It sends no traffic
+itself. Its `--plain` and `--format json` modes are read-only; see
+[COCKPIT.md](COCKPIT.md).
+
 These discovery commands do not resolve a target, start a container, or make a
 network connection. The JSON output follows
 `schemas/commands-v1.schema.json` and always reports `networkActivity: false`.

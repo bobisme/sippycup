@@ -154,6 +154,65 @@ def _run_facts(root: Path) -> tuple[dict[str, Any], list[str], list[dict[str, An
     return facts, warnings, actions
 
 
+def _call_facts(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+    """Inspect guided-call run directories (``calls/`` and ``practice-calls/``).
+
+    Returns the facts for ``calls/``, evidence actions for any guided-call
+    run without a manifest, and whether a passing practice call exists.
+    """
+    facts = {"directory": str(root / "calls"), "count": 0, "passed": 0, "evidenceManifestMissing": 0}
+    actions: list[dict[str, Any]] = []
+    practice_passed = False
+    for name in ("calls", "practice-calls"):
+        directory = root / name
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        children = sorted(itertools.islice(directory.iterdir(), MAX_RUNS))
+        for run in children:
+            if not run.is_dir() or run.is_symlink() or _SAFE_RUN_NAME.fullmatch(run.name) is None:
+                continue
+            verdict = None
+            result_path = run / "result.json"
+            if result_path.is_file() and not result_path.is_symlink():
+                try:
+                    result = _read_json(result_path)
+                    if isinstance(result, dict):
+                        verdict = result.get("verdict")
+                except ValueError:
+                    verdict = None
+            if name == "practice-calls":
+                practice_passed = practice_passed or verdict == "pass"
+                continue
+            facts["count"] += 1
+            facts["passed"] += 1 if verdict == "pass" else 0
+            manifest = run / "evidence-manifest.json"
+            if not manifest.is_file() or manifest.is_symlink():
+                facts["evidenceManifestMissing"] += 1
+                actions.append(
+                    _action(
+                        f"calls-manifest-{run.name}",
+                        f"Inventory evidence for guided call {run.name}",
+                        "The guided-call run has no evidence manifest (it was interrupted or is unfinished).",
+                        argv=["./bin/sippycup", "evidence", "manifest", str(run), "--write"],
+                    )
+                )
+    return facts, actions, practice_passed
+
+
+def _first_dial(root: Path, now: datetime | None) -> str | None:
+    """The first destination user in the scope whose expected behaviour is not reject."""
+    scope_file = root / SCOPE_FILE
+    if not scope_file.is_file() or scope_file.is_symlink():
+        return None
+    document = inspect_scope(scope_file, now=now).document or {}
+    for item in document.get("destinations") or []:
+        if isinstance(item, dict) and item.get("expect") != "reject" and isinstance(item.get("user"), (str, int)):
+            user = str(item["user"])
+            if re.fullmatch(r"[A-Za-z0-9+*._-]{1,64}", user):
+                return user
+    return None
+
+
 def _scope_facts(
     root: Path, now: datetime | None
 ) -> tuple[dict[str, Any], list[str], list[str], list[dict[str, Any]]]:
@@ -431,7 +490,8 @@ def assess(
                 "Generate Quad's torture-defaults review packet",
                 "Technical safety passed, but the service owner has not reviewed the defaults.",
                 argv=[
-                    "./bin/sippycup-torture",
+                    "./bin/sippycup",
+                    "torture",
                     "review-template",
                     "--reviewer",
                     "Quad",
@@ -453,7 +513,8 @@ def assess(
                         "Have Quad complete the defaults review",
                         "; ".join(review["errors"]),
                         argv=[
-                            "./bin/sippycup-torture",
+                            "./bin/sippycup",
+                            "torture",
                             "validate-review",
                             str(selected_review),
                         ],
@@ -466,6 +527,88 @@ def assess(
     facts["runs"] = run_facts
     warnings.extend(run_warnings)
     actions.extend(run_actions)
+    call_facts, call_actions, practice_passed = _call_facts(root)
+    facts["calls"] = call_facts
+    actions.extend(call_actions)
+    if call_facts["count"] == 0 and run_facts["count"] == 0 and not practice_passed:
+        actions.append(
+            _action(
+                "rehearse-on-practice-target",
+                "Rehearse the whole sequence on the local practice target first",
+                "A passing practice call proves the image, capture, registration, media, "
+                "and evidence path before any packet reaches the owner's system.",
+                instruction=(
+                    f"Run ./bin/sippycup go {root} and follow stage 2, or see "
+                    "docs/PRACTICE-TARGET.md (practice-target up, then a --practice call)."
+                ),
+            )
+        )
+    if facts["profile"]["ready"] and call_facts["count"] == 0:
+        dial = _first_dial(root, now)
+        if dial is not None:
+            actions.append(
+                _action(
+                    "review-guided-call-dry-run",
+                    "Review the guided baseline call plan",
+                    "The dry run prints the plan, softphone parameters, and capture filter; "
+                    "it sends no packets.",
+                    argv=[
+                        "./bin/sippycup",
+                        "call",
+                        str(selected_profile),
+                        "--dial",
+                        dial,
+                        "--dry-run",
+                    ],
+                )
+            )
+        else:
+            actions.append(
+                _action(
+                    "review-guided-call-dry-run",
+                    "Record a destination for the guided baseline call",
+                    "The guided call needs a destination; none is recorded in the scope.",
+                    instruction=(
+                        "Add the owner's destinations[] (user, expect) to scope.yaml and compile, "
+                        "then run ./bin/sippycup call PROFILE --dial USER --dry-run."
+                    ),
+                )
+            )
+    campaign_manifest = root / "campaign.yaml"
+    campaign_plan = root / "plan.json"
+    if (
+        facts["profile"]["ready"]
+        and campaign_manifest.is_file()
+        and not campaign_manifest.is_symlink()
+        and not campaign_plan.exists()
+    ):
+        actions.append(
+            _action(
+                "plan-baseline-campaign",
+                "Freeze the baseline campaign plan for review",
+                "Planning compiles the manifest into an immutable plan without traffic.",
+                argv=[
+                    "./bin/sippycup",
+                    "campaign",
+                    "plan",
+                    str(campaign_manifest),
+                    "--output",
+                    str(campaign_plan),
+                ],
+            )
+        )
+    if run_facts["privacyPass"] > 0:
+        actions.append(
+            _action(
+                "package-evidence",
+                "Package privacy-reviewed runs as evidence packs",
+                "At least one run's evidence manifest reports privacy pass.",
+                instruction=(
+                    "After the disclosure decision, run ./bin/sippycup pack create RUN_DIR "
+                    "OUTPUT.tar --image-digest sha256:IMAGE_ID (see docs/EVIDENCE-PACKS.md)."
+                ),
+            )
+        )
     if run_facts["count"] == 0 and facts["profile"]["ready"]:
         actions.append(
             _action(
@@ -478,7 +621,7 @@ def assess(
                 ),
             )
         )
-    if run_facts["count"] > 0:
+    if run_facts["count"] > 0 or call_facts["count"] > 0:
         actions.append(
             _action(
                 "refresh-internal-report",
@@ -520,7 +663,12 @@ def assess(
         actions = [
             action
             for action in actions
-            if action["id"] not in {"review-one-call-plan", "prepare-baseline-record"}
+            if action["id"] not in {
+                "review-one-call-plan",
+                "prepare-baseline-record",
+                "review-guided-call-dry-run",
+                "plan-baseline-campaign",
+            }
         ]
 
     overall = (

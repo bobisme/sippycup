@@ -7,6 +7,7 @@ CAPTURE ?= work/selftest.pcap
 
 build:
 	"$$(./bin/container-runtime)" build --tag "$(IMAGE)" --file Containerfile .
+	-./bin/sippycup-go --record-build "$(IMAGE)"
 
 shell:
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup shell

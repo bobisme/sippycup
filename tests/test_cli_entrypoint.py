@@ -59,6 +59,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "help",
                 "commands",
                 "version",
+                "go",
                 "doctor",
                 "mcp",
                 "mcp-live",
