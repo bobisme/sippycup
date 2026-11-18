@@ -95,6 +95,13 @@ _sippycup() {
                     -- "${current}")
             )
             ;;
+        diagnose)
+            COMPREPLY=(
+                $(compgen -d -W \
+                    "--format text json --brief --compare --output --width --no-ladder --approve --show-addresses --help" \
+                    -- "${current}")
+            )
+            ;;
         go)
             COMPREPLY=(
                 $(compgen -d -W "--plain --line --format --no-runtime --image --help" -- "${current}")
