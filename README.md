@@ -174,10 +174,24 @@ text. `status` verifies these records and recommends only network-free next
 steps; it never executes target traffic. See `docs/ASSESSMENT-WORKFLOW.md` for
 the end-to-end execution and recordkeeping framework.
 
-Copy `config/target.env.example` to the ignored `config/target.env` when the
-staging details arrive. It is a worksheet only; scripts require targets on
-their command lines so traffic cannot be sent accidentally from stale
-configuration.
+Record the service owner's written scope once, in a private scope file, instead
+of copying it by hand into the profile, campaign manifest, and oracle
+expectations:
+
+```sh
+./bin/sippycup scope init work/voice-assessment
+./bin/sippycup scope questions work/voice-assessment
+./bin/sippycup scope check work/voice-assessment
+./bin/sippycup scope compile work/voice-assessment
+```
+
+`scope questions` renders the question sheet to send to the owner, `check`
+reports exactly which answers are missing or inconsistent, and `compile`
+generates the target profile, a baseline campaign manifest, and oracle
+expectations that pass their existing validators. All of it is offline, and the
+scope file holds credential reference names only. Scripts still require targets
+on their command lines so traffic cannot be sent from stale configuration. See
+`docs/SCOPE-INTAKE.md`.
 
 Preview a narrowly scoped host capture:
 

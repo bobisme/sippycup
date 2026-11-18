@@ -11,6 +11,7 @@ init|workbench|init|sippycup-workbench|Preparation|offline|Create a fail-closed 
 rehearse|workbench|rehearse|sippycup-workbench|Preparation|offline|Validate target scope and authorization without traffic
 one-call|workbench|one-call|sippycup-workbench|Preparation|offline|Render a bounded one-call plan without executing it
 status|workbench|status|sippycup-workbench|Preparation|offline|Recommend only safe offline engagement actions
+scope|workbench|scope|sippycup-workbench|Preparation|offline|Record the owner's scope once and compile the profile, campaign, and expectations
 capture|host|capture||Execution|network|Capture only explicitly scoped host or network traffic
 preflight|container||sippycup-preflight|Execution|network|Send one bounded SIP OPTIONS preflight
 campaign|direct|campaign|campaign|Execution|network|Plan or execute a safety-gated call campaign

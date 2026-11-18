@@ -108,7 +108,7 @@ resilience-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/resilience -v
 
 workbench-test:
-	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_workbench tests.test_journal tests.test_advisor -v
+	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_workbench tests.test_journal tests.test_advisor tests.test_scope -v
 
 cli-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_cli_entrypoint -v

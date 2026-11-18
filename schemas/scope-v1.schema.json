@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sippycup.dev/schemas/scope-v1.schema.json",
+  "title": "Sippycup scope intake v1",
+  "description": "Structural schema. `scope check` additionally enforces cross-field consistency (addresses inside approved networks, ports and transports approved, TLS server names, validity window against the clock, ceilings that can hold one call) and rejects any field or value that looks like a password, token, or key.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name"],
+  "properties": {
+    "schema_version": {"const": "sippycup.dev/scope/v1"},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {"enum": ["pending", "approved", "revoked"]},
+        "approval_id": {"type": ["string", "null"], "maxLength": 128},
+        "approved_by": {"type": ["string", "null"], "maxLength": 128},
+        "valid_from": {"type": ["string", "null"], "format": "date-time"},
+        "valid_until": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "signaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "networks": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "ports": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1, "maximum": 65535}
+        },
+        "transports": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["udp", "tcp", "tls"]}
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "address", "transport", "port"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,40}$"},
+          "address": {"type": "string"},
+          "transport": {"enum": ["udp", "tcp", "tls"]},
+          "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+          "tls_server_name": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "networks": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "port_range": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "start": {"type": ["integer", "null"], "minimum": 1, "maximum": 65535},
+            "end": {"type": ["integer", "null"], "minimum": 1, "maximum": 65535}
+          }
+        },
+        "protection": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["rtp", "sdes-srtp", "dtls-srtp"]}
+        },
+        "codecs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["PCMU", "PCMA", "G722", "OPUS"]}
+        },
+        "dtmf": {"enum": ["rfc4733", "sip-info", "inband", "none", null]},
+        "symmetric_rtp": {"type": ["boolean", "null"]}
+      }
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_addresses": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {"type": ["boolean", "null"]},
+        "username": {"type": ["string", "null"]},
+        "realm": {"type": ["string", "null"]},
+        "credential_ref": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9-]{0,62}$",
+          "description": "The opaque NAME of a secret in an external source, never its value."
+        },
+        "credential_delivery": {
+          "enum": ["secret-manager", "encrypted-message", "in-person", "phone-call", "other", null]
+        }
+      }
+    },
+    "destinations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "user", "expect"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+          "target": {"type": "string"},
+          "user": {"type": "string"},
+          "expect": {"enum": ["echo", "agent", "reject"]}
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "calls": {"type": ["integer", "null"], "minimum": 1},
+        "concurrent_calls": {"type": ["integer", "null"], "minimum": 1},
+        "calls_per_second": {"type": ["integer", "null"], "minimum": 1},
+        "packets_per_second": {"type": ["integer", "null"], "minimum": 1},
+        "packets": {"type": ["integer", "null"], "minimum": 1},
+        "bytes": {"type": ["integer", "null"], "minimum": 1},
+        "call_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
+        "total_duration_seconds": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "stop_conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "consecutive_failures": {"type": ["integer", "null"], "minimum": 1},
+        "unexpected_response": {"type": ["boolean", "null"]},
+        "packet_loss_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
+      }
+    },
+    "test_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_classes": {"type": "array", "items": {"type": "string"}},
+        "exclusions": {"type": "array", "items": {"type": "string", "maxLength": 200}}
+      }
+    },
+    "contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": ["string", "null"]},
+        "channel": {"type": ["string", "null"]},
+        "can_stop_test": {"type": ["boolean", "null"]}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retention_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650},
+        "disclosure": {"enum": ["private", "coordinated", "public-after-remediation", null]}
+      }
+    }
+  }
+}
