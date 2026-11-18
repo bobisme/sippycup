@@ -16,6 +16,18 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
         "The call was answered but the oracle failed",
         "The notes name each failed assertion (for example an RTP timestamp jump, loss, reordering, or jitter above the limit). Read assert.json in the run directory; an oracle failure describes the media or signaling observed, not the cause. For example, Asterisk re-bases the RTP timestamp where early media ends and the answer begins, which the oracle reports as a timestamp jump.",
     ),
+    "call.srtp-not-negotiated": (
+        "SRTP was mandatory but the call did not negotiate it",
+        "The call was placed with --srtp mandatory and the far end either rejected the secure offer (commonly 488) or answered with plain RTP, so no protected media was exchanged. This shows the far end's SRTP policy for this account and destination; it is not a media-quality result. Compare the offer and answer media profiles (RTP/SAVP and a=crypto) in the softphone log.",
+    ),
+    "call.dtmf-not-negotiated": (
+        "DTMF digits were required but telephone-event was not negotiated",
+        "The far end's answer did not include the RFC 4733 telephone-event payload, so no digits were sent. Sippycup never falls back to SIP INFO or in-band tones on its own. Check the answer SDP's rtpmap lines; the platform may expect a different DTMF method.",
+    ),
+    "call.dtmf-mismatch": (
+        "The DTMF digits on the wire differ from the digits requested",
+        "The capture's outbound telephone-event sequence does not equal the requested digit string (digits missing, repeated, or out of order). Read dtmf-events.txt in the run directory. This describes what the softphone sent, not what the far end interpreted.",
+    ),
     "call.inconclusive": (
         "The call was answered but the evidence cannot decide",
         "The oracle returned unknown for something the verdict needs (encrypted signaling, a truncated capture, or missing RTP counts). Unknown is never reported as pass; capture again or inspect the evidence.",

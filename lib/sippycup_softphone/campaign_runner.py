@@ -36,13 +36,22 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .driver import (
+    SRTP_MODES,
     SoftphoneAccount,
     SoftphoneCall,
     SoftphoneError,
     SoftphoneResult,
     place_call,
     redact,
+    remove_private_directory,
     registrar_uri,
+)
+from .evidence import (
+    DEFAULT_DTMF_AFTER_SECONDS,
+    DTMF_SETTLE_SECONDS,
+    DtmfError,
+    dtmf_seconds,
+    validate_dtmf,
 )
 
 RESULT_VERSION = "sippycup.dev/softphone-step-result/v1"
@@ -132,6 +141,28 @@ def parse_envelope(raw: bytes) -> tuple[dict[str, Any], str | None, dict[str, An
         dial = _mapping(dial, "step.dial")
         if set(dial) != {"user"} or not isinstance(dial["user"], str) or _SIP_USER.fullmatch(dial["user"]) is None:
             raise EnvelopeError("step dial user is invalid")
+    call = step.get("call")
+    if call is not None:
+        call = _mapping(call, "step.call")
+        if "dtmf" not in call or set(call) - {"dtmf", "dtmfAfterSeconds", "durationSeconds"}:
+            raise EnvelopeError(
+                "step call must contain dtmf and optionally dtmfAfterSeconds and durationSeconds"
+            )
+        seconds = call.get("durationSeconds", 1)
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= 3600:
+            raise EnvelopeError("step call durationSeconds is invalid")
+        try:
+            validate_dtmf(call["dtmf"])
+        except DtmfError as error:
+            raise EnvelopeError(f"step call dtmf is invalid: {error}") from error
+        after = call.get("dtmfAfterSeconds", DEFAULT_DTMF_AFTER_SECONDS)
+        if isinstance(after, bool) or not isinstance(after, int) or not 0 <= after <= 60:
+            raise EnvelopeError("step call dtmfAfterSeconds is invalid")
+    media = step.get("media")
+    if media is not None:
+        media = _mapping(media, "step.media")
+        if set(media) != {"srtp"} or media["srtp"] not in SRTP_MODES:
+            raise EnvelopeError("step media must contain exactly srtp: off, optional, or mandatory")
     tls = step.get("tls")
     if tls is not None:
         from sippycup.tls_trust import (
@@ -178,19 +209,36 @@ def call_duration(step: Mapping[str, Any]) -> dict[str, Any]:
     budget = step["budget"]["durationSeconds"]
     generated = step.get("generated")
     requested = (
-        int(generated["factors"]["duration"]) if generated is not None else DEFAULT_CALL_SECONDS
+        int(generated["factors"]["duration"])
+        if generated is not None
+        else int((step.get("call") or {}).get("durationSeconds", DEFAULT_CALL_SECONDS))
     )
     reserve = SETUP_RESERVE_SECONDS + TEARDOWN_RESERVE_SECONDS
     if (step.get("account") or {}).get("register"):
         reserve += REGISTRATION_RESERVE_SECONDS
     available = max(1, int(math.floor(budget - reserve)))
     effective = min(requested, available)
-    return {
+    value = {
         "requested": requested,
         "effective": effective,
         "budget": budget,
         "clamped": effective < requested,
     }
+    call = step.get("call")
+    if call is not None:
+        # The reviewed digits must fit in the call: lengthen it to the DTMF
+        # delay plus the digits when the budget allows, never beyond.
+        needed = int(math.ceil(
+            call.get("dtmfAfterSeconds", DEFAULT_DTMF_AFTER_SECONDS)
+            + dtmf_seconds(call["dtmf"])
+            + DTMF_SETTLE_SECONDS
+        ))
+        value["dtmfNeeds"] = needed
+        if effective < needed <= available:
+            value["effective"] = needed
+            value["lengthenedForDtmf"] = True
+        value["clamped"] = value["effective"] < requested
+    return value
 
 
 def write_tone(path: Path, seconds: float = 3.0, rate: int = 8000) -> None:
@@ -254,6 +302,10 @@ def authentication_attempts(log_text: str) -> dict[str, dict[str, int]]:
 
 
 def _setup_seconds(result: SoftphoneResult) -> float | None:
+    """INVITE to 2xx from PJSUA's log timestamps, else the driver timeline."""
+    logged = (result.setup or {}).get("inviteToAnswerSeconds")
+    if logged is not None:
+        return logged
     dialed = next((item["at"] for item in result.timeline if item["state"] == "DIALED"), None)
     confirmed = next((item["at"] for item in result.timeline if item["state"] == "CONFIRMED"), None)
     if dialed is None or confirmed is None:
@@ -297,14 +349,41 @@ def factor_report(
     else:
         skipped["codec"] = f"offered {wanted} first; negotiated {result.codec or 'nothing'}"
     skipped["ptime"] = "runner does not set packetization time"
-    if factors["mediaProtection"] == "plain":
+    srtp = result.srtp or {}
+    srtp_active = bool(srtp.get("active"))
+    protection = factors["mediaProtection"]
+    if protection == "plain" and result.answered and not srtp_active:
         exercised["mediaProtection"] = "plain"
+    elif protection == "plain":
+        skipped["mediaProtection"] = (
+            "SDES-SRTP was active" if srtp_active else "call was not answered"
+        )
+    elif protection == "sdes-srtp" and srtp_active:
+        exercised["mediaProtection"] = "sdes-srtp"
+    elif protection == "sdes-srtp":
+        skipped["mediaProtection"] = (
+            f"SDES-SRTP requested {srtp.get('requested', 'off')} but not active"
+            if srtp.get("requested", "off") != "off"
+            else "target media.srtp is off; runner offered plain RTP"
+        )
     else:
-        skipped["mediaProtection"] = "runner offers plain RTP only"
-    if factors["dtmf"] == "none":
+        skipped["mediaProtection"] = "runner keys SRTP with SDES only, never DTLS"
+    dtmf = result.dtmf
+    dtmf_sent = bool(dtmf and dtmf.get("status") == "sent")
+    if factors["dtmf"] == "none" and dtmf is None:
         exercised["dtmf"] = "none"
+    elif factors["dtmf"] == "none":
+        skipped["dtmf"] = "runner sent the case's reviewed DTMF digits"
+    elif factors["dtmf"] == "rfc4733" and dtmf_sent:
+        exercised["dtmf"] = "rfc4733"
+    elif factors["dtmf"] == "rfc4733":
+        skipped["dtmf"] = (
+            f"RFC 4733 DTMF {dtmf.get('status')}"
+            if dtmf is not None
+            else "no reviewed digit string (cases[].call.dtmf)"
+        )
     else:
-        skipped["dtmf"] = "runner sends no DTMF"
+        skipped["dtmf"] = "runner sends RFC 4733 events only, never SIP INFO or in-band"
     skipped["earlyMedia"] = "callee behavior; runner does not assert early media"
     if factors["holdReinvite"] == "disabled":
         exercised["holdReinvite"] = "disabled"
@@ -332,8 +411,14 @@ def factor_report(
         skipped["impairment"] = "runner applies no impairment"
     actions_done = []
     actions_skipped = []
+    dtmf_action_done = False
     for position, action in enumerate(generated["actions"], 1):
         if action == "hangup" and caller_hangup:
+            actions_done.append({"position": position, "action": action})
+        elif action == "dtmf" and dtmf_sent and not dtmf_action_done:
+            # One reviewed digit string per call: it covers the first
+            # dtmf action only.
+            dtmf_action_done = True
             actions_done.append({"position": position, "action": action})
         else:
             actions_skipped.append({"position": position, "action": action})
@@ -426,8 +511,13 @@ def run(
     clock: Callable[[], float] = time.monotonic,
     cancel: threading.Event | None = None,
     emit: Callable[[str], None] | None = None,
+    private_root: Path | None = None,
 ) -> int:
-    """Execute one envelope and return the process exit status."""
+    """Execute one envelope and return the process exit status.
+
+    ``private_root`` (tests) replaces ``/dev/shm`` as the parent of the
+    runner's and the driver's private directories.
+    """
     started = clock()
     emit = emit or (lambda line: print(line, flush=True))
     secrets: list[str] = []
@@ -466,6 +556,8 @@ def run(
     codecs = (CODECS[generated["factors"]["codec"]],) if generated is not None else ("PCMU",)
     tls = step.get("tls") or {}
     server_name = tls.get("serverName")
+    call_options = step.get("call")
+    srtp_mode = (step.get("media") or {}).get("srtp", "off")
     if transport == "tls":
         summary["tls"] = {
             "verified": False,
@@ -502,7 +594,10 @@ def run(
         if not name.startswith("SIPPYCUP_SECRET_")
         and not any(secret in value for secret in secrets)
     }
-    private = Path(tempfile.mkdtemp(prefix="sippycup-campaign-softphone-", dir=_private_root()))
+    private = Path(tempfile.mkdtemp(
+        prefix="sippycup-campaign-softphone-",
+        dir=str(private_root) if private_root is not None else _private_root(),
+    ))
     private.chmod(0o700)
     exit_code = EXIT_FAILED
     try:
@@ -519,6 +614,11 @@ def run(
             ca_copy = write_private_copy(data, private / "trust-anchor.pem")
         play = private / "canary.wav"
         write_tone(play)
+        if call_options is not None and duration["effective"] < duration.get("dtmfNeeds", 0):
+            raise SoftphoneError(
+                f"the step budget leaves {duration['effective']}s of call, but the DTMF delay "
+                f"and digits need {duration['dtmfNeeds']}s"
+            )
         record = (artifacts / "heard.wav") if retain else (private / "heard.wav")
         call = SoftphoneCall(
             destination=dial,
@@ -544,6 +644,11 @@ def run(
             advertised_address=local_address(address, port),
             tls_server_name=server_name,
             tls_ca_file=ca_copy,
+            dtmf=(call_options or {}).get("dtmf"),
+            dtmf_after_seconds=(call_options or {}).get(
+                "dtmfAfterSeconds", DEFAULT_DTMF_AFTER_SECONDS
+            ),
+            srtp=srtp_mode,
         )
         result = place_call(
             call,
@@ -554,6 +659,7 @@ def run(
             environment=environment,
             clock=clock,
             kill_with_parent=True,
+            private_root=private_root,
         )
         try:
             log_text = (artifacts / "softphone.log").read_text(encoding="utf-8", errors="replace")
@@ -578,7 +684,22 @@ def run(
             hangup=result.hangup,
             error=result.error,
             authentication=attempts,
+            setup=result.setup,
+            localRtpPort=result.local_rtp_port,
+            srtp={
+                key: (result.srtp or {}).get(key)
+                for key in ("requested", "active", "suite", "answerProfile")
+            } if result.srtp else {"requested": srtp_mode, "active": None},
+            warnings=result.warnings,
         )
+        if result.dtmf is not None:
+            summary["dtmf"] = {
+                key: result.dtmf.get(key)
+                for key in (
+                    "requested", "requestedDigits", "method", "status", "negotiated",
+                    "sent", "received", "answeredPayloadTypes",
+                )
+            }
         if transport == "tls":
             summary["tls"]["verified"] = result.tls_verified is True
             summary["tls"]["detail"] = result.tls_detail
@@ -598,7 +719,7 @@ def run(
         summary.update(outcome="failed", error=f"runner_error: {type(error).__name__}")
         exit_code = EXIT_FAILED
     finally:
-        shutil.rmtree(private, ignore_errors=True)
+        remove_private_directory(private)
     emit(_bounded_line(summary, secrets))
     return exit_code
 

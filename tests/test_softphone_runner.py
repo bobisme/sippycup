@@ -480,12 +480,17 @@ class RunnerTests(unittest.TestCase):
             "SIPPYCUP_SECRET_SIP_USER": "source-variable",
             **kwargs.pop("extra_environment", {}),
         }
+        private = self.root / "private"
+        private.mkdir(mode=0o700, exist_ok=True)
         code = campaign_runner.run(
             step_envelope(artifacts=self.artifacts, **kwargs),
             pjsua=str(FAKE_PJSUA),
             environ=environment,
             emit=lines.append,
+            private_root=private,
         )
+        # The runner's and the driver's private directories are both gone.
+        self.assertEqual(list(private.iterdir()), [])
         self.assertEqual(len(lines), 1, lines)
         self.assertLessEqual(len(lines[0].encode()), campaign_runner.MAX_LINE_BYTES)
         summary = json.loads(lines[0])
@@ -519,7 +524,7 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn(SECRET, json.dumps(summary))
         detail = json.loads((self.artifacts / "softphone.json").read_text())
         self.assertEqual(detail["outcome"], "passed")
-        self.assertFalse(any(Path("/dev/shm").glob("sippycup-campaign-softphone-*")))
+        self.assertEqual(list((self.root / "private").iterdir()), [])
 
     def test_registration_is_attempted_only_when_the_plan_says_so(self):
         code, summary, record = self.run_runner(register=True)
@@ -616,7 +621,9 @@ class RunnerTests(unittest.TestCase):
         _code, summary, record = self.run_runner(retain=False)
         rec = next(line for line in record["config"].splitlines() if line.startswith("--rec-file="))
         self.assertTrue(rec.startswith("--rec-file=/"))
-        self.assertNotIn(str(self.root), rec, "unretained audio is recorded only privately")
+        self.assertTrue(rec.startswith(f"--rec-file={self.root / 'private'}/"),
+                        "unretained audio is recorded only privately")
+        self.assertNotIn(str(self.artifacts), rec)
         self.assertFalse(summary["payloadRetained"])
         self.assertFalse((self.artifacts / "heard.wav").exists())
         _code, summary, record = self.run_runner(retain=True)
@@ -806,6 +813,7 @@ class DriverExtensionTests(unittest.TestCase):
             f" play_file=Path({str(self.play)!r}), record_file=Path({str(self.root / 'h.wav')!r}),"
             f" duration_seconds=60, log_file=Path({str(self.root / 'l.log')!r}))\n"
             f"place_call(call, pjsua={str(FAKE_PJSUA)!r}, kill_with_parent=True,"
+            f" private_root=Path({str(self.root)!r}),"
             f" environment={{'PATH': '/usr/bin:/bin', 'FAKE_PJSUA_WITNESS': {str(witness)!r}}})\n"
         )
         parent = subprocess.Popen([sys.executable, "-c", script])
@@ -838,7 +846,8 @@ class DriverExtensionTests(unittest.TestCase):
 def _alive(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text().split()[2]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # The process exited between the lookup and the read.
         return False
     return state != "Z"
 

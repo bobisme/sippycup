@@ -77,6 +77,9 @@ already carries the service owner's approval.
 | `--run-root DIR` | Directory beneath `work/` for the run directory. Default: `calls/` next to the profile. |
 | `--engagement DIR` | Journal directory used in the suggested journal command. Default: the profile's directory. |
 | `--no-media-required` | Do not require RTP in both directions. |
+| `--dtmf DIGITS` | Send these RFC 4733 (telephone-event) digits after answer: 1-32 of `0-9 A-D * #`, with `,` for a 1 s pause. Never SIP INFO or in-band. |
+| `--dtmf-after SECONDS` | Delay from answer to the first digit, 0-60. Default 1. |
+| `--srtp off\|optional\|mandatory` | SDES-SRTP. Default: `optional` for a TLS profile whose `features.srtp` is true, else `off`. |
 | `--format json` | Print the result document instead of the human summary. |
 | `--dry-run` | Print the plan and softphone parameters; send nothing. |
 
@@ -118,6 +121,77 @@ follow a remote Contact elsewhere, and redirects (3xx) are refused. If the
 negotiated media peer is not an approved address, the call is hung up and
 the verdict is `media-outside-scope`.
 
+## DTMF
+
+`--dtmf 12#,34` sends `12#`, waits 1 s, then sends `34`, starting
+`--dtmf-after` seconds after answer. The driver types PJSUA's legacy console
+command `#` (send RFC 2833 DTMF) followed by each chunk, so PJSUA sends RFC
+4733 events with the telephone-event payload type the peer answered with.
+PJSUA always offers telephone-event. If the peer did not negotiate it, PJSUA
+refuses (`Remote does not support RFC 2833`): nothing is sent, SIP INFO and
+in-band tones are never tried, and the verdict is `dtmf-not-negotiated`. The
+call must be long enough for the delay plus 0.25 s per digit, 1 s per pause,
+and 1 s to settle; otherwise it is refused before anything starts.
+
+After the call, tshark decodes RTP on the negotiated media port from the
+capture with its `rtpevent` dissector disabled, and the event codes are read
+from the raw payload: one event is one SSRC and RTP timestamp, so repeated
+and end packets count once. `result.json` `dtmf` carries `requested`,
+`requestedDigits`, `method: rfc4733`, `status` (`sent`, `notNegotiated`,
+`notSent`, `incomplete`, `mismatch`), `negotiated`, `payloadTypes`, `sent`
+(the outbound digits on the wire, `sentSource: capture`), `echoed` (the
+inbound digits), `pjsuaSent`/`pjsuaReceived` (what PJSUA logged), `verified`,
+and `wire`. The call passes only when the captured outbound digits equal the
+requested digits; otherwise the verdict is `dtmf-mismatch`. The generated
+oracle expectations set `require_dtmf: true`, and the oracle ignores RFC 4733
+event packets (which keep one timestamp for the whole event) when it judges
+RTP timestamp jumps and jitter. Under SRTP the event code is encrypted: the
+capture then shows only the number of events, which must equal the number of
+requested digits, and `verified` stays `null`.
+
+## SRTP
+
+`--srtp optional` offers RTP/AVP with `a=crypto` (PJSUA `--use-srtp=1`) and
+accepts a plain answer; `--srtp mandatory` offers RTP/SAVP (`--use-srtp=2`),
+and a call that does not negotiate SRTP fails with the distinct verdict
+`srtp-not-negotiated` (PJSUA never falls back to plain RTP; a peer that
+refuses SRTP typically answers 488). Keying is SDES (`--srtp-keying=0`).
+SDES keys travel in the SDP, so they are confidential only over TLS: over
+TLS PJSUA requires secure signaling for SRTP (`--srtp-secure=1`); over UDP or
+TCP SRTP is still tested (`--srtp-secure=0`) and the result carries the
+warning `sdes-key-exposed-on-cleartext-signaling`. `a=crypto` key values are
+redacted from the persisted softphone log and console.
+
+`result.json` `srtp` carries `mode`, `active`, `suite` (for example
+`AES_CM_128_HMAC_SHA1_80`), `offerProfile`, `answerProfile` (`RTP/SAVP` or
+`RTP/AVP`), `secureSignaling`, `warning`, and `media`. With SRTP active the
+oracle cannot read RTP payloads, so its result is recorded but does not
+decide the verdict; the RTP header is still cleartext, so RTP to and from
+the negotiated media peer is counted from the capture (`srtp-media.txt`)
+exactly as for TLS calls.
+
+## Registration status and setup time
+
+A failed registration reports the SIP status of the final REGISTER response
+in PJSUA's message log, for example `Registration: FAILED (status 401)` for a
+wrong password (PJSIP itself reports only `PJSIP_EFAILEDCREDENTIAL`), 403,
+or the 408 PJSIP generates when nothing answers. `notes` repeats it.
+
+`setup` (in `result.json` and under `softphone`) is measured from PJSUA's log
+timestamps: `inviteToProvisionalSeconds` (first INVITE sent to the first 180
+or 183), `inviteToAnswerSeconds` (to the 2xx), with the statuses. It starts
+at the first INVITE, so a digest challenge round trip is included. Where the
+oracle decides (UDP/TCP, plain RTP) its `max_setup_ms: 5000` applies; for
+TLS or SRTP calls the same 5 s limit is applied to `inviteToAnswerSeconds`.
+
+## Local RTP port
+
+The capture filter admits all UDP to and from the approved addresses, so
+media is captured in both directions whatever local port PJSUA picks.
+`softphone.local_rtp_port` reports the port from PJSUA's SDP offer (PJSUA
+starts at 4000 and takes the next free pair). The driver's
+`allowed_media_ports` range applies to the remote (target) media port only.
+
 ## Run directory
 
 Each run creates a new mode-0700 directory such as
@@ -140,6 +214,8 @@ never reused. Files are mode 0600:
 | `expectations.yaml` | Generated oracle expectations. |
 | `report.txt`, `triage.json`, `assert.json` | Offline report, triage, and oracle result (with `.stderr` files). |
 | `tls-media.txt` | TLS calls only: RTP to and from the negotiated media peer, decoded by tshark from the capture. |
+| `srtp-media.txt` | SRTP active on UDP/TCP signaling: RTP headers to and from the negotiated media peer. |
+| `dtmf-events.txt` | `--dtmf` only: RTP on the negotiated media port with raw payloads, from which RFC 4733 events are decoded. |
 | `result.json` | Stable result, `schemas/call-result-v1.schema.json`. |
 | `evidence-manifest.json` | Hashes, sensitivity labels, and privacy findings. |
 
@@ -169,6 +245,9 @@ identifiers; use the evidence privacy workflow before sharing anything.
 
 | `tls-not-verified` | TLS verification failed or was not confirmed; PJSUA sent no SIP request on that connection. | 1 |
 | `tls-name-pinning-failed` | The reviewed name could not be pinned to the literal address; PJSUA was not started. | 1 |
+| `srtp-not-negotiated` | `--srtp mandatory`, and the call did not negotiate SDES-SRTP. | 1 |
+| `dtmf-not-negotiated` | `--dtmf`, and the peer did not negotiate telephone-event; nothing was sent. | 1 |
+| `dtmf-mismatch` | The digits PJSUA sent, or the digits seen on the wire, differ from the request. | 1 |
 
 Every verdict has `./bin/sippycup explain call.VERDICT`. `result.json` also
 carries `setup` (seconds from INVITE to answer, the 18x statuses seen, and
@@ -268,6 +347,19 @@ command. Build a `SoftphoneCall`, optionally with a `SoftphoneAccount`, and
 call `place_call(call, password=..., cancel=..., abort=...)`. It returns a
 `SoftphoneResult` with the registration result, final SIP status, call-state
 timeline, connected time, PJSUA RTP counters, and any error.
+
+`dtmf="12#"` with `dtmf_after_seconds` sends RFC 4733 digits after answer,
+`srtp="off"|"optional"|"mandatory"` selects SDES-SRTP, and the result adds
+`dtmf`, `srtp`, `sdp` (offer and answer audio facts), `setup`,
+`local_rtp_port`, and `warnings`. `exclusive_codecs=True` offers only
+`codecs` (PJSUA `--dis-codec=*` before the `--add-codec` lines; telephone-event
+is still offered); by default the listed codecs are only raised in priority
+and PJSUA offers every other codec it has. Until the first RTP packet
+arrives PJSUA prints the media peer as `-`; the driver treats that as
+unknown (`media_peer` stays `null`), not as out of scope, so a far end that
+sends no RTP runs its full duration. The private directory that holds the
+password configuration is removed after PJSUA and every process in its
+process group are reaped, the configuration file first, with brief retries.
 
 `allowed_media_ports=(start, end)` additionally hangs up when the negotiated
 remote RTP port is outside that range, and `place_call(...,

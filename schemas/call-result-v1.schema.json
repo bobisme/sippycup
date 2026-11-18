@@ -65,6 +65,9 @@
         "peer-hung-up-early",
         "silent-audio",
         "slow-setup",
+        "srtp-not-negotiated",
+        "dtmf-not-negotiated",
+        "dtmf-mismatch",
         "cancelled",
         "blocked"
       ]
@@ -122,9 +125,49 @@
         "error": {"type": ["string", "null"]},
         "cancelled": {"type": "boolean"},
         "tls_verified": {"type": ["boolean", "null"]},
-        "tls_server_name": {"type": ["string", "null"]}
+        "tls_server_name": {"type": ["string", "null"]},
+        "local_rtp_port": {"type": ["integer", "null"], "description": "Local RTP port from the SDP offer PJSUA sent."},
+        "setup": {"$ref": "#/$defs/setup"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
       }
     },
+    "srtp": {
+      "type": "object",
+      "description": "SDES-SRTP requested (mode) and negotiated (active, suite, answerProfile) as PJSUA logged it. media counts RTP headers (cleartext under SRTP) on the negotiated media port when SRTP was active on non-TLS signaling.",
+      "required": ["mode", "active"],
+      "properties": {
+        "mode": {"enum": ["off", "optional", "mandatory"]},
+        "keying": {"enum": ["sdes", null]},
+        "active": {"type": ["boolean", "null"]},
+        "suite": {"type": ["string", "null"]},
+        "offerProfile": {"type": ["string", "null"]},
+        "answerProfile": {"type": ["string", "null"]},
+        "secureSignaling": {"type": "boolean"},
+        "warning": {"enum": ["sdes-key-exposed-on-cleartext-signaling", null]},
+        "media": {"type": ["object", "null"]}
+      }
+    },
+    "dtmf": {
+      "type": ["object", "null"],
+      "description": "Requested RFC 4733 digits. sent is the outbound digit sequence decoded from the capture (sentSource capture) or, when the capture cannot show it, what PJSUA logged (sentSource pjsua-log); echoed is the inbound sequence. verified is true only when the captured outbound digits equal requestedDigits.",
+      "required": ["requested", "requestedDigits", "method", "status", "sent", "verified"],
+      "properties": {
+        "requested": {"type": "string"},
+        "requestedDigits": {"type": "string"},
+        "method": {"const": "rfc4733"},
+        "status": {"enum": ["sent", "notNegotiated", "notSent", "incomplete", "mismatch"]},
+        "negotiated": {"type": ["boolean", "null"]},
+        "payloadTypes": {"type": "array", "items": {"type": "integer"}},
+        "sent": {"type": ["string", "null"]},
+        "sentSource": {"enum": ["capture", "pjsua-log"]},
+        "pjsuaSent": {"type": "string"},
+        "pjsuaReceived": {"type": "string"},
+        "echoed": {"type": ["string", "null"]},
+        "verified": {"type": ["boolean", "null"]},
+        "wire": {"type": ["object", "null"]}
+      }
+    },
+    "warnings": {"type": "array", "items": {"enum": ["sdes-key-exposed-on-cleartext-signaling"]}},
     "tls": {
       "type": "object",
       "description": "TLS calls only. serverName is the reviewed certificate name, or the literal address when its IP SAN was verified; every packet went only to connectsTo. trust is system (the image's bundle) or file (the reviewed caFile, whose SHA-256 is caSha256). The oracle cannot read encrypted signaling, so media is RTP decoded from the capture on the negotiated media port.",
@@ -172,5 +215,18 @@
     "networkActivity": {"type": "string"},
     "blockingErrors": {"type": "array", "items": {"type": "string"}},
     "evidencePrivacy": {"type": "string"}
+  },
+  "$defs": {
+    "setup": {
+      "type": ["object", "null"],
+      "description": "Call setup from PJSUA's log timestamps, measured from the first INVITE sent (a digest challenge round trip is included).",
+      "properties": {
+        "source": {"const": "pjsua-log-timestamps"},
+        "inviteToProvisionalSeconds": {"type": ["number", "null"]},
+        "provisionalStatus": {"type": ["integer", "null"]},
+        "inviteToAnswerSeconds": {"type": ["number", "null"]},
+        "answerStatus": {"type": ["integer", "null"]}
+      }
+    }
   }
 }

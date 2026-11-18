@@ -145,6 +145,59 @@ to exactly the same plan bytes as before they existed (golden digests in
 `tests/test_softphone_runner.py`). Matrix compilation copies the template
 case's `dial` into every generated case.
 
+## DTMF and SRTP
+
+A `call` case can send reviewed RFC 4733 digits, and a target can choose
+SDES-SRTP for its calls:
+
+```yaml
+targets:
+  - name: pbx
+    # ...
+    media: {srtp: optional}              # off | optional | mandatory
+cases:
+  - id: ivr-pin
+    type: call
+    target: pbx
+    count: 1
+    dial: {user: "9196"}
+    call:
+      dtmf: "12#,34"                     # 1-32 of 0-9 A-D * #; ',' pauses 1 s
+      dtmfAfterSeconds: 1                # optional, 0-60, default 1
+      durationSeconds: 10                # optional, 1-3600; not with generated
+    budget: {packetsPerRun: 2500, bytesPerRun: 1200000, durationSecondsPerRun: 16}
+```
+
+Quote the digits: YAML reads `1234` as an integer, which the planner rejects.
+`call` is frozen into the case's steps (`step.call`) and `media` into every
+call step of the target (`step.media`); OPTIONS steps carry neither. Both are
+covered by the manifest lock, and the runtime validator checks them again:
+exact keys, the digit grammar and bounds, `call` steps only, a
+`durationSeconds` only without `generated`, and the same `media` (or none) on
+every call step of a target. Manifests without them compile to exactly the
+same plan bytes as before. A call step with `call` or `media` always runs on
+`campaign-softphone-runner`. DTMF digits are part of the reviewed plan: do
+not put a real PIN in a manifest.
+
+The runner sends the digits as RFC 4733 events with PJSUA's RFC 2833 console
+command `dtmfAfterSeconds` after answer and never falls back to SIP INFO or
+in-band tones; a peer that did not negotiate telephone-event fails the step
+with `dtmf_not_negotiated`, and digits PJSUA did not send fail it with
+`dtmf_not_sent`. `durationSeconds` (default 5) is how long the call stays
+connected, for example to hear an IVR answer; the runner lengthens a call
+that is too short for the delay plus 0.25 s per digit, 1 s per pause, and 1 s
+to settle, and refuses the step (exit 2) when the budget cannot fit that.
+`srtp: optional` offers RTP/AVP with `a=crypto`; `mandatory` offers RTP/SAVP
+and fails the step with `srtp_not_negotiated` when SRTP is not negotiated.
+SDES keys are confidential only over TLS signaling; over UDP or TCP the
+runner still uses SRTP and adds the warning
+`sdes-key-exposed-on-cleartext-signaling`.
+
+The DTMF digits on the wire are in the RTP payload: a campaign capture with
+`retainPayload: false` keeps only packet headers (54 bytes), so it shows the
+telephone-event packets but not which digits they carry. Use
+`retainPayload: true` when the capture must prove the digits.
+
 ## TLS server name and trust anchor
 
 A TLS target can name the certificate it must present while every packet
@@ -376,10 +429,16 @@ or a credential), the runner performs transport, address family, codec
 preference (`pcmu`, `pcma`, `g722`; `opus` is offered first but counted only
 if negotiated), call duration, and caller-initiated teardown. Its result line
 lists each factor under `factors.exercised` or `factors.notExercised` with a
-reason, and each action by position: only a caller `hangup` is ever performed.
-Absence values it deliberately honors (`dtmf: none`, `mediaProtection: plain`,
-`holdReinvite: disabled`, `impairment: none`) count as exercised; `ptime`,
-`earlyMedia`, `nat`, DTMF, SRTP, hold, and impairments are never claimed.
+reason, and each action by position: a caller `hangup`, and the first
+`dtmf` action when the case's reviewed digits were sent, are performed.
+Absence values it deliberately honors (`dtmf: none` when the case sends no
+digits, `mediaProtection: plain` when the answered call used plain RTP,
+`holdReinvite: disabled`, `impairment: none`) count as exercised.
+`dtmf: rfc4733` is exercised only when the case has `call.dtmf` and PJSUA
+sent every digit with telephone-event negotiated; `mediaProtection:
+sdes-srtp` only when the target's `media.srtp` made SRTP active. `sip-info`,
+`inband`, `dtls-srtp`, `ptime`, `earlyMedia`, `nat`, hold, and impairments
+are never claimed.
 A codec counts only when PJSUA reports that codec negotiated; a duration
 clamped by the step budget is not exercised.
 
@@ -491,16 +550,24 @@ range and networks, global expectations, `retainPayload`, and a mode-0700
   seconds of setup and teardown (4.5 with registration). It hangs up when 1.5
   seconds of budget remain, so it exits before the supervisor's deadline.
   Budgets below 5 seconds are refused;
+- sends the step's `call.dtmf` digits as RFC 4733 events and uses the
+  target's `media.srtp` mode (see "DTMF and SRTP");
 - exits 0 only when the expected `finalStatus` (default 200) was received
   and, for a 2xx expectation, the call was answered, the registration (if
-  any) succeeded, `maxSetupSeconds` held, and, when
+  any) succeeded, `maxSetupSeconds` held (INVITE to 2xx from PJSUA's log
+  timestamps, including any digest challenge), requested DTMF was sent,
+  mandatory SRTP was negotiated, and, when
   `requireBidirectionalRtp` applies (case value, else the global one), PJSUA
   counted RTP sent and received. A case that expects a non-2xx status passes
   only if the call was not answered and that status arrived. Every other
   outcome exits 1; an envelope it cannot execute safely exits 2;
 - prints one secret-free JSON line (`sippycup.dev/softphone-step-result/v1`,
-  at most 4 KiB) with the outcome and reasons, dial user, registration,
-  final status, connected and setup seconds, RTP tx/rx packet counts, codec,
+  at most 4 KiB) with the outcome and reasons, dial user, registration and
+  its final SIP status (`registrationStatus`, for example 401 for a wrong
+  password), final status, connected and setup seconds, `setup` (INVITE to
+  180/183 and to 2xx), `localRtpPort`, `dtmf` (requested, sent, received,
+  `method: rfc4733`, status, negotiated), `srtp` (requested, active, suite,
+  answer profile), `warnings`, RTP tx/rx packet counts, codec,
   hangup side, requested/effective duration, payload policy, credentialed
   INVITE/REGISTER attempts and rejections, and matrix factors. It is recorded
   as a `step.output` event even when secrets are in use (up to 16 KiB per
@@ -827,11 +894,17 @@ reference when the target requires one) to use the softphone runner instead.
 The softphone runner dials only the first frozen address of a multi-address
 target, accepts media only from the step's frozen addresses within the
 authorized RTP range (a separate media server address is refused, because
-the capture filter and watchdog would not see it), sends no DTMF, SRTP, hold,
-or re-INVITE, and does not set ptime. A server that answers a correct response with a
+the capture filter and watchdog would not see it), sends DTMF only as RFC
+4733 events and SRTP only with SDES keying, sends no hold or re-INVITE, and
+does not set ptime. A server that answers a correct response with a
 genuinely stale nonce is not retried (one attempt per transaction is the
-lockout rule), so that call fails. PJSUA's local RTP port is not forced into
-the authorized media range; only the remote port is checked. Digest
+lockout rule), so that call fails. `authorization.mediaPorts` is the
+target's media port range: the runner checks the negotiated remote port
+against it, and the capture filter (`udp portrange START-END` with the target
+host) admits every packet whose target-side port is in it, so both RTP
+directions are captured whatever local port PJSUA uses (it starts at 4000;
+the result line reports `localRtpPort`). The local port is therefore not
+forced into the range. Digest
 authentication itself is exercised only against a real registrar, not by the
 loopback self-test. Every TLS connection a campaign makes (preflight,
 `options` steps, and softphone calls) verifies the certificate, against the

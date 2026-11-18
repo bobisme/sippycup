@@ -224,6 +224,53 @@ def _dial(value: Any, field: str) -> dict[str, str]:
     return {"user": _sip_user(dial["user"], f"{field}.user")}
 
 
+SRTP_MODES = ("off", "optional", "mandatory")
+MAX_DTMF_AFTER_SECONDS = 60
+MAX_CALL_SECONDS = 3600
+
+
+def _call_options(value: Any, field: str) -> dict[str, Any]:
+    """A call case's reviewed in-call actions: RFC 4733 digits after answer,
+    and how long the call stays connected (to hear the response)."""
+    from sippycup_softphone.evidence import DtmfError, validate_dtmf
+
+    call = _mapping(value, field)
+    _keys(call, field, {"dtmf", "dtmfAfterSeconds", "durationSeconds"})
+    if "dtmf" not in call:
+        raise ManifestError(f"{field}.dtmf is required")
+    digits = call["dtmf"]
+    if isinstance(digits, (bool, int)):
+        raise ManifestError(
+            f"{field}.dtmf must be a quoted string (YAML reads unquoted digits as a number)"
+        )
+    try:
+        result: dict[str, Any] = {"dtmf": validate_dtmf(digits)}
+    except DtmfError as error:
+        raise ManifestError(f"{field}.dtmf: {error}") from error
+    if "dtmfAfterSeconds" in call:
+        after = _uint(call["dtmfAfterSeconds"], f"{field}.dtmfAfterSeconds", allow_zero=True)
+        if after > MAX_DTMF_AFTER_SECONDS:
+            raise ManifestError(
+                f"{field}.dtmfAfterSeconds must be at most {MAX_DTMF_AFTER_SECONDS}"
+            )
+        result["dtmfAfterSeconds"] = after
+    if "durationSeconds" in call:
+        seconds = _uint(call["durationSeconds"], f"{field}.durationSeconds")
+        if seconds > MAX_CALL_SECONDS:
+            raise ManifestError(f"{field}.durationSeconds must be at most {MAX_CALL_SECONDS}")
+        result["durationSeconds"] = seconds
+    return result
+
+
+def _media(value: Any, field: str) -> dict[str, str]:
+    """A target's media security for softphone calls (SDES-SRTP mode)."""
+    media = _mapping(value, field)
+    _keys(media, field, {"srtp"})
+    if media.get("srtp") not in SRTP_MODES:
+        raise ManifestError(f"{field}.srtp must be one of off, optional, mandatory")
+    return {"srtp": media["srtp"]}
+
+
 def _account(value: Any, field: str) -> dict[str, Any]:
     account = _mapping(value, field)
     _keys(account, field, {"username", "realm", "register"})
@@ -914,7 +961,7 @@ def compile_plan(
         _keys(
             target,
             f"targets[{index}]",
-            {"name", "address", "signaling", "credentialRef", "account"},
+            {"name", "address", "signaling", "credentialRef", "account", "media"},
         )
         target_name = _name(target.get("name"), f"targets[{index}].name")
         if target_name in targets:
@@ -973,6 +1020,7 @@ def compile_plan(
                     f"targets[{index}].account requires the target's credentialRef "
                     "(the password is supplied at run time, never in the manifest)"
                 )
+        media = _media(target["media"], f"targets[{index}].media") if "media" in target else None
         tls = _tls(signaling, transport, f"targets[{index}].signaling", trust_reader)
         if tls is not None:
             trust = (
@@ -997,6 +1045,7 @@ def compile_plan(
             "credentialRef": credential,
             "account": account,
             "tls": tls,
+            "media": media,
         }
         for address in answers:
             destinations.append(
@@ -1038,7 +1087,7 @@ def compile_plan(
         _keys(
             case,
             f"cases[{index}]",
-            {"id", "type", "target", "count", "budget", "expectations", "generated", "dial"},
+            {"id", "type", "target", "count", "budget", "expectations", "generated", "dial", "call"},
         )
         case_id = _name(case.get("id"), f"cases[{index}].id")
         if case_id in seen_cases:
@@ -1055,6 +1104,16 @@ def compile_plan(
             if case_type != "call":
                 raise ManifestError(f"cases[{index}].dial is only valid for a call case")
             dial = _dial(case["dial"], f"cases[{index}].dial")
+        call_options = None
+        if "call" in case:
+            if case_type != "call":
+                raise ManifestError(f"cases[{index}].call is only valid for a call case")
+            call_options = _call_options(case["call"], f"cases[{index}].call")
+            if "durationSeconds" in call_options and "generated" in case:
+                raise ManifestError(
+                    f"cases[{index}].call.durationSeconds conflicts with the generated "
+                    "duration factor"
+                )
         count = _uint(case.get("count"), f"cases[{index}].count")
         planned_step_count = _checked_add(
             planned_step_count, count, "generated step count"
@@ -1149,6 +1208,10 @@ def compile_plan(
                 step["account"] = dict(targets[target_name]["account"])
             if targets[target_name]["tls"] is not None:
                 step["tls"] = dict(targets[target_name]["tls"])
+            if call_options is not None:
+                step["call"] = dict(call_options)
+            if case_type == "call" and targets[target_name]["media"] is not None:
+                step["media"] = dict(targets[target_name]["media"])
             steps.append(step)
 
     for key, value in totals.items():

@@ -42,9 +42,12 @@ SIP_PASSWORD="$(your-secret-tool read staging-sip)" \
 ```
 
 Use `--dry-run` first to review the plan. See `GUIDED-CALL.md`. The guided
-command checks signaling, media direction, and the recording automatically;
-the interactive items below (speaking, DTMF, mute, hold) still need the
-manual softphone.
+command checks signaling, media direction, and the recording automatically.
+Add `--dtmf 123#` to send the approved digits as RFC 4733 events and verify
+them in the capture, and `--srtp mandatory` when the service must encrypt
+media. A failed registration shows the SIP status (for example 401), and the
+result reports call setup time. The interactive items below (speaking, mute,
+hold) still need the manual softphone.
 
 ## Placing the call with the bundled softphone manually
 
@@ -98,7 +101,7 @@ capture. Delete the configuration file when the engagement ends.
 - [ ] Confirm audio from caller to destination.
 - [ ] Confirm audio from destination to caller.
 - [ ] Speak a recognizable phrase and note response latency.
-- [ ] Test approved DTMF digits, such as `123#`.
+- [ ] Test approved DTMF digits, such as `123#` (guided: `--dtmf 123#`).
 - [ ] Mute and unmute.
 - [ ] Hold and resume, if supported.
 - [ ] End the call from the caller side.

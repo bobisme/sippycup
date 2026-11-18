@@ -612,7 +612,7 @@ def _validate_case_expectations(value: Any, step: int) -> None:
         raise RuntimeError(f"step {step} setup deadline is invalid")
 
 
-OPTIONAL_STEP_KEYS = {"generated", "dial", "account", "tls"}
+OPTIONAL_STEP_KEYS = {"generated", "dial", "account", "tls", "call", "media"}
 _SIP_USER = re.compile(r"[A-Za-z0-9+*][A-Za-z0-9._+*-]{0,63}")
 _SIP_REALM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,252}")
 
@@ -658,6 +658,53 @@ def _validate_call_facts(
     if target in account_by_target and account_by_target[target] != account:
         raise RuntimeError(f"plan step {index} account differs from its target's account")
     account_by_target[target] = account
+
+
+_DTMF = re.compile(r"[0-9A-D*#,]{1,64}")
+
+
+def _validate_media_call_facts(
+    step: dict[str, Any], index: int, media_by_target: dict[str, Any]
+) -> None:
+    """Independently check a call step's DTMF digits and its target's SRTP mode."""
+    if "call" in step:
+        call = _object(step["call"], f"step {index} call")
+        if step["type"] != "call":
+            raise RuntimeError(f"plan step {index} call actions are only valid for a call")
+        if "dtmf" not in call or set(call) - {"dtmf", "dtmfAfterSeconds", "durationSeconds"}:
+            raise RuntimeError(f"plan step {index} call has invalid fields")
+        if "durationSeconds" in call and (
+            not _is_uint(call["durationSeconds"], positive=True)
+            or call["durationSeconds"] > 3600
+            or "generated" in step
+        ):
+            raise RuntimeError(f"plan step {index} call duration is invalid")
+        digits = call["dtmf"]
+        if (
+            not isinstance(digits, str)
+            or _DTMF.fullmatch(digits) is None
+            or not 1 <= len(digits.replace(",", "")) <= 32
+            or digits.count(",") > 32
+        ):
+            raise RuntimeError(f"plan step {index} DTMF digits are invalid")
+        if "dtmfAfterSeconds" in call and (
+            not _is_uint(call["dtmfAfterSeconds"], positive=False)
+            or call["dtmfAfterSeconds"] > 60
+        ):
+            raise RuntimeError(f"plan step {index} DTMF delay is invalid")
+    media = step.get("media")
+    if media is not None:
+        media = _object(media, f"step {index} media")
+        if step["type"] != "call":
+            raise RuntimeError(f"plan step {index} media is only valid for a call")
+        if set(media) != {"srtp"} or media["srtp"] not in ("off", "optional", "mandatory"):
+            raise RuntimeError(f"plan step {index} media is invalid")
+    if step["type"] == "call":
+        # Every call step of one target carries the same media block.
+        target = step["target"]
+        if target in media_by_target and media_by_target[target] != media:
+            raise RuntimeError(f"plan step {index} media differs from its target's media")
+        media_by_target[target] = media
 
 
 def _validate_tls_facts(
@@ -905,6 +952,7 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     calculated = {"calls": 0, "packets": 0, "bytes": 0, "durationSeconds": 0}
     account_by_target: dict[str, Any] = {}
     tls_by_target: dict[str, Any] = {}
+    media_by_target: dict[str, Any] = {}
     for expected_index, step in enumerate(steps, 1):
         step = _object(step, f"steps[{expected_index - 1}]")
         step_keys = {
@@ -927,6 +975,7 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         if credential is not None and credential not in credentials:
             raise RuntimeError(f"plan step {expected_index} credential is unauthorized")
         _validate_call_facts(step, expected_index, account_by_target)
+        _validate_media_call_facts(step, expected_index, media_by_target)
         step_destination = _object(
             step["destination"], f"steps[{expected_index - 1}].destination"
         )
