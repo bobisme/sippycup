@@ -39,8 +39,8 @@ class DressRehearsalGateTests(unittest.TestCase):
     def _gate(self, variant: str, extra: list[str]) -> None:
         wanted = os.environ.get("SIPPYCUP_DRESS_REHEARSAL_GATE")
         if wanted not in {"1" if variant == "direct" else variant, "all"}:
-            self.skipTest("set SIPPYCUP_DRESS_REHEARSAL_GATE=1, =proxy, or =all "
-                          "(make dress-rehearsal-gate, make dress-rehearsal-proxy-gate) to run")
+            self.skipTest("set SIPPYCUP_DRESS_REHEARSAL_GATE=1, =proxy, =proxy-cidr, or =all "
+                          "(make dress-rehearsal-gate, dress-rehearsal-proxy-gate, dress-rehearsal-proxy-cidr-gate) to run")
         available, reason = practice_gate.images_available()
         if not available:
             if os.environ.get("SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES") == "1":
