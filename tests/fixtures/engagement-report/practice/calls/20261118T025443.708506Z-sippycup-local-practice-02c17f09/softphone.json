@@ -1,0 +1,52 @@
+{
+  "answered": false,
+  "cancelled": false,
+  "codec": null,
+  "commands_sent": [
+    "m",
+    "<destination>",
+    "q"
+  ],
+  "connected_seconds": null,
+  "destination_uri": "sip:busy@127.0.0.2:5060",
+  "dialed": true,
+  "disconnect_reason": "Busy Here",
+  "disconnect_status": 486,
+  "error": null,
+  "exit_code": 0,
+  "final_status": 486,
+  "hangup": null,
+  "media_direction": null,
+  "media_peer": null,
+  "ok": false,
+  "registered": true,
+  "registration_attempted": true,
+  "registration_status": 200,
+  "rtp_counts_source": "pjsua-call-dump",
+  "rtp_rx_packets": null,
+  "rtp_tx_packets": null,
+  "schema_version": "sippycup.dev/softphone-result/v1",
+  "started": true,
+  "timeline": [
+    {
+      "at": 0.0,
+      "state": "STARTED"
+    },
+    {
+      "at": 0.021,
+      "state": "DIALED"
+    },
+    {
+      "at": 0.041,
+      "state": "CALLING"
+    },
+    {
+      "at": 0.041,
+      "state": "DISCONNECTED"
+    }
+  ],
+  "tls_detail": null,
+  "tls_server_name": null,
+  "tls_trust": null,
+  "tls_verified": null
+}

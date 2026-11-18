@@ -84,6 +84,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "journal",
                 "evidence",
                 "pack",
+                "summary",
                 "torture",
                 "envelope",
                 "resilience",

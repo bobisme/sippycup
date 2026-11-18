@@ -497,6 +497,24 @@ def assess(
             )
         )
 
+    # Owner-facing engagement report: offered once any campaign or guided-call
+    # run directory exists (docs/ENGAGEMENT-REPORT.md).
+    calls_root = root / "calls"
+    has_call_runs = (
+        calls_root.is_dir()
+        and not calls_root.is_symlink()
+        and any(child.is_dir() for child in itertools.islice(calls_root.iterdir(), MAX_RUNS))
+    )
+    if run_facts["count"] > 0 or has_call_runs:
+        actions.append(
+            _action(
+                "render-owner-report",
+                "Render the owner report",
+                "Assemble what was approved, run, observed, and found for the platform owner; fails closed on privacy lint.",
+                argv=["./bin/sippycup", "summary", str(root)],
+            )
+        )
+
     if scope_facts.get("derivatives", {}).get("state") in {"stale", "invalid"}:
         # Do not steer the operator toward stale derived files.
         actions = [

@@ -1,0 +1,22 @@
+{
+  "pjsua": {
+    "name": "pjsua",
+    "path": "/usr/local/bin/pjsua",
+    "sha256": "67d7e1d0682936c8dcc9c3ccb6ccedc06005514905b8bb6774e9410738c8e076",
+    "version": "2.17"
+  },
+  "python": "3.13.5",
+  "schema": "sippycup.dev/call-versions/v1",
+  "tcpdump": {
+    "name": "tcpdump",
+    "path": "/usr/bin/tcpdump",
+    "sha256": "0d426e2571a22de0d30996fd01bb44c1f267f33065023abea092c88bad16d2d2",
+    "version": "tcpdump version 4.99.5"
+  },
+  "tshark": {
+    "name": "tshark",
+    "path": "/usr/bin/tshark",
+    "sha256": "261988b660afc78134fb20e4d7cd9d185b26b5e82fbc10713c9af10de6bfa074",
+    "version": "TShark (Wireshark) 4.4.19"
+  }
+}

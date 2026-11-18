@@ -1,0 +1,38 @@
+{
+  "authorization": {
+    "approval_id": "LOCAL-PRACTICE-ONLY",
+    "approved_by": "sippycup practice-target up (local loopback practice only)",
+    "status": "approved",
+    "valid_from": "2026-11-18T02:53:06Z",
+    "valid_until": "2026-11-18T06:54:06Z"
+  },
+  "capture": {
+    "interface": "lo",
+    "output": "work/practice/call-tls.pcap"
+  },
+  "features": {
+    "dtls_srtp": false,
+    "ice": false,
+    "srtp": false,
+    "turn": false,
+    "webrtc": false
+  },
+  "limits": {
+    "max_calls": 1,
+    "max_calls_per_second": 1,
+    "max_concurrency": 1,
+    "max_duration_seconds": 60
+  },
+  "name": "sippycup-local-practice-tls",
+  "schema_version": "sippycup.dev/target-profile/v1",
+  "target": {
+    "approved_addresses": [
+      "127.0.0.2"
+    ],
+    "host": "127.0.0.2",
+    "port": 5061,
+    "tls_ca_file": "work/practice/ca.crt",
+    "tls_server_name": "sippycup-practice",
+    "transport": "tls"
+  }
+}

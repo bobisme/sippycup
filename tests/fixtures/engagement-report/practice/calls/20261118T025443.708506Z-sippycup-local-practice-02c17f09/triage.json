@@ -1,0 +1,50 @@
+{
+  "capture": "/work/eng-report/calls/20261118T025443.708506Z-sippycup-local-practice-02c17f09/capture.pcap",
+  "findings": [
+    {
+      "code": "capture.nonempty",
+      "message": "17 packets captured",
+      "verdict": "pass"
+    },
+    {
+      "code": "capture.sip_present",
+      "message": "17 SIP frames decoded",
+      "verdict": "pass"
+    },
+    {
+      "code": "capture.media_present",
+      "message": "0 RTP and 0 RTCP frames decoded",
+      "verdict": "unknown"
+    },
+    {
+      "code": "privacy.authorization_present",
+      "message": "authorization material is present; do not share the source capture",
+      "verdict": "warn"
+    }
+  ],
+  "metadata": {
+    "bytes": 12134,
+    "duration_seconds": 0.043267,
+    "packets": 17
+  },
+  "network_activity": false,
+  "optional_analyzers": {
+    "visqol": false,
+    "zeek": false
+  },
+  "privacy": {
+    "authorization_material_observed": true,
+    "call_identifiers_observed": true,
+    "inspection_complete": true,
+    "values_disclosed": false
+  },
+  "protocol_frames": {
+    "rtcp": 0,
+    "rtp": 0,
+    "sdp": 2,
+    "sip": 17,
+    "stun": 0,
+    "tls": 0
+  },
+  "schema_version": "sippycup.dev/triage/v1"
+}

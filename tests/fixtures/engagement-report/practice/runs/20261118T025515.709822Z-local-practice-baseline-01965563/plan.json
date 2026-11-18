@@ -1,0 +1,125 @@
+{
+  "apiVersion": "sippycup.dev/plan/v1",
+  "assumptions": [],
+  "authorization": {
+    "credentialRefs": [],
+    "hardMaxima": {
+      "bytes": 100000,
+      "calls": 2,
+      "callsPerSecond": 1,
+      "concurrentCalls": 1,
+      "durationSeconds": 30,
+      "packets": 100,
+      "packetsPerSecond": 50
+    },
+    "mediaPorts": {
+      "end": 20019,
+      "start": 20000
+    },
+    "networks": [
+      "127.0.0.2/32"
+    ],
+    "signalingPorts": [
+      5060
+    ],
+    "stopConditions": {
+      "consecutiveFailures": 1,
+      "packetLossPercent": 5,
+      "unexpectedResponse": true
+    },
+    "transports": [
+      "tcp",
+      "udp"
+    ]
+  },
+  "captureFilter": "(host 127.0.0.2 and (tcp port 5060 or udp port 5060 or udp portrange 20000-20019))",
+  "evidence": {
+    "capture": true,
+    "directory": "evidence/local-practice",
+    "retainPayload": false
+  },
+  "expectations": {
+    "allowedSipStatuses": [
+      200
+    ],
+    "requireBidirectionalRtp": false
+  },
+  "kind": "CampaignPlan",
+  "metadata": {
+    "manifestSha256": "dd3a29948cde1f33a8aa0ef9e8dabee53a99b8b2a3352835004ec81719c6dabb",
+    "name": "local-practice-baseline"
+  },
+  "plannedTotals": {
+    "bytes": 30000,
+    "calls": 0,
+    "durationSeconds": 10,
+    "packets": 30
+  },
+  "resolutionPins": {},
+  "resolvedDestinations": [
+    {
+      "address": "127.0.0.2",
+      "port": 5060,
+      "target": "practice-tcp",
+      "transport": "tcp"
+    },
+    {
+      "address": "127.0.0.2",
+      "port": 5060,
+      "target": "practice-udp",
+      "transport": "udp"
+    }
+  ],
+  "steps": [
+    {
+      "budget": {
+        "bytes": 10000,
+        "calls": 0,
+        "durationSeconds": 5,
+        "packets": 10
+      },
+      "case": "options-udp",
+      "credentialRef": null,
+      "destination": {
+        "addresses": [
+          "127.0.0.2"
+        ],
+        "port": 5060,
+        "transport": "udp"
+      },
+      "expectations": {
+        "apiVersion": "sippycup.dev/case-expectations/v1",
+        "finalStatus": 200
+      },
+      "index": 1,
+      "sequence": 1,
+      "target": "practice-udp",
+      "type": "options"
+    },
+    {
+      "budget": {
+        "bytes": 20000,
+        "calls": 0,
+        "durationSeconds": 5,
+        "packets": 20
+      },
+      "case": "options-tcp",
+      "credentialRef": null,
+      "destination": {
+        "addresses": [
+          "127.0.0.2"
+        ],
+        "port": 5060,
+        "transport": "tcp"
+      },
+      "expectations": {
+        "apiVersion": "sippycup.dev/case-expectations/v1",
+        "finalStatus": 200
+      },
+      "index": 2,
+      "sequence": 1,
+      "target": "practice-tcp",
+      "type": "options"
+    }
+  ]
+}

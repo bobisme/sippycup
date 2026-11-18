@@ -1,0 +1,19 @@
+[
+  {
+    "address": "127.0.0.2",
+    "detail": "SIP/2.0 200 OK",
+    "ok": true,
+    "port": 5061,
+    "statusClass": "2xx",
+    "statusCode": 200,
+    "target": "practice-tls",
+    "tls": {
+      "caSha256": "e98b847753fe41839b190f7768be35bfe7368a5e3eb0807f826fdad6d20885af",
+      "serverName": "sippycup-practice",
+      "trust": "file",
+      "verified": true
+    },
+    "transport": "tls",
+    "warning": null
+  }
+]

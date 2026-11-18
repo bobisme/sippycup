@@ -211,6 +211,22 @@ suggested structure and disclosure checklist. A human must write the article
 from validated facts, run privacy review, and obtain Quad's approval for the
 exact text.
 
+## Owner report
+
+When the runs are complete, assemble the report you hand the platform owner:
+what was approved, what ran, what happened, what was found, and what to fix.
+
+```sh
+./bin/sippycup summary work/ferivox-assessment --journal
+```
+
+It writes `report/engagement-report.md`, `report/engagement-report.html`, and
+`report/report.json`, re-checks every run against the approved targets,
+window, and ceilings, and refuses to write anything if the rendered owner
+report would disclose credentials, subscriber identifiers, or unapproved
+addresses. `--journal` records the report hash in the journal. See
+[`ENGAGEMENT-REPORT.md`](ENGAGEMENT-REPORT.md).
+
 ## Campaign evidence inside the engagement
 
 Place supervised runs below the engagement root:

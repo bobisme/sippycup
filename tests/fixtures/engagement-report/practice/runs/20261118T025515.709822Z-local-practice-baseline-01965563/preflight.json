@@ -1,0 +1,24 @@
+[
+  {
+    "address": "127.0.0.2",
+    "detail": "SIP/2.0 200 OK",
+    "ok": true,
+    "port": 5060,
+    "statusClass": "2xx",
+    "statusCode": 200,
+    "target": "practice-tcp",
+    "transport": "tcp",
+    "warning": null
+  },
+  {
+    "address": "127.0.0.2",
+    "detail": "SIP/2.0 200 OK",
+    "ok": true,
+    "port": 5060,
+    "statusClass": "2xx",
+    "statusCode": 200,
+    "target": "practice-udp",
+    "transport": "udp",
+    "warning": null
+  }
+]

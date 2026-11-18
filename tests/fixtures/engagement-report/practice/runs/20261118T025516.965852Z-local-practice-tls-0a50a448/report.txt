@@ -1,0 +1,14 @@
+Sippycup PCAP report
+Capture: /work/eng-report/runs/20261118T025516.965852Z-local-practice-tls-0a50a448/capture.pcap
+Generated (UTC): 2026-11-18T02:55:23Z
+
+================================================================
+Capture metadata and hashes
+================================================================
+File name:           /work/eng-report/runs/20261118T025516.965852Z-local-practice-tls-0a50a448/capture.pcap
+Packet size limit:   inferred: 54 bytes
+Number of packets:   573
+File size:           64 kB
+Capture duration:    6.230508 seconds
+Earliest packet time: 2026-11-18 02:55:16.992546
+Latest packet time:   2026-11-18 02:55:23.223054

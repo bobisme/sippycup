@@ -1,0 +1,149 @@
+{
+  "apiVersion": "sippycup.dev/call-result/v1",
+  "captureFilter": "(host 127.0.0.2) and (tcp port 5061 or udp)",
+  "destinationUri": "sip:echo@sippycup-practice:5061;transport=tls",
+  "durationSeconds": {
+    "effective": 10,
+    "limit": 60,
+    "requested": 10
+  },
+  "evidenceManifest": "evidence-manifest.json",
+  "exitCode": 0,
+  "journalCommand": [
+    "./bin/sippycup",
+    "journal",
+    "add",
+    "work/eng-report",
+    "--kind",
+    "action",
+    "--summary",
+    "Guided baseline call (sippycup-local-practice-tls): pass",
+    "--evidence",
+    "calls/20261118T025453.149898Z-sippycup-local-practice-tls-228c57af/result.json",
+    "--evidence",
+    "calls/20261118T025453.149898Z-sippycup-local-practice-tls-228c57af/evidence-manifest.json",
+    "--evidence",
+    "calls/20261118T025453.149898Z-sippycup-local-practice-tls-228c57af/capture.pcap"
+  ],
+  "localAddress": "127.0.0.1",
+  "networkActivity": "1 SIP OPTIONS preflight, 1 REGISTER exchange (plus unregistration on exit), 1 INVITE dialog with RTP to 127.0.0.2:5061/tls inside the container's private network namespace (loopback, no NAT)",
+  "networkMode": "private",
+  "notes": [
+    "The target is a loopback address inside the container's own network namespace; no NAT applies.",
+    "Signaling was TLS-encrypted on the wire, so the packet oracle cannot reconstruct the SIP dialog; its result is recorded but does not decide the verdict. Signaling facts come from PJSUA's own log (TLS verified for sippycup-practice); media facts come from the capture, with RTP decoded on the negotiated media port."
+  ],
+  "oracle": {
+    "dialogs": 0,
+    "exit_code": 4,
+    "failed": [],
+    "stream_directions": [],
+    "summary": {
+      "fail": 0,
+      "pass": 0,
+      "unknown": 1
+    },
+    "unknown": [
+      "dialog[0].dialog.present"
+    ],
+    "verdict": "unknown"
+  },
+  "preflight": {
+    "detail": "SIP/2.0 200 OK",
+    "ok": true
+  },
+  "profile": "sippycup-local-practice-tls",
+  "recording": {
+    "channels": 1,
+    "path": "heard.wav",
+    "peak": 8122,
+    "peak_dbfs": -12.1,
+    "present": true,
+    "readable": true,
+    "rms_dbfs": -15.3,
+    "sample_rate": 16000,
+    "seconds": 10.0,
+    "silence_threshold_peak": 104,
+    "silent": false
+  },
+  "runDirectory": "work/eng-report/calls/20261118T025453.149898Z-sippycup-local-practice-tls-228c57af",
+  "softphone": {
+    "answered": true,
+    "cancelled": false,
+    "codec": "PCMU",
+    "connected_seconds": 10.003,
+    "dialed": true,
+    "disconnect_reason": "OK",
+    "disconnect_status": 200,
+    "error": null,
+    "final_status": 200,
+    "hangup": "duration",
+    "media_direction": "sendrecv",
+    "media_peer": "127.0.0.2:20002",
+    "registered": true,
+    "registration_attempted": true,
+    "registration_status": 200,
+    "rtp_rx_packets": 500,
+    "rtp_tx_packets": 500,
+    "tls_server_name": "sippycup-practice",
+    "tls_verified": true
+  },
+  "state": "completed",
+  "target": {
+    "host": "127.0.0.2",
+    "port": 5061,
+    "transport": "tls"
+  },
+  "timestamps": {
+    "call_ended": "2026-11-18T02:55:05.401238Z",
+    "call_started": "2026-11-18T02:54:54.286417Z",
+    "capture_ready": "2026-11-18T02:54:54.277465Z",
+    "capture_stopped": "2026-11-18T02:55:05.931771Z",
+    "finished": "2026-11-18T02:55:07.348763Z",
+    "preflight_sent": "2026-11-18T02:54:54.278760Z",
+    "started": "2026-11-18T02:54:53.149963Z"
+  },
+  "tls": {
+    "caFile": "work/practice/ca.crt",
+    "caSha256": "e98b847753fe41839b190f7768be35bfe7368a5e3eb0807f826fdad6d20885af",
+    "connectsTo": "127.0.0.2",
+    "media": {
+      "inbound": 500,
+      "outbound": 500,
+      "peer": "127.0.0.2:20002",
+      "source": "capture"
+    },
+    "preflightVerified": true,
+    "serverName": "sippycup-practice",
+    "softphoneDetail": "sippycup-practice:5061: OK",
+    "softphoneVerified": true,
+    "trust": "file",
+    "verified": true
+  },
+  "triage": {
+    "exit_code": 0,
+    "findings": [
+      {
+        "code": "capture.nonempty",
+        "verdict": "pass"
+      },
+      {
+        "code": "capture.sip_present",
+        "verdict": "unknown"
+      },
+      {
+        "code": "capture.media_present",
+        "verdict": "pass"
+      }
+    ],
+    "packets": 1061,
+    "protocol_frames": {
+      "rtcp": 7,
+      "rtp": 0,
+      "sdp": 0,
+      "sip": 0,
+      "stun": 0,
+      "tls": 31
+    }
+  },
+  "verdict": "pass"
+}

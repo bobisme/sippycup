@@ -1,0 +1,9 @@
+{
+  "apiVersion": "sippycup.dev/engagement/v1",
+  "confidentiality": "private",
+  "createdAt": "2026-11-18T02:54:13.597821Z",
+  "journal": "journal.jsonl",
+  "kind": "AssessmentEngagement",
+  "owner": "Practice Owner",
+  "title": "Practice engagement report rehearsal"
+}

@@ -1,0 +1,142 @@
+{
+  "apiVersion": "sippycup.dev/plan/v1",
+  "assumptions": [
+    "TLS to practice-tls verifies server name sippycup-practice against CA file work/practice/ca.crt (sha256 e98b847753fe41839b190f7768be35bfe7368a5e3eb0807f826fdad6d20885af); connections go only to 127.0.0.2 and the name is never resolved"
+  ],
+  "authorization": {
+    "credentialRefs": [
+      "practice-password"
+    ],
+    "hardMaxima": {
+      "bytes": 800000,
+      "calls": 1,
+      "callsPerSecond": 1,
+      "concurrentCalls": 1,
+      "durationSeconds": 60,
+      "packets": 2500,
+      "packetsPerSecond": 400
+    },
+    "mediaPorts": {
+      "end": 20019,
+      "start": 20000
+    },
+    "networks": [
+      "127.0.0.2/32"
+    ],
+    "signalingPorts": [
+      5061
+    ],
+    "stopConditions": {
+      "consecutiveFailures": 1,
+      "packetLossPercent": 5,
+      "unexpectedResponse": true
+    },
+    "transports": [
+      "tls"
+    ]
+  },
+  "captureFilter": "(host 127.0.0.2 and (tcp port 5061 or udp portrange 20000-20019))",
+  "evidence": {
+    "capture": true,
+    "directory": "evidence/local-practice-tls",
+    "retainPayload": false
+  },
+  "expectations": {
+    "allowedSipStatuses": [
+      100,
+      180,
+      200
+    ],
+    "requireBidirectionalRtp": true
+  },
+  "kind": "CampaignPlan",
+  "metadata": {
+    "manifestSha256": "6917c93ac9c19284460b0b09620c75a3aba046a758cbdcb9e47128390f1fe631",
+    "name": "local-practice-tls"
+  },
+  "plannedTotals": {
+    "bytes": 720000,
+    "calls": 1,
+    "durationSeconds": 20,
+    "packets": 2020
+  },
+  "resolutionPins": {},
+  "resolvedDestinations": [
+    {
+      "address": "127.0.0.2",
+      "port": 5061,
+      "target": "practice-tls",
+      "transport": "tls"
+    }
+  ],
+  "steps": [
+    {
+      "budget": {
+        "bytes": 20000,
+        "calls": 0,
+        "durationSeconds": 5,
+        "packets": 20
+      },
+      "case": "options-tls",
+      "credentialRef": "practice-password",
+      "destination": {
+        "addresses": [
+          "127.0.0.2"
+        ],
+        "port": 5061,
+        "transport": "tls"
+      },
+      "expectations": {
+        "apiVersion": "sippycup.dev/case-expectations/v1",
+        "finalStatus": 200
+      },
+      "index": 1,
+      "sequence": 1,
+      "target": "practice-tls",
+      "tls": {
+        "caFile": "work/practice/ca.crt",
+        "caSha256": "e98b847753fe41839b190f7768be35bfe7368a5e3eb0807f826fdad6d20885af",
+        "serverName": "sippycup-practice"
+      },
+      "type": "options"
+    },
+    {
+      "account": {
+        "register": true,
+        "username": "practice"
+      },
+      "budget": {
+        "bytes": 700000,
+        "calls": 1,
+        "durationSeconds": 15,
+        "packets": 2000
+      },
+      "case": "call-echo-tls",
+      "credentialRef": "practice-password",
+      "destination": {
+        "addresses": [
+          "127.0.0.2"
+        ],
+        "port": 5061,
+        "transport": "tls"
+      },
+      "dial": {
+        "user": "echo"
+      },
+      "expectations": {
+        "apiVersion": "sippycup.dev/case-expectations/v1",
+        "finalStatus": 200,
+        "requireBidirectionalRtp": true
+      },
+      "index": 2,
+      "sequence": 1,
+      "target": "practice-tls",
+      "tls": {
+        "caFile": "work/practice/ca.crt",
+        "caSha256": "e98b847753fe41839b190f7768be35bfe7368a5e3eb0807f826fdad6d20885af",
+        "serverName": "sippycup-practice"
+      },
+      "type": "call"
+    }
+  ]
+}

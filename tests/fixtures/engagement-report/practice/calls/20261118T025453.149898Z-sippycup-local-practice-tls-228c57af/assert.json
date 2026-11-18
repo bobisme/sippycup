@@ -1,0 +1,10 @@
+{
+  "dialogs": [],
+  "schema_version": "sippycup.results/v1",
+  "summary": {
+    "fail": 0,
+    "pass": 0,
+    "unknown": 1
+  },
+  "verdict": "unknown"
+}

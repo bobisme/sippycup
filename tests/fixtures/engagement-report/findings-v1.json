@@ -1,0 +1,49 @@
+{
+  "apiVersion": "sippycup.dev/findings/v1",
+  "target": {"name": "practice-udp", "address": "127.0.0.2", "port": 5060, "transport": "udp", "futureField": {"ignored": true}},
+  "generatedAt": "2026-11-18T03:10:00Z",
+  "unknownTopLevel": ["ignored"],
+  "checks": [
+    {"id": "options-method-exposure", "status": "finding", "requestsSent": 2, "summary": "OPTIONS answered with an Allow header listing every method."},
+    {"id": "register-user-enumeration", "status": "passed", "requestsSent": 4, "summary": "Responses did not distinguish known from unknown users."},
+    {"id": "tls-legacy-protocols", "status": "skipped", "requestsSent": 0, "summary": "The approved scope has no TLS target on this address."},
+    {"id": "invite-flood", "status": "not-approved", "requestsSent": 0, "summary": "Overload tests are not in the approved test classes."},
+    {"id": "server-header", "status": "finding", "requestsSent": 1, "summary": "The Server header discloses the product and version.", "extra": 7}
+  ],
+  "findings": [
+    {
+      "id": "fnd-001",
+      "checkId": "server-header",
+      "title": "Server header discloses product and version",
+      "severity": "low",
+      "confidence": "high",
+      "summary": "Every response carries a Server header naming the product and its exact version.",
+      "evidence": [{"kind": "response-header", "detail": "Server header present on 1 of 1 responses", "artifact": "responses.json"}],
+      "remediation": "Remove or genericize the Server header on the signaling edge.",
+      "references": ["RFC 3261 section 20.35"],
+      "notInSpec": "ignored"
+    },
+    {
+      "id": "fnd-002",
+      "checkId": "options-method-exposure",
+      "title": "OPTIONS discloses the full method set",
+      "severity": "info",
+      "confidence": "medium",
+      "summary": "The Allow header lists methods the service does not need to expose to unauthenticated peers.",
+      "evidence": [{"kind": "response-header", "detail": "Allow lists 13 methods"}],
+      "remediation": "Limit the Allow header to the methods offered to unauthenticated peers.",
+      "references": []
+    },
+    {
+      "id": "fnd-003",
+      "checkId": "auth-bypass",
+      "title": "INVITE accepted without authentication",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "An INVITE without credentials reached the dial plan.",
+      "evidence": [{"kind": "status", "detail": "180 Ringing without a challenge"}],
+      "remediation": "Challenge every INVITE from untrusted sources before routing.",
+      "references": ["RFC 3261 section 22"]
+    }
+  ]
+}
