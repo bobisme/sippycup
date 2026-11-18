@@ -522,6 +522,18 @@ owner report; see `docs/LADDER.md`):
 ./bin/sippycup ladder work/practice/calls/RUN_ID --format html --output ladder.html
 ```
 
+When a run does not pass, one page says what happened, at which stage, how sure
+the evidence is, whose side it is probably on, and which command to run next
+(or that you must stop and ask the owner). It reads a call, matrix, campaign, or
+checks run directory, is offline, and redacts like the ladder (see
+`docs/DIAGNOSE.md`):
+
+```sh
+./bin/sippycup diagnose work/practice/calls/RUN_ID
+./bin/sippycup diagnose work/practice/calls/RUN_ID --brief
+./bin/sippycup diagnose --compare work/practice/calls/PASSING work/practice/calls/FAILING
+```
+
 Codec, endpoint topology, one-way media, response/setup timing, assertion,
 and post-BYE changes remain semantic and link back to source frames. JSON,
 human, and JUnit views share one versioned result model. See

@@ -1615,7 +1615,8 @@ def _codec_notes(codec: dict[str, Any], verdict: str) -> list[str]:
             f"The offer listed codecs beyond the requested {requested}: {', '.join(codec.get('offered') or [])}."
         )
     wire = codec.get("wire") or {}
-    if wire.get("mediaUsesNegotiated") is False:
+    seen_types = wire.get("rtpPayloadTypes") or {}
+    if wire.get("mediaUsesNegotiated") is False and (seen_types.get("outbound") or seen_types.get("inbound")):
         notes.append(
             f"RTP on the media port used payload types {wire.get('rtpPayloadTypes')}, not only the "
             f"negotiated {codec.get('negotiated')} (payload type {codec.get('negotiatedPayloadType')})."
@@ -1983,6 +1984,7 @@ def _execute(
         plan = {
             "schema_version": PLAN_VERSION,
             "profile": profile_name,
+            "profile_path": _display(options.profile, work_root),
             "authorization": {
                 "networks": [
                     str(ipaddress.ip_network(item)) for item in dict.fromkeys([*approved, local])
@@ -2632,6 +2634,8 @@ def render_human(value: dict[str, Any]) -> str:
         lines.append(f"NOTE: {note}")
     if value["verdict"] != "pass":
         lines.append(f"Explain: ./bin/sippycup explain call.{value['verdict']}")
+        if value.get("runDirectory"):
+            lines.append(f"Diagnose: ./bin/sippycup diagnose {value['runDirectory']}")
     lines.append(f"Run directory: {value['runDirectory']}")
     lines.append(f"Record it: {shlex.join(value['journalCommand'])}")
     lines.append(f"Network activity: {value['networkActivity']}")

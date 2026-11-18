@@ -176,6 +176,20 @@ status is 0 when drawn, 2 for bad arguments or an unusable path, 3 for an
 unreadable capture, 4 when there is nothing to draw (no SIP, TLS, or RTP), and
 5 for an internal error or a privacy lint refusal. See `LADDER.md`.
 
+## Diagnose a run
+
+`./bin/sippycup diagnose RUN_DIR [--format text|json] [--brief] [--output FILE]
+[--no-ladder] [--width N] [--approve NET] [--show-addresses]` and
+`./bin/sippycup diagnose --compare RUN_A RUN_B` turn a guided call, matrix,
+campaign, or checks run directory into one page: what happened and at which
+stage, the decisive evidence, whose side it probably is on and how sure that
+is, and the next `./bin/sippycup` commands built from the run's own recorded
+profile and flags (or a stop-and-ask). It is offline (`direct` mode, like
+`ladder`). Exit status is 0 when written (even for a failed run), 2 for bad
+arguments or an unusable path, 4 when the directory is not a known run, and 5
+for an internal error or a privacy lint refusal. `--brief` prints five lines
+for the cockpit. See `DIAGNOSE.md`.
+
 
 ## Dress rehearsal
 

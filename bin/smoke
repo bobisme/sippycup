@@ -46,6 +46,7 @@ commands=(
     sippycup-chaos
     sippycup-diff
     sippycup-ladder
+    sippycup-diagnose
     sippycup-evidence
     sippycup-pack
     sippycup-envelope
@@ -130,6 +131,7 @@ first_party_help=(
     sippycup-chaos
     sippycup-diff
     sippycup-ladder
+    sippycup-diagnose
     sippycup-envelope
     sippycup-evidence
     sippycup-media
