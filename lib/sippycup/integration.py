@@ -10,8 +10,6 @@ import re
 import secrets as random
 import shutil
 import signal
-import socket
-import ssl
 import struct
 import subprocess
 import threading
@@ -34,7 +32,13 @@ class _FinishExecution(Exception):
 
 
 class CaptureWatchdog:
-    """Continuously enforce traffic ceilings from an immediate-mode PCAP."""
+    """Continuously enforce traffic ceilings from an immediate-mode PCAP.
+
+    Calls are counted by cleartext ``INVITE``, so TLS calls are invisible here.
+    ``ceilings.calls`` holds for them through the plan-time bound in
+    ``runtime._validate_plan`` (one call per call step, summed against
+    ``hardMaxima.calls``); see docs/CAMPAIGN-MANIFEST.md.
+    """
 
     def __init__(self, capture: Path, maxima: Mapping[str, int]) -> None:
         self.capture = capture
@@ -349,6 +353,10 @@ def _identity(command: str) -> dict[str, Any]:
 SIPP_RUNNER = "campaign-sipp-runner"
 SOFTPHONE_RUNNER = "campaign-softphone-runner"
 SOFTPHONE_OUTPUT_LIMIT = 16 * 1024
+# An OPTIONS step never receives a credential (see runner_input) and its output
+# is redacted like every other step's, so its one-line JSON summary may be
+# kept even when the campaign holds secrets.
+OPTIONS_OUTPUT_LIMIT = 4 * 1024
 
 
 def _bundled_runner(name: str = SIPP_RUNNER) -> str:
@@ -810,6 +818,17 @@ def execute_campaign(
                     "reports an error",
                     file=os.sys.stderr,
                 )
+            if (
+                plan["authorization"]["stopConditions"].get("preflightServerError") is True
+                and ok
+                and status_class in {"5xx", "6xx"}
+            ):
+                # Strict preflight, opted into by the reviewed manifest: a
+                # server-error answer fails the campaign before any further
+                # preflight or step is sent.
+                _write_json(run_dir / "preflight.json", preflight_results)
+                result = RunResult(1, "preflight_failed", 0)
+                raise _FinishExecution
             if cancel_signal is not None:
                 _write_json(run_dir / "preflight.json", preflight_results)
                 code = 130 if cancel_signal == signal.SIGINT else 143
@@ -831,7 +850,11 @@ def execute_campaign(
             # sends every credentialed call to the softphone runner, so the
             # SIPp runner sees credentials only on OPTIONS steps of a
             # credentialed target, which are sent unauthenticated anyway.
-            if reference is not None and step_runner_names[step["index"]] != SIPP_RUNNER:
+            if (
+                reference is not None
+                and step["type"] == "call"
+                and step_runner_names[step["index"]] != SIPP_RUNNER
+            ):
                 credentials[reference] = secret_values[reference]
             envelope: dict[str, Any] = {"step": step, "credentials": credentials}
             if step_runner_names[step["index"]] == SOFTPHONE_RUNNER:
@@ -860,6 +883,8 @@ def execute_campaign(
             # result line; other runners stay silent when secrets exist.
             if step_runner_names[step["index"]] == SOFTPHONE_RUNNER:
                 return SOFTPHONE_OUTPUT_LIMIT
+            if step["type"] == "options":
+                return OPTIONS_OUTPUT_LIMIT
             return 0
 
         result = run_plan(

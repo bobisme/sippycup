@@ -268,6 +268,9 @@ RUN chmod 0755 \
         /usr/local/bin/sippycup-resilience \
         /usr/local/bin/sippycup-workbench \
         /usr/local/bin/sippycup-smoke \
+        /usr/local/bin/sippycup-web-security \
+        /usr/local/bin/web-security-profile \
+        /usr/local/bin/web-security-evidence \
     && mkdir -p /work \
     && printf '%s\n' \
         'alias ll="ls -alF"' \

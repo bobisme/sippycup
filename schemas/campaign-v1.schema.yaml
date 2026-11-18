@@ -83,6 +83,7 @@ properties:
           consecutiveFailures: {$ref: '#/$defs/positiveU64'}
           unexpectedResponse: {type: boolean}
           packetLossPercent: {type: number, minimum: 0, maximum: 100}
+          preflightServerError: {type: boolean}
   targets:
     type: array
     minItems: 1

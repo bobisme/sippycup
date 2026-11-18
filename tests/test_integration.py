@@ -40,6 +40,16 @@ TOOL = FIXTURES / "integration-tool.py"
 PROVIDER = FIXTURES / "secret-provider.py"
 
 
+def options_plan():
+    manifest = yaml.safe_load((FIXTURES / "valid.yaml").read_bytes())
+    manifest["targets"][0]["address"] = "127.0.0.1"
+    manifest["authorization"]["networks"] = ["127.0.0.0/8"]
+    manifest["cases"] = [copy.deepcopy(manifest["cases"][0])]
+    manifest["authorization"]["ceilings"]["calls"] = 1
+    raw = yaml.safe_dump(manifest, sort_keys=True).encode()
+    return compile_plan(manifest, hashlib.sha256(raw).hexdigest()), raw
+
+
 def one_call_plan(*, credential: bool = False, max_packets: int = 100):
     manifest = yaml.safe_load((FIXTURES / "valid.yaml").read_bytes())
     manifest["targets"][0]["address"] = "127.0.0.1"
@@ -195,6 +205,34 @@ class IntegrationTests(unittest.TestCase):
                 stderr.seek(0)
                 self.assertEqual("preflight warning" in stderr.read(), warning is not None)
 
+    def test_strict_preflight_fails_the_campaign_on_5xx_and_6xx_only_when_opted_in(self):
+        def strict_plan():
+            manifest = yaml.safe_load((FIXTURES / "valid.yaml").read_bytes())
+            manifest["targets"][0]["address"] = "127.0.0.1"
+            manifest["authorization"]["networks"] = ["127.0.0.0/8"]
+            manifest["authorization"]["stopConditions"]["preflightServerError"] = True
+            manifest["targets"][0].pop("credentialRef")
+            manifest["authorization"]["credentialRefs"] = []
+            raw = yaml.safe_dump(manifest, sort_keys=True).encode()
+            return compile_plan(manifest, hashlib.sha256(raw).hexdigest()), raw
+
+        for detail in ("SIP/2.0 503 Service Unavailable", "SIP/2.0 603 Decline"):
+            with self.subTest(detail=detail):
+                result, run_dir, order = self.execute(
+                    strict_plan(), preflight=lambda _d, d=detail: (True, d)
+                )
+                self.assertEqual(result.state, "preflight_failed")
+                self.assertEqual(order.read_text().splitlines(), ["capture-start", "capture-stop"])
+                self.assertFalse((run_dir / "events.jsonl").exists())
+                (entry,) = json.loads((run_dir / "preflight.json").read_text())
+                self.assertEqual(entry["warning"], "server_error_response")
+        for detail in ("SIP/2.0 200 OK", "SIP/2.0 404 Not Found"):
+            with self.subTest(detail=detail):
+                result, _run_dir, _order = self.execute(
+                    strict_plan(), preflight=lambda _d, d=detail: (True, d)
+                )
+                self.assertEqual(result.state, "succeeded")
+
     def test_failed_preflight_sends_no_call_and_still_tears_down_capture(self):
         result, run_dir, order = self.execute(
             one_call_plan(),
@@ -224,6 +262,83 @@ class IntegrationTests(unittest.TestCase):
         self.assertNotIn(secret.encode(), _order.with_suffix(".argv").read_bytes())
         events = (run_dir / "events.jsonl").read_text()
         self.assertIn("step.output_truncated", events)
+
+    def test_options_summary_is_retained_with_secrets_and_stays_redacted(self):
+        secret = "correct horse fixture battery staple"
+        plan, manifest_bytes = options_plan()
+        self.assertEqual([step["type"] for step in plan["steps"]], ["options"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            order = root / "order.txt"
+            result, run_dir = execute_campaign(
+                plan,
+                manifest_bytes=manifest_bytes,
+                run_root=root / "runs",
+                runner=[sys.executable, str(FIXTURES / "options-summary-runner.py"), secret],
+                capture_command=[sys.executable, str(TOOL), "capture", "{capture}", str(order)],
+                report_command=[sys.executable, str(TOOL), "report", "{capture}"],
+                preflight=lambda _destination: (True, "SIP/2.0 200 OK"),
+                secret_values={"staging-user": secret},
+                allow_test_runner=True,
+            )
+            self.assertEqual(result.state, "succeeded")
+            events = [
+                json.loads(line)
+                for line in (run_dir / "events.jsonl").read_text().splitlines()
+            ]
+            outputs = [event for event in events if event["event"].startswith("step.output")]
+            self.assertTrue(outputs)
+            self.assertFalse(
+                [event for event in outputs if event["event"] == "step.output_truncated" and event.get("retainedBytes") == 0],
+                "the OPTIONS summary must not be dropped",
+            )
+            retained = json.dumps(outputs)
+            self.assertIn("credentialsReceived", retained)
+            self.assertNotIn(secret, retained)
+            for path in run_dir.rglob("*"):
+                if path.is_file():
+                    self.assertNotIn(secret.encode(), path.read_bytes(), path.name)
+
+    def test_call_step_output_is_still_discarded_when_secrets_exist(self):
+        secret = "correct horse fixture battery staple"
+        _result, run_dir, _order = self.execute(
+            one_call_plan(credential=True),
+            preflight=lambda _destination: (True, "SIP/2.0 401 Unauthorized"),
+            secrets={"staging-user": secret},
+        )
+        events = [
+            json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()
+        ]
+        (truncated,) = [e for e in events if e["event"] == "step.output_truncated"]
+        self.assertEqual(truncated["retainedBytes"], 0)
+
+    def test_tampered_plan_with_more_calls_than_the_ceiling_is_rejected(self):
+        # The plan-time bound is what enforces ceilings.calls for every
+        # transport, including TLS whose INVITE the capture watchdog cannot read.
+        from sippycup.runtime import validate_plan
+
+        plan, manifest_bytes = one_call_plan()
+        validate_plan(copy.deepcopy(plan))
+        extra = copy.deepcopy(plan["steps"][0])
+        extra["index"] = 2
+        tampered = copy.deepcopy(plan)
+        tampered["steps"].append(extra)
+        tampered["plannedTotals"]["calls"] += 1
+        tampered["plannedTotals"]["packets"] += extra["budget"]["packets"]
+        tampered["plannedTotals"]["bytes"] += extra["budget"]["bytes"]
+        tampered["plannedTotals"]["durationSeconds"] += extra["budget"]["durationSeconds"]
+        tampered["authorization"]["hardMaxima"]["calls"] = 1
+        with self.assertRaises(RuntimeError):
+            validate_plan(tampered)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError):
+                execute_campaign(
+                    tampered,
+                    manifest_bytes=manifest_bytes,
+                    run_root=Path(directory) / "runs",
+                    preflight=lambda _destination: self.fail("no packet may be sent"),
+                )
+            self.assertFalse((Path(directory) / "runs").exists())
 
     def test_signal_during_preflight_stops_capture_without_starting_call(self):
         def interrupted_preflight(_destination):

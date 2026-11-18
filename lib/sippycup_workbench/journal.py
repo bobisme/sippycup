@@ -168,10 +168,29 @@ def initialize(
     title = _validate_text("title", title, maximum=200).strip()
     owner = _validate_text("owner", owner, maximum=200).strip()
     path = Path(root)
-    try:
-        path.mkdir(mode=0o700, parents=False, exist_ok=False)
-    except OSError as error:
-        raise JournalError(f"cannot create engagement directory: {error}") from error
+    if path.is_symlink():
+        raise JournalError(f"engagement directory is a symlink: {path}")
+    if path.is_dir():
+        # An existing directory (for example one `scope init` already wrote
+        # scope.yaml into) is fine, but only while it holds no journal yet:
+        # an existing journal or metadata file is never overwritten.
+        present = [
+            name for name in (ENGAGEMENT_NAME, JOURNAL_NAME)
+            if os.path.lexists(path / name)
+        ]
+        if present:
+            raise JournalError(
+                f"engagement directory already has {' and '.join(present)}: {path}"
+            )
+        try:
+            path.chmod(stat.S_IMODE(path.stat().st_mode) & ~0o077)
+        except OSError as error:
+            raise JournalError(f"cannot make engagement directory private: {error}") from error
+    else:
+        try:
+            path.mkdir(mode=0o700, parents=False, exist_ok=False)
+        except OSError as error:
+            raise JournalError(f"cannot create engagement directory: {error}") from error
     metadata = {
         "apiVersion": ENGAGEMENT_VERSION,
         "kind": "AssessmentEngagement",

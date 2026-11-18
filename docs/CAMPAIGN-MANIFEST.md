@@ -82,6 +82,24 @@ Case `budget` values are conservative per-run upper bounds, not predictions.
 The compiler multiplies them by `count` and reports exact `plannedTotals`.
 Executors must enforce both the frozen plan's `hardMaxima` and each step's
 budget. `stopConditions` are mandatory even for a one-step campaign.
+
+`ceilings.calls` is enforced at plan time for every transport. The planner
+gives each `call` step a budget of exactly one call and rejects a plan whose
+call steps exceed `ceilings.calls`; the executor revalidates that bound, so a
+tampered plan with more call steps than the ceiling is refused before any
+directory, process, or packet exists. The capture watchdog additionally counts
+cleartext `INVITE` requests, but it cannot see inside TLS, so for TLS targets
+the plan-time bound (one call per step, one dialog per call step, enforced by
+the softphone runner) is what holds the ceiling.
+
+`stopConditions` accepts one optional field, `preflightServerError`
+(boolean). When `true`, a 5xx or 6xx answer to the OPTIONS preflight fails the
+campaign as `preflight_failed` and nothing further is sent: no later preflight
+and no step. When omitted (or `false`) such an answer is recorded in
+`preflight.json` as a `server_error_response` warning and the run proceeds,
+because any final response proves reachability. The field is frozen into the
+plan only when the manifest states it, so manifests that omit it compile to
+exactly the same plan as before.
 The v1 planner rejects more than 100,000 expanded steps; split a larger
 authorization into separately reviewed campaigns instead of producing an
 unreviewable plan or exhausting planner memory.

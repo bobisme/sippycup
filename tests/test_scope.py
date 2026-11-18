@@ -189,6 +189,20 @@ class InitTests(ScopeTestCase):
         with self.assertRaises(ScopeError):
             create_scope(self.root, name="Bad Name")
 
+    def test_scope_init_and_journal_init_work_in_either_order(self) -> None:
+        from sippycup_workbench.journal import initialize, verify
+
+        initialize(self.root, title="Journal first", owner="Quad")
+        create_scope(self.root)
+        self.assertEqual(verify(self.root).entries, ())
+        other = Path(self._temporary.name) / "scope-first"
+        other.mkdir()
+        create_scope(other)
+        initialize(other, title="Scope first", owner="Quad")
+        self.assertTrue((other / "scope.yaml").is_file())
+        self.assertEqual(stat.S_IMODE(other.stat().st_mode), 0o700)
+        self.assertEqual(verify(other).entries, ())
+
     def test_init_default_name_is_a_valid_slug(self) -> None:
         odd = Path(self._temporary.name) / "My Engagement 7"
         odd.mkdir()

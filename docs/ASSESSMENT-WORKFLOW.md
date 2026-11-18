@@ -35,12 +35,16 @@ private directory:
   --owner Quad
 ```
 
-The command exclusively creates a mode-0700 directory containing:
+The command exclusively creates a mode-0700 directory (or adopts an existing
+journal-less one, see below) containing:
 
 - `engagement.json`, immutable private metadata;
 - `journal.jsonl`, an initially empty mode-0600 append-only journal.
 
-It refuses an existing directory. Journal entries are finite, strictly
+It also accepts an existing real directory (for example one `scope init`
+already wrote `scope.yaml` into) as long as it has no `engagement.json` or
+`journal.jsonl`; such a directory is tightened to mode 0700, and an existing
+journal is never overwritten. It refuses a symlink. Journal entries are finite, strictly
 sequenced JSON records. Every entry hashes its canonical contents and the
 previous entry hash. Verification rejects edits, deletion from the middle,
 reordering, incomplete writes, unexpected fields, unsafe evidence paths,

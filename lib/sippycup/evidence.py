@@ -35,11 +35,22 @@ EXPECTED_ARTIFACTS = {
     "timestamps.json",
     "preflight.json",
 }
+# A guided call (`./bin/sippycup call`) writes no campaign reviewed manifest or
+# event stream; it is recognised by its own result schema.
+GUIDED_CALL_RESULT_VERSION = "sippycup.dev/call-result/v1"
+GUIDED_CALL_EXPECTED_ARTIFACTS = EXPECTED_ARTIFACTS - {
+    "reviewed-manifest.yaml",
+    "events.jsonl",
+}
 CAPTURE_SUFFIXES = {".pcap", ".pcapng"}
 AUDIO_SUFFIXES = {".wav", ".wave", ".flac", ".mp3", ".ogg", ".opus", ".pcm", ".raw", ".ulaw", ".alaw", ".au"}
 # Horizontal whitespace only: \s would cross the line break and report a YAML
 # `authorization:` section (target profiles, manifests) as SIP credentials.
-AUTHORIZATION = re.compile(br"(?im)^(?:proxy-)?authorization[ \t]*:[ \t]*\S.+$")
+# A header whose whole value is the softphone redaction marker `<redacted>` was
+# already scrubbed and is not credential material.
+AUTHORIZATION = re.compile(
+    br"(?im)^(?:proxy-)?authorization[ \t]*:[ \t]*(?!<redacted>[ \t]*\r?$)\S.+$"
+)
 CALL_ID = re.compile(br"(?im)^call-id\s*:\s*[^\r\n]+")
 SIP_USER = re.compile(br"(?i)sips?:([^@;>\s]+)@")
 PHONE_IDENTIFIER = re.compile(br"(?<![0-9])\+[0-9][0-9() -]{5,}[0-9](?![0-9])")
@@ -151,6 +162,17 @@ def _read_plan(root: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def expected_artifacts(root: Path) -> set[str]:
+    """Expected file set for this run kind; campaign runs keep the full set."""
+    try:
+        result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return EXPECTED_ARTIFACTS
+    if isinstance(result, dict) and result.get("apiVersion") == GUIDED_CALL_RESULT_VERSION:
+        return GUIDED_CALL_EXPECTED_ARTIFACTS
+    return EXPECTED_ARTIFACTS
 
 
 def _authorized_networks(plan: dict[str, Any], extras: Iterable[str]) -> list[Any]:
@@ -350,7 +372,7 @@ def build_evidence_manifest(
         "schema": MANIFEST_VERSION,
         "artifacts": artifacts,
         "missingExpected": sorted(
-            EXPECTED_ARTIFACTS - {item["path"] for item in artifacts}
+            expected_artifacts(root) - {item["path"] for item in artifacts}
         ),
     }
     content_identity = hashlib.sha256(

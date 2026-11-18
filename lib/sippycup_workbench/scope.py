@@ -321,7 +321,7 @@ def create_scope(engagement: str | Path, *, name: str | None = None) -> Path:
     if not root.is_dir():
         raise ScopeError(
             f"engagement directory does not exist: {root}; create it first with "
-            f"`./bin/sippycup journal init {root}` (journal init refuses an existing directory)"
+            f"`./bin/sippycup journal init {root}` (or create the directory yourself; either order works)"
         )
     try:
         descriptor = os.open(
