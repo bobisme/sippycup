@@ -202,7 +202,7 @@ See `docs/GUIDED-CALL.md` for credentials, verdicts, and the emergency stop.
 
 `checks` runs owner-approved, low-volume posture checks (banners, TLS,
 cleartext signaling, unauthenticated REGISTER/INVITE, Digest quality, user
-enumeration, and nonce replay). Each check has a declared request bound, and
+enumeration, nonce replay, and SRTP policy). Each check has a declared request bound, and
 each writes into `findings.json`. Nothing runs unless the profile's
 `security_checks.approved` list names it:
 

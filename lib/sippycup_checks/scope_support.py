@@ -102,8 +102,9 @@ def validate_scope(
                 add("scope.security_check_inapplicable", "inconsistent", "security_checks.approved",
                     f"{check_id} would probe {count} cleartext endpoints; at most "
                     f"{catalog.MAX_CLEARTEXT_ENDPOINTS} are allowed")
-        total += catalog.declared_bound(spec, section_like)
-        invites += catalog.invites_declared(spec, section_like)
+        first_transport = first.get("transport") if first else None
+        total += catalog.declared_bound(spec, section_like, first_transport)
+        invites += catalog.invites_declared(spec, section_like, first_transport)
     maximum = section.get("max_requests")
     if type(maximum) is int and total > maximum:
         add("scope.security_checks_budget", "inconsistent", "security_checks.max_requests",
@@ -149,7 +150,8 @@ def profile_section(document: dict[str, Any]) -> dict[str, Any] | None:
     destination = _destination(first, destinations)
     if "destination" in needs and destination:
         result["destination"] = destination
-    if "cleartext_endpoints" in needs:
+    # srtp-policy uses an approved cleartext endpoint when there is one, but does not require it.
+    if "cleartext_endpoints" in needs or "srtp-policy" in approved:
         endpoints = cleartext_endpoints(document, first)
         if endpoints:
             result["cleartext_endpoints"] = endpoints

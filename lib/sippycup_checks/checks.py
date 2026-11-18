@@ -42,6 +42,19 @@ class Context:
     monotonic: Callable[[], float] = tlsprobe.monotonic
     shared: dict[str, Any] = field(default_factory=dict)
     transcript: list[dict[str, Any]] = field(default_factory=list)
+    # Only srtp-policy places real calls through the softphone driver; these
+    # carry its gates. ``recheck`` returns why authorization no longer holds
+    # (None while it does) and is called before every call.
+    approved_addresses: tuple[str, ...] = ()
+    recheck: Callable[[], str | None] = lambda: None
+    cancel: Any = None
+    place_call: Callable[..., Any] | None = None
+    call_environment: dict[str, str] | None = None
+    pjsua: str = "pjsua"
+    run_dir: Any = None
+    local_address: str | None = None
+    answer_timeout: int = 8
+    srtp_expected: bool = False
 
     def channel(self, endpoint: Endpoint | None = None) -> Channel:
         return Channel(endpoint or self.endpoint, self.budget, timeout=self.timeout, monotonic=self.monotonic)
@@ -212,6 +225,7 @@ def tls_certificate(ctx: Context) -> CheckResult:
     covers = tlsprobe.san_covers(facts, name, is_ip=is_ip)
     detail = {"verified": not verification_failed, "verifyName": name, "certificate": facts,
               "daysLeft": None if days is None else round(days, 2), "tlsVersion": verified.version}
+    ctx.shared["tls_certificate"] = detail
     base = [
         ev("certificate", f"subject {facts.get('subject')}; issuer {facts.get('issuer')}"),
         ev("certificate", f"valid until {facts.get('notAfter')}"),
@@ -297,16 +311,51 @@ def tls_protocols(ctx: Context) -> CheckResult:
     if by_label["TLS 1.3"].outcome == "rejected":
         findings.append(finding("tls-protocols.no-tls13", "The edge rejected a TLS 1.3-only handshake.",
                                 [ev("handshake", f"TLS 1.3 rejected: {by_label['TLS 1.3'].detail}")]))
-    accepted = [item.label for item in results if item.outcome == "accepted"]
-    untestable = [item.label for item in results if item.outcome == "untestable"]
+    accepted = [item for item in results if item.outcome == "accepted"]
+    untestable = [item for item in results if item.outcome == "untestable"]
     inconclusive = [item.label for item in results if item.outcome in ("timeout", "unreachable", "verify_failed")]
-    summary = f"accepted: {', '.join(accepted) or 'none'}"
     if untestable:
-        summary += f"; not offered locally (not sent): {', '.join(untestable)}"
+        # Not "not accepted": the toolbox could not even offer these, so the
+        # target's answer is unknown. Reported as a finding so the result is
+        # never a clean pass that silently skipped part of the review.
+        findings.append(finding(
+            "tls-protocols.untestable-probes",
+            "This toolbox's TLS library cannot offer these probes, so they were NOT sent and the edge's "
+            "answer to them is unknown: " + ", ".join(item.label for item in untestable) + ".",
+            [ev("untestable", f"{item.label}: not testable from this toolbox ({item.detail})") for item in untestable],
+        ))
+    detail: dict[str, Any] = {
+        "probes": [item.as_dict() for item in results],
+        "acceptedVersions": [
+            {"protocol": item.label, "negotiated": item.version, "cipher": item.cipher}
+            for item in accepted if item.label.startswith("TLS 1.")
+        ],
+        "notTestable": [item.label for item in untestable],
+    }
+    certificate = ctx.shared.get("tls_certificate")
+    if certificate:
+        facts = certificate.get("certificate") or {}
+        detail["certificate"] = {
+            "verified": certificate.get("verified"),
+            "notAfter": facts.get("notAfter"),
+            "keyAlgorithm": facts.get("keyAlgorithm"),
+            "keyBits": facts.get("keyBits"),
+            "signatureAlgorithm": facts.get("signatureAlgorithm"),
+            "source": "tls-certificate check in this run",
+        }
+    summary = "accepted: " + (
+        ", ".join(f"{item.label} ({item.cipher})" if item.label.startswith("TLS 1.") else item.label
+                  for item in accepted) or "none"
+    )
+    rejected = [item.label for item in results if item.outcome == "rejected" and item.label.startswith("TLS 1.")]
+    if rejected:
+        summary += f"; rejected: {', '.join(rejected)}"
+    if untestable:
+        summary += ("; NOT TESTABLE from this toolbox (not sent, answer unknown): "
+                    + ", ".join(item.label for item in untestable))
     if inconclusive:
         summary += f"; inconclusive: {', '.join(inconclusive)}"
-    return CheckResult(check, "finding" if findings else "passed", summary, findings,
-                       {"probes": [item.as_dict() for item in results]})
+    return CheckResult(check, "finding" if findings else "passed", summary, findings, detail)
 
 
 def cleartext_signaling(ctx: Context) -> CheckResult:
@@ -638,6 +687,12 @@ def nonce_replay(ctx: Context) -> CheckResult:
                        f"replay rejected: {third.final.status_line}{' (stale=true)' if stale else ''}", detail=detail)
 
 
+def srtp_policy(ctx: Context) -> CheckResult:
+    from . import srtpcheck as implementation
+
+    return implementation.run(ctx)
+
+
 IMPLEMENTATIONS: dict[str, Callable[[Context], CheckResult]] = {
     "banner-disclosure": banner_disclosure,
     "options-methods": options_methods,
@@ -649,4 +704,5 @@ IMPLEMENTATIONS: dict[str, Callable[[Context], CheckResult]] = {
     "unauthenticated-invite": unauthenticated_invite,
     "user-enumeration": user_enumeration,
     "nonce-replay": nonce_replay,
+    "srtp-policy": srtp_policy,
 }
