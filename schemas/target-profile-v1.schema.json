@@ -91,6 +91,20 @@
         "dtls_srtp": {"type": "boolean"},
         "webrtc": {"type": "boolean"}
       }
+    },
+    "media": {
+      "type": "object",
+      "description": "Optional. The owner-approved codecs: calls offer only these, and a requested codec outside the list is refused.",
+      "additionalProperties": false,
+      "required": ["codecs"],
+      "properties": {
+        "codecs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["PCMU", "PCMA", "G722", "GSM", "iLBC", "opus", "speex/8000", "speex/16000", "speex/32000"]}
+        }
+      }
     }
   }
 }

@@ -28,6 +28,8 @@ _TOP_LEVEL_FIELDS = {
     "features",
     # Optional: the owner-approved posture checks (see docs/SECURITY-CHECKS.md).
     "security_checks",
+    # Optional: the owner-approved codecs (see docs/GUIDED-CALL.md "Codec control").
+    "media",
 }
 _SECTION_FIELDS = {
     "target": {
@@ -253,6 +255,50 @@ def tls_facts(
     return facts
 
 
+def approved_codecs(
+    document: dict[str, Any], errors: list[str] | None = None
+) -> tuple[str, ...] | None:
+    """The owner-approved codecs (``media.codecs``) in supported spelling.
+
+    ``None`` when the profile has no ``media`` section, which approves no
+    particular codec list. Problems are appended to ``errors`` (or raised as
+    :class:`ProfileError` when ``errors`` is ``None``).
+    """
+    from sippycup_softphone.driver import SoftphoneError, canonical_codec
+
+    problems: list[str] = []
+    media = document.get("media")
+    if media is None:
+        return None
+    result: list[str] = []
+    if not isinstance(media, dict):
+        problems.append("media must be a mapping")
+    else:
+        unknown = set(media) - {"codecs"}
+        if unknown:
+            problems.append(f"unknown media fields: {', '.join(sorted(unknown))}")
+        codecs = media.get("codecs")
+        if not isinstance(codecs, list) or not codecs:
+            problems.append("media.codecs must be a non-empty list of codec names")
+        else:
+            for item in codecs:
+                try:
+                    name = canonical_codec(item)
+                except SoftphoneError as exc:
+                    problems.append(f"media.codecs: {exc}")
+                    continue
+                if name in result:
+                    problems.append(f"media.codecs lists {name} twice")
+                else:
+                    result.append(name)
+    if problems:
+        if errors is None:
+            raise ProfileError("; ".join(problems))
+        errors.extend(problems)
+        return None
+    return tuple(result)
+
+
 def rehearse(
     document: dict[str, Any],
     *,
@@ -414,6 +460,12 @@ def rehearse(
                 "approved": list(security_checks.get("approved") or []),
                 "max_requests": security_checks.get("max_requests"),
             }
+
+    # Optional media section: the codecs the owner approved for calls.
+    if "media" in document:
+        codecs = approved_codecs(document, errors)
+        if codecs is not None:
+            facts["approved_codecs"] = codecs
 
     facts.update(
         {

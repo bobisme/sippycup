@@ -314,10 +314,10 @@ evidence there.
 Not rehearsable here: `possible-nat-one-way-media` (needs a non-loopback
 target behind NAT), `media-outside-scope` (needs a server that advertises an
 unapproved media address), `tls-not-verified` (covered by the gate's TLS
-checks), `capture-*`, `authorization-lapsed`. A codec mismatch (`488` from a
-codec the caller does not offer) cannot be made: PJSUA always offers PCMA,
-G.722, speex, iLBC, GSM, and opus besides PCMU (the driver's `--codec` only
-raises a codec's priority), and the image has only the G.711 codecs, so
+checks), `capture-*`, `authorization-lapsed`. A codec mismatch is not a
+drill scenario, but the practice endpoints allow only PCMU and PCMA, so
+`call --codec G722` (which offers G.722 alone) gets `488` and
+`call-media-not-acceptable` (`GUIDED-CALL.md`, "Codec control");
 `srtp-required` produces the same `488` verdict from the other common cause.
 `hold` (a server-initiated re-INVITE with `sendonly`) is not possible with the
 dialplan applications in the minimal module set: `StartMusicOnHold` does not
@@ -445,9 +445,9 @@ It is not part of `make full-gate`.
   resolver could not leave it either; the gate also requires the name not to
   resolve outside PJSUA's pinned namespace.
 - Only IPv4 loopback is supported. IPv6, NAT behavior, DTLS-SRTP, WebRTC,
-  video, DTMF verification, hold, and transfer are not exercised. Hold and a
-  codec mismatch are not available as fault destinations (see "Rehearse
-  failures").
+  video, DTMF verification, hold, and transfer are not exercised. Hold is
+  not available as a fault destination; a codec mismatch is made with
+  `--codec` instead (see "Rehearse failures").
 - The target answers one realistic shape of SIP edge (Asterisk with
   `force_rport` off). A real service can still differ in codecs, timers,
   authentication, and routing.

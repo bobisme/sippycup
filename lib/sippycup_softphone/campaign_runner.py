@@ -37,6 +37,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .driver import (
     SRTP_MODES,
+    SUPPORTED_CODECS,
     SoftphoneAccount,
     SoftphoneCall,
     SoftphoneError,
@@ -144,17 +145,33 @@ def parse_envelope(raw: bytes) -> tuple[dict[str, Any], str | None, dict[str, An
     call = step.get("call")
     if call is not None:
         call = _mapping(call, "step.call")
-        if "dtmf" not in call or set(call) - {"dtmf", "dtmfAfterSeconds", "durationSeconds"}:
+        if (
+            ("dtmf" not in call and "codecs" not in call)
+            or set(call) - {"dtmf", "dtmfAfterSeconds", "durationSeconds", "codecs"}
+            or ("dtmfAfterSeconds" in call and "dtmf" not in call)
+        ):
             raise EnvelopeError(
-                "step call must contain dtmf and optionally dtmfAfterSeconds and durationSeconds"
+                "step call must contain dtmf (optionally dtmfAfterSeconds) or codecs, "
+                "and optionally durationSeconds"
             )
         seconds = call.get("durationSeconds", 1)
         if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= 3600:
             raise EnvelopeError("step call durationSeconds is invalid")
-        try:
-            validate_dtmf(call["dtmf"])
-        except DtmfError as error:
-            raise EnvelopeError(f"step call dtmf is invalid: {error}") from error
+        if "dtmf" in call:
+            try:
+                validate_dtmf(call["dtmf"])
+            except DtmfError as error:
+                raise EnvelopeError(f"step call dtmf is invalid: {error}") from error
+        if "codecs" in call:
+            codecs = call["codecs"]
+            if (
+                not isinstance(codecs, list)
+                or not codecs
+                or any(not isinstance(item, str) or item not in SUPPORTED_CODECS for item in codecs)
+                or len(set(codecs)) != len(codecs)
+                or step.get("generated") is not None
+            ):
+                raise EnvelopeError("step call codecs are invalid")
         after = call.get("dtmfAfterSeconds", DEFAULT_DTMF_AFTER_SECONDS)
         if isinstance(after, bool) or not isinstance(after, int) or not 0 <= after <= 60:
             raise EnvelopeError("step call dtmfAfterSeconds is invalid")
@@ -225,7 +242,7 @@ def call_duration(step: Mapping[str, Any]) -> dict[str, Any]:
         "clamped": effective < requested,
     }
     call = step.get("call")
-    if call is not None:
+    if call is not None and "dtmf" in call:
         # The reviewed digits must fit in the call: lengthen it to the DTMF
         # delay plus the digits when the budget allows, never beyond.
         needed = int(math.ceil(
@@ -557,6 +574,10 @@ def run(
     tls = step.get("tls") or {}
     server_name = tls.get("serverName")
     call_options = step.get("call")
+    # A case's reviewed codecs are the only ones offered (plus telephone-event).
+    exclusive_codecs = bool((call_options or {}).get("codecs"))
+    if exclusive_codecs:
+        codecs = tuple(call_options["codecs"])
     srtp_mode = (step.get("media") or {}).get("srtp", "off")
     if transport == "tls":
         summary["tls"] = {
@@ -632,6 +653,7 @@ def run(
             console_file=artifacts / "softphone-console.txt",
             account=account,
             codecs=codecs,
+            exclusive_codecs=exclusive_codecs,
             answer_timeout_seconds=answer_timeout,
             registration_timeout_seconds=min(
                 MAX_REGISTRATION_TIMEOUT_SECONDS, max(1.0, budget / 3)
@@ -699,6 +721,16 @@ def run(
                     "requested", "requestedDigits", "method", "status", "negotiated",
                     "sent", "received", "answeredPayloadTypes",
                 )
+            }
+        if exclusive_codecs:
+            facts = result.codecs or {}
+            summary["codecs"] = {
+                "requested": list(codecs),
+                "offered": [item.get("name") for item in facts.get("offered") or []],
+                "answered": [item.get("name") for item in facts.get("answered") or []],
+                "negotiated": facts.get("negotiated"),
+                "negotiatedPayloadType": facts.get("negotiatedPayloadType"),
+                "offerOnlyRequested": facts.get("offerOnlyRequested"),
             }
         if transport == "tls":
             summary["tls"]["verified"] = result.tls_verified is True

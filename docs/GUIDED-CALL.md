@@ -68,7 +68,7 @@ already carries the service owner's approval.
 | `--duration SECONDS` | Call time after answer. Default 10. Clamped to `limits.max_duration_seconds`. |
 | `--answer-timeout SECONDS` | Hang up (CANCEL) if the call is not answered in time. Default 30, maximum 120. |
 | `--play FILE` | A 16-bit PCM WAV beneath `work/`, such as the agreed canary phrase. Default: a generated two-tone WAV with no recorded voice. |
-| `--codec NAME` | Codec preference, repeatable, first is preferred. Default `PCMU`. |
+| `--codec NAME[,NAME]` | Offer only these codecs (plus telephone-event), first preferred; repeatable or comma-separated, case-insensitive. Names: `PCMU`, `PCMA`, `G722`, `GSM`, `iLBC`, `opus`, `speex/8000`, `speex/16000`, `speex/32000`. Default: the profile's `media.codecs`, else PCMU preferred among all PJSUA codecs. See "Codec control". |
 | `--username USER` | Account for registration and digest challenges. |
 | `--realm REALM` | Digest realm. Default `*`. |
 | `--no-register` | Answer INVITE challenges without sending REGISTER. |
@@ -149,6 +149,51 @@ RTP timestamp jumps and jitter. Under SRTP the event code is encrypted: the
 capture then shows only the number of events, which must equal the number of
 requested digits, and `verified` stays `null`.
 
+## Codec control
+
+The image's PJSUA 2.17 has these audio codecs (its `Cp` console listing):
+`PCMU/8000`, `PCMA/8000`, `G722/16000`, `GSM/8000`, `iLBC/8000`,
+`opus/48000/2`, and `speex` at 8000, 16000, and 32000 Hz (L16 is disabled).
+`--codec` accepts exactly one name for each: `PCMU`, `PCMA`, `G722`, `GSM`,
+`iLBC`, `opus`, `speex/8000`, `speex/16000`, `speex/32000` (any letter case).
+Any other name, or a name given twice, is refused with exit 2 before
+anything starts. `make codec-gate` checks the list against the live binary.
+
+With `--codec`, the call offers only the named codecs, in that order, plus
+telephone-event: PJSUA gets `--dis-codec=*` and then one `--add-codec` per
+name. Without `--codec`, the default is unchanged: PCMU is preferred and
+PJSUA still offers every other codec it has.
+
+A profile can approve codecs with an optional section (`scope compile`
+writes it from the scope's `media.codecs`):
+
+```yaml
+media:
+  codecs: [PCMU, PCMA]
+```
+
+Then `--codec` must name only approved codecs (anything else is refused with
+exit 2), and without `--codec` the call offers exactly the approved list.
+`rehearse` refuses an unknown or duplicate name in the section.
+
+`result.json` `codec` records `requested`, `exclusive`, `approved`,
+`offered`, `answered`, `negotiated` (the answer's first codec) with its
+`negotiatedPayloadType`, `offerOnlyRequested`, `unoffered`, and `wire`. The
+wire proof comes from the capture: tshark lists the SDP of the INVITE offer
+and the 2xx answer (`codec-sdp.txt`; under TLS the signaling is encrypted, so
+the offer and answer come from PJSUA's log and `sdpSource` says
+`pjsua-log`) and the RTP payload types on the negotiated media port in each
+direction (`codec-rtp.txt`; RTP headers stay cleartext under SRTP).
+`wire.verified` is true only when an exclusive offer listed nothing but the
+requested codecs and every captured RTP packet used the negotiated payload
+type, telephone-event, or comfort noise.
+
+A far end that answers with a codec the offer did not contain gets the
+verdict `codec-not-offered` (an answer must choose from the offer, RFC 3264
+section 6). A far end that accepts none of the offered codecs normally
+answers 488, which is `call-media-not-acceptable`; with `--codec` a note says
+which codecs were offered.
+
 ## SRTP
 
 `--srtp optional` offers RTP/AVP with `a=crypto` (PJSUA `--use-srtp=1`) and
@@ -216,6 +261,7 @@ never reused. Files are mode 0600:
 | `tls-media.txt` | TLS calls only: RTP to and from the negotiated media peer, decoded by tshark from the capture. |
 | `srtp-media.txt` | SRTP active on UDP/TCP signaling: RTP headers to and from the negotiated media peer. |
 | `dtmf-events.txt` | `--dtmf` only: RTP on the negotiated media port with raw payloads, from which RFC 4733 events are decoded. |
+| `codec-sdp.txt`, `codec-rtp.txt` | The captured SDP offer and answer (UDP/TCP signaling) and the RTP payload type of every packet on the negotiated media port. |
 | `result.json` | Stable result, `schemas/call-result-v1.schema.json`. |
 | `evidence-manifest.json` | Hashes, sensitivity labels, and privacy findings. |
 
@@ -248,6 +294,7 @@ identifiers; use the evidence privacy workflow before sharing anything.
 | `srtp-not-negotiated` | `--srtp mandatory`, and the call did not negotiate SDES-SRTP. | 1 |
 | `dtmf-not-negotiated` | `--dtmf`, and the peer did not negotiate telephone-event; nothing was sent. | 1 |
 | `dtmf-mismatch` | The digits PJSUA sent, or the digits seen on the wire, differ from the request. | 1 |
+| `codec-not-offered` | The far end's SDP answer named a codec that the offer did not contain. | 1 |
 
 Every verdict has `./bin/sippycup explain call.VERDICT`. `result.json` also
 carries `setup` (seconds from INVITE to answer, the 18x statuses seen, and

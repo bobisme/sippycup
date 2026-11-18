@@ -671,15 +671,31 @@ def _validate_media_call_facts(
         call = _object(step["call"], f"step {index} call")
         if step["type"] != "call":
             raise RuntimeError(f"plan step {index} call actions are only valid for a call")
-        if "dtmf" not in call or set(call) - {"dtmf", "dtmfAfterSeconds", "durationSeconds"}:
+        if (
+            ("dtmf" not in call and "codecs" not in call)
+            or set(call) - {"dtmf", "dtmfAfterSeconds", "durationSeconds", "codecs"}
+            or ("dtmfAfterSeconds" in call and "dtmf" not in call)
+        ):
             raise RuntimeError(f"plan step {index} call has invalid fields")
+        if "codecs" in call:
+            from sippycup_softphone.driver import SUPPORTED_CODECS
+
+            codecs = call["codecs"]
+            if (
+                not isinstance(codecs, list)
+                or not 1 <= len(codecs) <= len(SUPPORTED_CODECS)
+                or any(not isinstance(item, str) or item not in SUPPORTED_CODECS for item in codecs)
+                or len(set(codecs)) != len(codecs)
+                or "generated" in step
+            ):
+                raise RuntimeError(f"plan step {index} call codecs are invalid")
         if "durationSeconds" in call and (
             not _is_uint(call["durationSeconds"], positive=True)
             or call["durationSeconds"] > 3600
             or "generated" in step
         ):
             raise RuntimeError(f"plan step {index} call duration is invalid")
-        digits = call["dtmf"]
+        digits = call.get("dtmf", "0")
         if (
             not isinstance(digits, str)
             or _DTMF.fullmatch(digits) is None

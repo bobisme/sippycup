@@ -39,6 +39,9 @@ The registry makes execution location explicit:
 - `checks run` follows the same rules as `call`: a private container, `--admin`
   rejected, and `--practice` composes. `checks list`, `explain`, and `plan` run
   from the checkout and are network-free. See `SECURITY-CHECKS.md`.
+- `matrix run` follows the same rules as `call` and places each cell as one
+  guided call, one after another. `matrix plan` (and `run --dry-run`) runs
+  from the checkout and is network-free. See `CALL-MATRIX.md`.
 - Commands that take `--secret-env NAME` (or `REF=NAME`) receive only that
   variable in the container, forwarded with the runtime's name-only
   `--env NAME` form so the value never appears in a command line.
@@ -65,6 +68,7 @@ Examples:
 ./bin/sippycup selftest /work/selftest.pcap
 ./bin/sippycup call work/engagement/profile.yaml --dial 1001 --dry-run
 ./bin/sippycup checks plan work/engagement/profile.yaml
+./bin/sippycup matrix plan work/engagement/profile.yaml --dial 1001 --codecs PCMU,PCMA
 ./bin/sippycup webrtc validate examples/webrtc/offline-scenario.json
 ./bin/sippycup webrtc signaling-self-test
 ```

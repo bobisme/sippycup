@@ -188,5 +188,12 @@ softphone-gate:
 		PYTHONDONTWRITEBYTECODE=1 \
 		python3 -m unittest tests.test_softphone_gate -v
 
+.PHONY: codec-gate
+codec-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_CODEC_GATE=1 SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		PYTHONDONTWRITEBYTECODE=1 \
+		python3 -m unittest tests.test_codec_gate -v
+
 web-security-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v

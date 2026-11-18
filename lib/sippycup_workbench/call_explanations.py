@@ -28,6 +28,10 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
         "The DTMF digits on the wire differ from the digits requested",
         "The capture's outbound telephone-event sequence does not equal the requested digit string (digits missing, repeated, or out of order). Read dtmf-events.txt in the run directory. This describes what the softphone sent, not what the far end interpreted.",
     ),
+    "call.codec-not-offered": (
+        "The far end answered with a codec that was not offered",
+        "The SDP answer named a codec (payload type and rtpmap) that the offer did not contain. An answer must choose from the offered formats (RFC 3264 section 6), so this is a far-end SDP fault, not a media-quality result: a gateway that rewrites SDP, a fixed codec policy that ignores the offer, or a transcoder answering for another leg. The result's codec section lists offered, answered, and unoffered codecs; read the answer SDP in softphone.log or the capture.",
+    ),
     "call.inconclusive": (
         "The call was answered but the evidence cannot decide",
         "The oracle returned unknown for something the verdict needs (encrypted signaling, a truncated capture, or missing RTP counts). Unknown is never reported as pass; capture again or inspect the evidence.",
@@ -126,7 +130,7 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
     ),
     "call.call-media-not-acceptable": (
         "The far end answered 488 (or 606): offered media not acceptable",
-        "The far end could not accept the SDP offer: a codec it does not allow, SRTP required but not offered (or the reverse), or an unsupported media direction. Compare the offer in the capture with the far end's requirements.",
+        "The far end could not accept the SDP offer: a codec it does not allow, SRTP required but not offered (or the reverse), or an unsupported media direction. With --codec (or a profile's media.codecs) the offer lists only those codecs, so this verdict means the far end accepts none of them; the result's codec section shows the offer. Compare the offer in the capture with the far end's requirements.",
     ),
     "call.call-redirected": (
         "The far end answered with a 3xx redirect",

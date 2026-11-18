@@ -616,6 +616,10 @@ EOF
         if [[ "${command_name}" == checks && ( $# == 0 || "${1}" == list || "${1}" == explain || "${1}" == plan ) ]]; then
             exec "${project_dir}/bin/${host_target}" "$@"
         fi
+        # matrix plan reads only the profiles.
+        if [[ "${command_name}" == matrix && ( $# == 0 || "${1}" == plan ) ]]; then
+            exec "${project_dir}/bin/${host_target}" "$@"
+        fi
         for argument in "$@"; do
             if [[ "${argument}" == --dry-run || "${argument}" == -h || "${argument}" == --help ]]; then
                 exec "${project_dir}/bin/${host_target}" "$@"

@@ -231,22 +231,29 @@ MAX_CALL_SECONDS = 3600
 
 def _call_options(value: Any, field: str) -> dict[str, Any]:
     """A call case's reviewed in-call actions: RFC 4733 digits after answer,
-    and how long the call stays connected (to hear the response)."""
+    how long the call stays connected (to hear the response), and the only
+    codecs the call offers."""
     from sippycup_softphone.evidence import DtmfError, validate_dtmf
 
     call = _mapping(value, field)
-    _keys(call, field, {"dtmf", "dtmfAfterSeconds", "durationSeconds"})
-    if "dtmf" not in call:
-        raise ManifestError(f"{field}.dtmf is required")
-    digits = call["dtmf"]
-    if isinstance(digits, (bool, int)):
-        raise ManifestError(
-            f"{field}.dtmf must be a quoted string (YAML reads unquoted digits as a number)"
-        )
-    try:
-        result: dict[str, Any] = {"dtmf": validate_dtmf(digits)}
-    except DtmfError as error:
-        raise ManifestError(f"{field}.dtmf: {error}") from error
+    _keys(call, field, {"dtmf", "dtmfAfterSeconds", "durationSeconds", "codecs"})
+    if "dtmf" not in call and "codecs" not in call:
+        raise ManifestError(f"{field} needs dtmf or codecs")
+    result: dict[str, Any] = {}
+    if "dtmf" in call:
+        digits = call["dtmf"]
+        if isinstance(digits, (bool, int)):
+            raise ManifestError(
+                f"{field}.dtmf must be a quoted string (YAML reads unquoted digits as a number)"
+            )
+        try:
+            result["dtmf"] = validate_dtmf(digits)
+        except DtmfError as error:
+            raise ManifestError(f"{field}.dtmf: {error}") from error
+    elif "dtmfAfterSeconds" in call:
+        raise ManifestError(f"{field}.dtmfAfterSeconds requires dtmf")
+    if "codecs" in call:
+        result["codecs"] = _codecs(call["codecs"], f"{field}.codecs")
     if "dtmfAfterSeconds" in call:
         after = _uint(call["dtmfAfterSeconds"], f"{field}.dtmfAfterSeconds", allow_zero=True)
         if after > MAX_DTMF_AFTER_SECONDS:
@@ -260,6 +267,27 @@ def _call_options(value: Any, field: str) -> dict[str, Any]:
             raise ManifestError(f"{field}.durationSeconds must be at most {MAX_CALL_SECONDS}")
         result["durationSeconds"] = seconds
     return result
+
+
+def _codecs(value: Any, field: str) -> list[str]:
+    """1-9 distinct codecs the image's PJSUA supports, in preference order."""
+    from sippycup_softphone.driver import SUPPORTED_CODECS, SoftphoneError, canonical_codec
+
+    if not isinstance(value, list) or not 1 <= len(value) <= len(SUPPORTED_CODECS):
+        raise ManifestError(
+            f"{field} must be a list of 1-{len(SUPPORTED_CODECS)} codec names: "
+            + ", ".join(SUPPORTED_CODECS)
+        )
+    names: list[str] = []
+    for item in value:
+        try:
+            name = canonical_codec(item)
+        except SoftphoneError as error:
+            raise ManifestError(f"{field}: {error}") from error
+        if name in names:
+            raise ManifestError(f"{field} lists {name} twice")
+        names.append(name)
+    return names
 
 
 def _media(value: Any, field: str) -> dict[str, str]:
@@ -1113,6 +1141,10 @@ def compile_plan(
                 raise ManifestError(
                     f"cases[{index}].call.durationSeconds conflicts with the generated "
                     "duration factor"
+                )
+            if "codecs" in call_options and "generated" in case:
+                raise ManifestError(
+                    f"cases[{index}].call.codecs conflicts with the generated codec factor"
                 )
         count = _uint(case.get("count"), f"cases[{index}].count")
         planned_step_count = _checked_add(

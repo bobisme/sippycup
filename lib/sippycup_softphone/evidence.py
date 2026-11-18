@@ -128,24 +128,59 @@ def parse_messages(text: str) -> list[dict[str, Any]]:
     return messages
 
 
+_MEDIA_FORMATS = re.compile(r"^m=audio \d+(?:/\d+)? \S+((?: \d+)*)\s*$")
+# RFC 3551 static audio payload types (name, clock rate) that an SDP may use
+# without an rtpmap line.
+STATIC_PAYLOAD_TYPES = {
+    0: ("PCMU", 8000),
+    3: ("GSM", 8000),
+    4: ("G723", 8000),
+    8: ("PCMA", 8000),
+    9: ("G722", 8000),
+    13: ("CN", 8000),
+    18: ("G729", 8000),
+}
+# Formats that are not voice codecs: DTMF events and comfort noise.
+NON_CODEC_FORMATS = frozenset({"telephone-event", "cn"})
+
+
+def sdp_codecs(formats: Sequence[int], rtpmap: dict[int, tuple[str, int]]) -> list[dict[str, Any]]:
+    """The voice codecs an m-line lists, in its order (no telephone-event or CN)."""
+    codecs: list[dict[str, Any]] = []
+    for payload_type in formats:
+        name, rate = rtpmap.get(payload_type) or STATIC_PAYLOAD_TYPES.get(payload_type, (None, None))
+        if name is not None and name.lower() in NON_CODEC_FORMATS:
+            continue
+        codecs.append({"payloadType": payload_type, "name": name, "clockRate": rate})
+    return codecs
+
+
 def sdp(lines: Sequence[str]) -> dict[str, Any] | None:
     """Audio facts of the SDP body in one logged message, or ``None``."""
     media = None
     events: list[int] = []
     suites: list[str] = []
+    rtpmap: dict[int, tuple[str, int]] = {}
     for line in lines:
         stripped = line.strip()
         if (match := _MEDIA_LINE.match(stripped)) is not None:
             if media is not None:
                 break  # only the first audio stream
-            media = {"port": int(match.group(1)), "profile": match.group(2)}
+            formats = _MEDIA_FORMATS.match(stripped)
+            media = {
+                "port": int(match.group(1)),
+                "profile": match.group(2),
+                "formats": [int(item) for item in formats.group(1).split()] if formats else [],
+            }
             continue
         if media is None:
             continue
         if stripped.startswith("m="):
             break
-        if (match := _RTPMAP.match(stripped)) is not None and match.group(2).lower() == "telephone-event":
-            events.append(int(match.group(1)))
+        if (match := _RTPMAP.match(stripped)) is not None:
+            rtpmap[int(match.group(1))] = (match.group(2), int(match.group(3)))
+            if match.group(2).lower() == "telephone-event":
+                events.append(int(match.group(1)))
         elif (match := _CRYPTO.match(stripped)) is not None:
             suites.append(match.group(1))
     if media is None:
@@ -155,6 +190,8 @@ def sdp(lines: Sequence[str]) -> dict[str, Any] | None:
         "profile": media["profile"],
         "telephoneEvents": events,
         "cryptoSuites": suites,
+        "formats": media["formats"],
+        "codecs": sdp_codecs(media["formats"], rtpmap),
     }
 
 

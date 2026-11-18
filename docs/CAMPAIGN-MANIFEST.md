@@ -198,6 +198,41 @@ The DTMF digits on the wire are in the RTP payload: a campaign capture with
 telephone-event packets but not which digits they carry. Use
 `retainPayload: true` when the capture must prove the digits.
 
+## Codecs
+
+A `call` case can choose the only codecs its calls offer:
+
+```yaml
+cases:
+  - id: pcma-only
+    type: call
+    target: pbx
+    count: 1
+    dial: {user: "9196"}
+    call:
+      codecs: [PCMA]                     # offered alone (plus telephone-event)
+    budget: {packetsPerRun: 2500, bytesPerRun: 1200000, durationSecondsPerRun: 12}
+```
+
+`codecs` lists 1-9 distinct names from the image's PJSUA set (`PCMU`,
+`PCMA`, `G722`, `GSM`, `iLBC`, `opus`, `speex/8000`, `speex/16000`,
+`speex/32000`; see `GUIDED-CALL.md`, "Codec control"), first preferred. Names
+are case-insensitive in the manifest and frozen into `step.call.codecs` in
+that spelling, so the manifest lock covers them. `call` now needs `dtmf` or
+`codecs` (`dtmfAfterSeconds` only with `dtmf`), and `codecs` is refused
+together with `generated` (whose `codec` factor already chooses). `runtime.py`
+revalidates the frozen list independently (exact spelling, no duplicates, not
+with `generated`), and `campaign-softphone-runner` checks it again. The field
+is optional: manifests without it compile to exactly the same plan bytes as
+before (golden digests in `tests/test_softphone_runner.py`).
+
+The runner offers only these codecs (PJSUA `--dis-codec=*`, then
+`--add-codec`), and its result line adds `codecs` with `requested`,
+`offered`, `answered`, `negotiated`, `negotiatedPayloadType`, and
+`offerOnlyRequested` from PJSUA's log. A far end that answers with a codec
+it was not offered fails the step with `codec_not_offered`. A case that
+expects the far end to refuse a codec sets `expectations.finalStatus: 488`.
+
 ## TLS server name and trust anchor
 
 A TLS target can name the certificate it must present while every packet

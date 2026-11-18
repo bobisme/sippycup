@@ -74,6 +74,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "preflight",
                 "call",
                 "checks",
+                "matrix",
                 "campaign",
                 "media",
                 "media-echo",

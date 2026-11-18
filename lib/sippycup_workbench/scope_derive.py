@@ -176,6 +176,28 @@ def _build_profile(doc: dict[str, Any], report: Report) -> dict[str, Any]:
     }
 
 
+def _profile_media(doc: dict[str, Any]) -> dict[str, Any] | None:
+    """The owner's expected codecs become the profile's approved codecs.
+
+    Calls then offer only these codecs and refuse any other. Omitted when
+    the scope names no codec, so such profiles are unchanged.
+    """
+    from sippycup_softphone.driver import SoftphoneError, canonical_codec
+
+    codecs = (doc.get("media") or {}).get("codecs")
+    if not isinstance(codecs, list) or not codecs:
+        return None
+    names: list[str] = []
+    for item in codecs:
+        try:
+            name = canonical_codec(item)
+        except SoftphoneError:
+            return None
+        if name not in names:
+            names.append(name)
+    return {"codecs": names}
+
+
 def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str]]:
     limits = doc["limits"]
     targets = normalized_targets(doc)
@@ -465,6 +487,9 @@ def compile_scope(
             security_checks = profile_section(doc)
             if security_checks is not None:
                 profile["security_checks"] = security_checks
+            media_section = _profile_media(doc)
+            if media_section is not None:
+                profile["media"] = media_section
             result.profile_status = profile["authorization"]["status"]
             data = _dump(profile)
             problem = _validate_profile(data, profile["authorization"]["status"] == "approved", instant)

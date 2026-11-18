@@ -11,6 +11,7 @@ triage, and oracle against expectations generated from the profile.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import ipaddress
 import json
@@ -51,10 +52,22 @@ from sippycup_softphone import (
     destination_uri,
     place_call,
 )
-from sippycup_softphone.driver import SDES_CLEARTEXT_WARNING, SRTP_MODES, registrar_uri
+from sippycup_softphone.driver import (
+    SDES_CLEARTEXT_WARNING,
+    SRTP_MODES,
+    SUPPORTED_CODECS,
+    canonical_codec,
+    registrar_uri,
+)
 from sippycup_softphone import evidence as softphone_evidence
 
-from .profile import ProfileError, host_is_approved_literal, load_profile, rehearse
+from .profile import (
+    ProfileError,
+    approved_codecs,
+    host_is_approved_literal,
+    load_profile,
+    rehearse,
+)
 
 RESULT_VERSION = "sippycup.dev/call-result/v1"
 PLAN_VERSION = "sippycup.dev/call-plan/v1"
@@ -105,6 +118,8 @@ class CallOptions:
     dtmf: str | None = None
     dtmf_after: float = softphone_evidence.DEFAULT_DTMF_AFTER_SECONDS
     srtp: str | None = None
+    # True when the operator named codecs (--codec): offer only those.
+    exclusive_codecs: bool = False
 
 
 class TcpdumpCapture:
@@ -575,6 +590,10 @@ def _softphone_parameters(
         "duration_seconds": {"requested": options.duration, "limit": limit, "effective": duration},
         "answer_timeout_seconds": options.answer_timeout,
         "codecs": list(options.codecs),
+        "codec_offer": "only" if options.exclusive_codecs else "preferred",
+        "approved_codecs": (
+            None if (approved := _approved_or_none(document)) is None else list(approved)
+        ),
         "play": str(options.play) if options.play else "generated synthetic tone (played.wav)",
         "record": "heard.wav in the run directory",
         "account": (
@@ -1018,6 +1037,18 @@ def _classify_core(
             else "Registration failed without a SIP status (no response or a transport error)."
         )
         return "failed", "registration-failed", EXIT_NOT_PASS, notes
+    codecs = softphone.get("codecs") or {}
+    if codecs.get("unoffered") or error == "codec_not_offered":
+        names = ", ".join(
+            f"{item.get('name') or 'payload type'} ({item.get('payloadType')})"
+            for item in codecs.get("unoffered") or []
+        )
+        notes.append(
+            f"The far end answered with {names or 'a codec'} that the offer did not contain "
+            f"(offered: {', '.join(item.get('name') or str(item.get('payloadType')) for item in codecs.get('offered') or [])}); "
+            "an SDP answer must choose from the offer (RFC 3264 section 6)."
+        )
+        return ("completed" if softphone.get("answered") else "failed"), "codec-not-offered", EXIT_NOT_PASS, notes
     if not softphone.get("answered"):
         status = softphone.get("final_status")
         provisional = (setup or {}).get("provisional") or []
@@ -1301,6 +1332,239 @@ def count_tls_media(path: Path, peer: str | None, exit_code: int | None) -> dict
     return {"peer": peer, "outbound": outbound, "inbound": inbound, "source": "capture"}
 
 
+def resolve_codecs(options: "CallOptions", document: dict[str, Any]) -> tuple[tuple[str, ...], bool, tuple[str, ...] | None]:
+    """(codecs, exclusive, approved): what the call offers, checked before anything starts.
+
+    Every name must be one the image's PJSUA supports. An explicit ``--codec``
+    offers only those codecs. A profile with ``media.codecs`` approves only
+    that list: a codec outside it is refused, and without ``--codec`` the call
+    offers exactly the approved list. Otherwise PCMU is preferred and PJSUA
+    also offers its other codecs (the historical default).
+    """
+    try:
+        codecs = tuple(canonical_codec(item) for item in options.codecs)
+    except SoftphoneError as error:
+        raise CallError(f"--codec: {error}") from error
+    if not codecs:
+        raise CallError("--codec needs at least one codec name")
+    if len(set(codecs)) != len(codecs):
+        raise CallError("--codec names a codec twice")
+    try:
+        approved = approved_codecs(document)
+    except ProfileError as error:
+        raise CallError(f"the profile's {error}") from error
+    if approved is None:
+        return codecs, options.exclusive_codecs, None
+    if not options.exclusive_codecs:
+        return approved, True, approved
+    outside = [item for item in codecs if item not in approved]
+    if outside:
+        raise CallError(
+            f"codec {', '.join(outside)} is not approved by the profile "
+            f"(media.codecs: {', '.join(approved)})"
+        )
+    return codecs, True, approved
+
+
+def _approved_or_none(document: dict[str, Any]) -> tuple[str, ...] | None:
+    try:
+        return approved_codecs(document)
+    except ProfileError:
+        return None
+
+
+def codec_sdp_argv(tshark: str, capture: Path) -> list[str]:
+    """tshark argv listing the SDP of every captured SIP message (cleartext only)."""
+    return [
+        tshark, "-n", "-r", str(capture), "-Y", "sdp", "-T", "fields",
+        "-E", "aggregator=|", "-e", "sip.CSeq.method", "-e", "sip.Status-Code",
+        "-e", "sdp.media", "-e", "sdp.media_attr",
+    ]
+
+
+def rtp_payload_argv(tshark: str, capture: Path, peer: str | None) -> list[str] | None:
+    """tshark argv listing (source, RTP payload type) on the negotiated media port."""
+    if not peer:
+        return None
+    from sippycup_softphone.driver import _peer_address, _peer_port
+
+    address = _peer_address(peer)
+    port = _peer_port(peer)
+    if address is None or port is None:
+        return None
+    family = "ipv6" if ":" in address else "ip"
+    return [
+        tshark, "-n", "-r", str(capture), "-d", f"udp.port=={port},rtp",
+        "-Y", f"rtp && {family}.addr == {address} && udp.port == {port}",
+        "-T", "fields", "-e", f"{family}.src", "-e", "rtp.p_type",
+    ]
+
+
+def parse_sdp_rows(text: str) -> dict[str, Any]:
+    """The last INVITE offer and 2xx/183 answer in ``codec_sdp_argv`` output."""
+    offer = answer = None
+    for line in text.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 4 or "INVITE" not in fields[0].split("|"):
+            continue
+        media = fields[2].split("|")[0].split()
+        if len(media) < 3 or media[0] != "audio":
+            continue
+        try:
+            formats = [int(item) for item in media[3:]]
+        except ValueError:
+            continue
+        rtpmap: dict[int, tuple[str, int]] = {}
+        for attribute in fields[3].split("|"):
+            match = re.match(r"^rtpmap:(\d+) ([A-Za-z0-9._-]+)/(\d+)", attribute)
+            if match is not None:
+                rtpmap[int(match.group(1))] = (match.group(2), int(match.group(3)))
+        body = {
+            "formats": formats,
+            "codecs": softphone_evidence.sdp_codecs(formats, rtpmap),
+            "telephoneEvents": [pt for pt in formats if rtpmap.get(pt, ("",))[0].lower() == "telephone-event"],
+        }
+        status = fields[1].split("|")[0]
+        if not status:
+            offer = body
+        elif status.isdigit() and (200 <= int(status) < 300 or int(status) == 183):
+            answer = body
+    return {"offer": offer, "answer": answer}
+
+
+def parse_rtp_payload_types(text: str, peer: str | None) -> dict[str, dict[str, int]] | None:
+    """RTP packet counts per payload type, toward and from the media peer."""
+    from sippycup_softphone.driver import _peer_address
+
+    address = _peer_address(peer) if peer else None
+    if address is None:
+        return None
+    counts: dict[str, dict[str, int]] = {"outbound": {}, "inbound": {}}
+    for line in text.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 2 or not fields[1].isdigit():
+            continue
+        direction = "inbound" if fields[0] == address else "outbound"
+        counts[direction][fields[1]] = counts[direction].get(fields[1], 0) + 1
+    return counts
+
+
+def _names(codecs: Sequence[dict[str, Any]]) -> list[str]:
+    return [
+        f"{item.get('name') or 'unknown'}/{item.get('clockRate')}" if item.get("clockRate") else str(item.get("name") or item.get("payloadType"))
+        for item in codecs
+    ]
+
+
+def codec_report(
+    codecs: Sequence[str],
+    exclusive: bool,
+    approved: Sequence[str] | None,
+    softphone: dict[str, Any] | None,
+    sdp_text: str | None,
+    rtp_text: str | None,
+) -> dict[str, Any]:
+    """Requested, offered, answered, and negotiated codecs, proven on the wire.
+
+    The offer and answer come from the capture when the signaling is
+    cleartext (``wire.sdpSource: capture``), else from PJSUA's log. RTP payload
+    types always come from the capture (RTP headers are cleartext under SRTP).
+    ``wire.verified`` is true only when an exclusive offer listed nothing but
+    the requested codecs and every captured RTP packet on the media port used
+    the negotiated payload type (or telephone-event or comfort noise).
+    """
+    from sippycup_softphone.driver import codec_facts
+
+    facts = (softphone or {}).get("codecs")
+    sdp_source = "pjsua-log"
+    if sdp_text:
+        wire_sdp = parse_sdp_rows(sdp_text)
+        if wire_sdp["offer"] is not None:
+            facts = codec_facts(codecs, exclusive, wire_sdp["offer"], wire_sdp["answer"])
+            sdp_source = "capture"
+    report: dict[str, Any] = {
+        "requested": list(codecs),
+        "exclusive": exclusive,
+        "approved": None if approved is None else list(approved),
+        "offered": [],
+        "answered": [],
+        "negotiated": None,
+        "negotiatedPayloadType": None,
+        "negotiatedRequested": None,
+        "offerOnlyRequested": None,
+        "unoffered": [],
+        "wire": None,
+    }
+    if facts is None:
+        return report
+    report.update(
+        offered=_names(facts.get("offered") or []),
+        answered=_names(facts.get("answered") or []),
+        negotiated=facts.get("negotiated"),
+        negotiatedPayloadType=facts.get("negotiatedPayloadType"),
+        negotiatedRequested=facts.get("negotiatedRequested"),
+        offerOnlyRequested=facts.get("offerOnlyRequested"),
+        unoffered=_names(facts.get("unoffered") or []),
+    )
+    peer = (softphone or {}).get("media_peer")
+    payload_types = parse_rtp_payload_types(rtp_text, peer) if rtp_text is not None else None
+    allowed: set[str] = set()
+    sdp = ((softphone or {}).get("sdp") or {})
+    for side in ("offer", "answer"):
+        allowed.update(str(item) for item in ((sdp.get(side) or {}).get("telephoneEvents") or []))
+    allowed.add("13")  # comfort noise
+    negotiated_pt = facts.get("negotiatedPayloadType")
+    media_uses = None
+    if payload_types is not None and negotiated_pt is not None:
+        seen = set(payload_types["outbound"]) | set(payload_types["inbound"])
+        media_uses = bool(seen) and str(negotiated_pt) in seen and seen <= allowed | {str(negotiated_pt)}
+    verified = None
+    if media_uses is not None:
+        verified = bool(media_uses and (facts.get("offerOnlyRequested") is True or not exclusive))
+    report["wire"] = {
+        "sdpSource": sdp_source,
+        "offerFormats": (sdp.get("offer") or {}).get("formats") if sdp_source == "pjsua-log" else None,
+        "rtpPayloadTypes": payload_types,
+        "rtpSource": "capture" if payload_types is not None else None,
+        "mediaUsesNegotiated": media_uses,
+        "verified": verified,
+    }
+    if sdp_source == "capture":
+        wire_sdp = parse_sdp_rows(sdp_text or "")
+        report["wire"]["offerFormats"] = (wire_sdp["offer"] or {}).get("formats")
+        report["wire"]["answerFormats"] = (wire_sdp["answer"] or {}).get("formats")
+    return report
+
+
+def _offline_text(path: Path, exit_code: int | None) -> str | None:
+    if exit_code != 0:
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _codec_notes(codec: dict[str, Any], verdict: str) -> list[str]:
+    notes: list[str] = []
+    requested = ", ".join(codec.get("requested") or [])
+    if verdict == "call-media-not-acceptable" and codec.get("exclusive"):
+        notes.append(
+            f"The offer listed only {requested} (plus telephone-event); the far end accepts none of them."
+        )
+    if codec.get("exclusive") and codec.get("offerOnlyRequested") is False:
+        notes.append(
+            f"The offer listed codecs beyond the requested {requested}: {', '.join(codec.get('offered') or [])}."
+        )
+    wire = codec.get("wire") or {}
+    if wire.get("mediaUsesNegotiated") is False:
+        notes.append(
+            f"RTP on the media port used payload types {wire.get('rtpPayloadTypes')}, not only the "
+            f"negotiated {codec.get('negotiated')} (payload type {codec.get('negotiatedPayloadType')})."
+        )
+    return notes
+
+
 def _network_activity(
     *,
     preflight_sent: bool,
@@ -1428,6 +1692,8 @@ def _execute(
         raise CallError(
             f"--dtmf-after must be from 0 to {softphone_evidence.MAX_DTMF_AFTER_SECONDS} seconds"
         )
+    codecs, exclusive, approved_codec_list = resolve_codecs(options, document)
+    options = dataclasses.replace(options, codecs=codecs, exclusive_codecs=exclusive)
     duration, limit = effective_duration(options.duration, document)
     planned = planned_wall_seconds(options, duration)
     now = deps.now()
@@ -1505,6 +1771,7 @@ def _execute(
                 account=(SoftphoneAccount(username=options.username, realm=options.realm)
                          if options.username else None),
                 codecs=tuple(options.codecs),
+                exclusive_codecs=options.exclusive_codecs,
                 tls_server_name=server_name,
                 tls_ca_file=Path("trust-anchor.pem") if ca_data is not None else None,
                 dtmf=options.dtmf,
@@ -1619,6 +1886,7 @@ def _execute(
             console_file=run_dir / "softphone-console.txt",
             account=account,
             codecs=tuple(options.codecs),
+            exclusive_codecs=options.exclusive_codecs,
             answer_timeout_seconds=options.answer_timeout,
             registration_timeout_seconds=REGISTRATION_TIMEOUT_SECONDS,
             allowed_media_addresses=tuple(approved),
@@ -1808,6 +2076,22 @@ def _execute(
                     events_argv, run_dir / "dtmf-events.txt", run_dir / "dtmf-events.stderr",
                     child_environment,
                 )
+            if (softphone_result or {}).get("dialed"):
+                # Codec proof from the capture: the SDP offer and answer (when
+                # the signaling is cleartext) and the RTP payload types.
+                if transport != "tls":
+                    offline_codes["codec_sdp"] = deps.run_offline(
+                        codec_sdp_argv(tools["tshark"], capture_path), run_dir / "codec-sdp.txt",
+                        run_dir / "codec-sdp.stderr", child_environment,
+                    )
+                payload_argv = rtp_payload_argv(
+                    tools["tshark"], capture_path, (softphone_result or {}).get("media_peer")
+                )
+                if payload_argv is not None:
+                    offline_codes["codec_rtp"] = deps.run_offline(
+                        payload_argv, run_dir / "codec-rtp.txt", run_dir / "codec-rtp.stderr",
+                        child_environment,
+                    )
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
         os.umask(old_umask)
@@ -1847,6 +2131,14 @@ def _execute(
         run_dir / "dtmf-events.txt",
         offline_codes.get("dtmf_events"),
     )
+    codec = codec_report(
+        options.codecs,
+        options.exclusive_codecs,
+        approved_codec_list,
+        softphone_result,
+        _offline_text(run_dir / "codec-sdp.txt", offline_codes.get("codec_sdp")),
+        _offline_text(run_dir / "codec-rtp.txt", offline_codes.get("codec_rtp")),
+    )
     state, verdict, exit_code, notes = classify(
         cancelled_signal=cancel_signal[0] if cancel_signal else None,
         stop_reason=stop_reason,
@@ -1876,6 +2168,7 @@ def _execute(
         )
     if limit is not None and options.duration > limit:
         notes.append(f"Requested duration {options.duration}s was clamped to the profile limit {limit}s.")
+    notes.extend(_codec_notes(codec, verdict))
     if recording and recording.get("silent") and verdict == "pass":
         notes.append("The recording is silent even though RTP was observed; review heard.wav.")
     if cancel_signal and preflight_sent:
@@ -1940,6 +2233,7 @@ def _execute(
         "setup": ({**((softphone_result or {}).get("setup") or {}), **(setup or {})} or None),
         "srtp": _srtp_summary(srtp, transport, softphone_result, srtp_media),
         "dtmf": dtmf_report,
+        "codec": codec,
         "warnings": [SDES_CLEARTEXT_WARNING] if srtp != "off" and transport != "tls" else [],
         "triage": triage,
         "oracle": oracle,
@@ -2006,7 +2300,19 @@ def render_human(value: dict[str, Any]) -> str:
             f"profile limit {duration['limit']}s)"
         )
         lines.append(f"  answer timeout:  {softphone['answer_timeout_seconds']}s")
-        lines.append(f"  codecs:          {', '.join(softphone['codecs'])}")
+        lines.append(
+            f"  codecs:          {', '.join(softphone['codecs'])}"
+            + (
+                " only (plus telephone-event)"
+                if softphone.get("codec_offer") == "only"
+                else " preferred; PJSUA also offers its other codecs"
+            )
+            + (
+                f"; profile approves {', '.join(softphone['approved_codecs'])}"
+                if softphone.get("approved_codecs")
+                else ""
+            )
+        )
         lines.append(f"  play:            {softphone['play']}")
         lines.append(f"  record:          {softphone['record']}")
         account = softphone["account"]
@@ -2095,6 +2401,28 @@ def render_human(value: dict[str, Any]) -> str:
             + f"sent {tx if tx is not None else 'unknown'}, received {rx if rx is not None else 'unknown'}"
             + (f", codec {softphone['codec']}" if softphone["codec"] else "")
         )
+    codec = value.get("codec")
+    if codec and (codec.get("offered") or codec.get("answered")):
+        wire = codec.get("wire") or {}
+        types = wire.get("rtpPayloadTypes")
+        lines.append(
+            f"  Codec:        offered {', '.join(codec['offered']) or 'none'}"
+            + (" (only the requested)" if codec.get("offerOnlyRequested") else "")
+            + f"; answered {', '.join(codec['answered']) or 'none'}"
+            + (
+                f"; negotiated {codec['negotiated']} (pt {codec['negotiatedPayloadType']})"
+                if codec.get("negotiated")
+                else ""
+            )
+            + (
+                f"; RTP pt to peer {types['outbound']}, from peer {types['inbound']}"
+                if types
+                else ""
+            )
+            + f" [SDP: {wire.get('sdpSource', 'none')}"
+            + (f", verified {'yes' if wire['verified'] else 'NO'}" if wire.get("verified") is not None else "")
+            + "]"
+        )
     media = (tls or {}).get("media")
     if media:
         lines.append(
@@ -2175,6 +2503,11 @@ def render_human(value: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def split_codecs(values: Sequence[str]) -> tuple[str, ...]:
+    """``--codec PCMA,PCMU --codec G722`` as ("PCMA", "PCMU", "G722")."""
+    return tuple(item.strip() for value in values for item in value.split(",") if item.strip())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sippycup call",
@@ -2193,7 +2526,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration", type=int, default=DEFAULT_DURATION_SECONDS, help="seconds; clamped to limits.max_duration_seconds")
     parser.add_argument("--answer-timeout", type=int, default=DEFAULT_ANSWER_TIMEOUT_SECONDS)
     parser.add_argument("--play", type=Path, help="16-bit PCM WAV beneath work/ (default: generated tone)")
-    parser.add_argument("--codec", action="append", dest="codecs", help="codec preference, repeatable (default PCMU)")
+    parser.add_argument(
+        "--codec", action="append", dest="codecs", metavar="NAME[,NAME]",
+        help="offer only these codecs, in preference order (repeatable or comma-separated): "
+        + ", ".join(SUPPORTED_CODECS)
+        + ". Default: the profile's media.codecs, else PCMU preferred among all PJSUA codecs",
+    )
     parser.add_argument("--username", help="account username for digest challenges")
     parser.add_argument("--realm", default="*")
     parser.add_argument("--no-register", action="store_true", help="answer challenges without sending REGISTER")
@@ -2228,7 +2566,8 @@ def main(argv: Sequence[str] | None = None, deps: Dependencies | None = None) ->
         destination=args.dial,
         duration=args.duration,
         play=args.play,
-        codecs=tuple(args.codecs or ("PCMU",)),
+        codecs=split_codecs(args.codecs) if args.codecs else ("PCMU",),
+        exclusive_codecs=bool(args.codecs),
         username=args.username,
         realm=args.realm,
         register=not args.no_register,

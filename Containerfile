@@ -192,6 +192,7 @@ COPY bin/campaign-integration-selftest /usr/local/bin/campaign-integration-selft
 COPY bin/call-integration-selftest /usr/local/bin/call-integration-selftest
 COPY bin/sippycup-call /usr/local/bin/sippycup-call
 COPY bin/sippycup-checks /usr/local/bin/sippycup-checks
+COPY bin/sippycup-matrix /usr/local/bin/sippycup-matrix
 COPY bin/container-preflight /usr/local/bin/sippycup-preflight
 COPY bin/container-options /usr/local/bin/sippycup-options
 COPY bin/container-report /usr/local/bin/sippycup-report
@@ -250,6 +251,7 @@ RUN chmod 0755 \
         /usr/local/bin/call-integration-selftest \
         /usr/local/bin/sippycup-call \
         /usr/local/bin/sippycup-checks \
+        /usr/local/bin/sippycup-matrix \
         /usr/local/bin/sipp \
         /usr/local/bin/sippycup-preflight \
         /usr/local/bin/sippycup-options \

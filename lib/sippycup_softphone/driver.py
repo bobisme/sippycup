@@ -73,6 +73,47 @@ _TOKEN = re.compile(r"^[^\s\"'\x00-\x1f\x7f]{1,256}$")
 _USERNAME = re.compile(r"^[A-Za-z0-9._+*~!$&()=,;?/%-]{1,64}$")
 _URI = re.compile(r"^sips?:[A-Za-z0-9._~!$&()*+,;=:@%\[\]-]{1,255}$")
 _CODEC = re.compile(r"^[A-Za-z0-9][A-Za-z0-9./-]{0,31}$")
+# The audio codecs the image's PJSUA build has, as its "Cp" (codec
+# priorities) console command lists them (PJSUA 2.17 in the prepared image):
+#   speex/16000/1 speex/8000/1 speex/32000/1 iLBC/8000/1 GSM/8000/1
+#   PCMU/8000/1 PCMA/8000/1 G722/16000/1 opus/48000/2 (L16 disabled)
+# A codec request names one of these; ``--add-codec`` matches by prefix, so
+# speex needs its clock rate. ``tests/test_codec_matrix.py`` (a recorded
+# listing) and ``make codec-gate`` (the live binary) keep the list equal.
+SUPPORTED_CODECS = (
+    "PCMU", "PCMA", "G722", "GSM", "iLBC", "opus", "speex/8000", "speex/16000", "speex/32000",
+)
+_SUPPORTED_BY_LOWER = {name.lower(): name for name in SUPPORTED_CODECS}
+# The name PJSUA prints for a negotiated codec ("PCMA", "speex", "opus"),
+# lower-cased, for each supported request.
+_CODEC_ENCODING = {name: name.split("/", 1)[0].lower() for name in SUPPORTED_CODECS}
+
+
+def canonical_codec(name: Any) -> str:
+    """The supported spelling of a requested codec name (case-insensitive)."""
+    if not isinstance(name, str) or _CODEC.fullmatch(name.strip()) is None:
+        raise SoftphoneError(f"invalid codec name: {name!r}")
+    canonical = _SUPPORTED_BY_LOWER.get(name.strip().lower())
+    if canonical is None:
+        raise SoftphoneError(
+            f"unsupported codec {name!r}: the image's PJSUA supports {', '.join(SUPPORTED_CODECS)}"
+        )
+    return canonical
+
+
+def codec_encoding(name: str) -> str:
+    """The lower-case encoding name (SDP rtpmap, PJSUA's report) of a supported codec."""
+    return _CODEC_ENCODING[canonical_codec(name)]
+
+
+def parse_codec_list(text: str) -> list[str]:
+    """Codec names from PJSUA's ``Cp`` listing (``PRIO<TAB>NAME/RATE/CHANNELS``)."""
+    names: list[str] = []
+    for line in text.splitlines():
+        match = re.match(r"^\s*(\d+)\s+([A-Za-z0-9.-]+)/(\d+)/(\d+)\s*$", line)
+        if match is not None and int(match.group(1)) > 0:
+            names.append(f"{match.group(2)}/{match.group(3)}")
+    return names
 
 _STATE = re.compile(r"Call (\d+) state changed to ([A-Z_]+)")
 _DISCONNECTED = re.compile(r"Call (\d+) is DISCONNECTED \[reason=(\d+) \(([^)]*)\)\]")
@@ -199,6 +240,8 @@ class SoftphoneResult:
     setup: dict[str, Any] | None = None
     local_rtp_port: int | None = None
     warnings: list[str] = field(default_factory=list)
+    # Requested, offered, answered, and negotiated codecs (see codec_facts).
+    codecs: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -325,8 +368,10 @@ def _validate(call: SoftphoneCall, password: str | None) -> str:
     if not call.codecs:
         raise SoftphoneError("at least one codec is required")
     for codec in call.codecs:
-        if _CODEC.fullmatch(codec) is None:
-            raise SoftphoneError(f"invalid codec name: {codec!r}")
+        if canonical_codec(codec) != codec:
+            raise SoftphoneError(f"codec {codec!r} must be spelled {canonical_codec(codec)!r}")
+    if len(set(call.codecs)) != len(call.codecs):
+        raise SoftphoneError("each codec may be requested once")
     if call.answer_timeout_seconds <= 0 or call.registration_timeout_seconds <= 0:
         raise SoftphoneError("timeouts must be positive")
     if call.srtp not in SRTP_MODES:
@@ -544,6 +589,65 @@ def _media_outside_scope(call: SoftphoneCall, peer: str | None) -> bool:
     return False
 
 
+def codec_matches(entry: Mapping[str, Any], requested: str) -> bool:
+    """Whether an SDP codec entry is the requested supported codec."""
+    name = str(entry.get("name") or "").lower()
+    canonical = canonical_codec(requested)
+    if name != codec_encoding(canonical):
+        return False
+    if "/" in canonical:
+        return entry.get("clockRate") == int(canonical.split("/", 1)[1])
+    return True
+
+
+def _same_codec(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    if left.get("name") is None or right.get("name") is None:
+        return left.get("payloadType") == right.get("payloadType")
+    return (
+        str(left["name"]).lower() == str(right["name"]).lower()
+        and left.get("clockRate") == right.get("clockRate")
+    )
+
+
+def codec_facts(
+    requested: Sequence[str],
+    exclusive: bool,
+    offer: Mapping[str, Any] | None,
+    answer: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """What was asked for, offered, answered, and negotiated, from the SDP.
+
+    ``unoffered`` lists answer codecs that the offer did not contain (a far
+    end that answers with a codec it was not offered). ``offerOnlyRequested``
+    is true when every offered codec is one of ``requested``; it is only
+    expected to hold for an exclusive offer.
+    """
+    offered = list((offer or {}).get("codecs") or [])
+    answered = list((answer or {}).get("codecs") or [])
+    unoffered = [
+        item for item in answered if not any(_same_codec(item, other) for other in offered)
+    ]
+    first = answered[0] if answered else None
+    return {
+        "requested": list(requested),
+        "exclusive": exclusive,
+        "offered": offered,
+        "answered": answered,
+        "negotiated": None if first is None else first.get("name"),
+        "negotiatedPayloadType": None if first is None else first.get("payloadType"),
+        "negotiatedRequested": (
+            None if first is None else any(codec_matches(first, name) for name in requested)
+        ),
+        "offerOnlyRequested": (
+            None
+            if offer is None
+            else all(any(codec_matches(item, name) for name in requested) for item in offered)
+        ),
+        "unoffered": unoffered,
+        "source": "pjsua-log",
+    }
+
+
 def _observe_media_facts(
     call: SoftphoneCall, result: SoftphoneResult, raw_text: str, combined: str
 ) -> None:
@@ -554,6 +658,10 @@ def _observe_media_facts(
     answer = negotiated["answer"]
     if offer is not None or answer is not None:
         result.sdp = negotiated
+    if result.dialed:
+        result.codecs = codec_facts(call.codecs, call.exclusive_codecs, offer, answer)
+        if result.codecs["unoffered"] and result.error in (None, "softphone_exited_unexpectedly"):
+            result.error = "codec_not_offered"
     result.local_rtp_port = offer["port"] if offer is not None else None
     result.setup = setup_timing(messages)
     if result.registration_attempted and result.registered is False and result.registration_status is None:

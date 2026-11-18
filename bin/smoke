@@ -42,6 +42,7 @@ commands=(
     sippycup-assert
     sippycup-call
     sippycup-checks
+    sippycup-matrix
     sippycup-chaos
     sippycup-diff
     sippycup-evidence
@@ -124,6 +125,7 @@ first_party_help=(
     sippycup-assert
     sippycup-call
     sippycup-checks
+    sippycup-matrix
     sippycup-chaos
     sippycup-diff
     sippycup-envelope
