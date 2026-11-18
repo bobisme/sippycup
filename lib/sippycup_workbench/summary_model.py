@@ -98,6 +98,14 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
         "summary": "Sippycup hung the call up because the far end negotiated media to an address the written scope does not approve. This is a safety stop, not a target failure.",
         "recommendation": "Confirm the media server addresses or media-server range with the service owner and add them to the written scope's media networks (or have the advertised SDP connection address corrected), then repeat the call.",
     },
+    # bn-2jg: the far end routed in-dialog SIP (ACK/BYE) away from the
+    # approved target; Sippycup stopped PJSUA. Also a safety stop.
+    "signaling-outside-scope": {
+        "severity": "info",
+        "title": "Safety stop: the far end routed SIP to an address outside the approved scope",
+        "summary": "The far end's Record-Route or Contact sent in-dialog SIP to an address the written scope does not approve; Sippycup stopped the softphone at once. This is a safety stop, not a target failure.",
+        "recommendation": "Confirm with the service owner whether that address is part of the service; have it approved as the target, or have the edge record-route through the approved address, then repeat the call.",
+    },
     "oracle-assertion-failed": {
         "severity": "info",
         "title": "A call-path assertion failed on an answered call",
@@ -120,7 +128,7 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
 
 
 # Verdicts where Sippycup itself stopped a run to stay inside the scope.
-SAFETY_STOPS = frozenset({"media-outside-scope"})
+SAFETY_STOPS = frozenset({"media-outside-scope", "signaling-outside-scope"})
 
 
 class Unreadable(Exception):
@@ -1567,7 +1575,7 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
         # A call the media-scope stop hung up fails the oracle's media
         # assertions because of the stop itself; that is not a target finding.
         if oracle.get("verdict") == "fail" and (details.get("call") or {}).get("answered") and oracle.get("decidesVerdict") \
-                and verdict != "media-outside-scope":
+                and verdict not in SAFETY_STOPS:
             found.append(_observation("oracle-assertion-failed", run, "Failed: " + ", ".join(oracle.get("failed") or []) + "."))
         if verdict in {"capture-failed", "capture-died"}:
             found.append(_observation("capture-incomplete", run))

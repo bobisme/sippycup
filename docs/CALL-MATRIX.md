@@ -58,7 +58,7 @@ whose verdict is a stop condition: `registration-failed` or
 `call-auth-failed` (another call would repeat the credentials),
 `call-rate-limited` (429), `call-unavailable` with a 503, `authorization-lapsed`,
 `blocked`, `capture-failed`, `capture-died`, `media-outside-scope`,
-`internal-error`, or `cancelled`. Ctrl-C or SIGTERM hangs up the current call
+`signaling-outside-scope`, `internal-error`, or `cancelled`. Ctrl-C, SIGTERM, or SIGHUP hangs up the current call
 the same way as `call` and runs no further cell.
 
 Exit status:

@@ -779,7 +779,7 @@ def main(argv: Sequence[str] | None = None, *, pjsua: str | None = None) -> int:
     def stop(_signum: int, _frame: object) -> None:
         cancel.set()
 
-    for signum in (signal.SIGINT, signal.SIGTERM):
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, stop)
     raw = sys.stdin.buffer.readline(MAX_ENVELOPE_BYTES + 1)
     return run(raw, pjsua=pjsua or shutil.which("pjsua") or "pjsua", cancel=cancel)

@@ -44,6 +44,7 @@
         "call-not-placed",
         "call-error",
         "media-outside-scope",
+        "signaling-outside-scope",
         "capture-failed",
         "capture-died",
         "authorization-lapsed",

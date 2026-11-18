@@ -43,7 +43,7 @@ LABEL = {
     "sdes-over-cleartext": "SDES offer over cleartext signaling",
 }
 # Driver errors that end the whole run, not just this call.
-SCOPE_ERRORS = {"media_peer_outside_scope", "capture_died", "cancelled"}
+SCOPE_ERRORS = {"media_peer_outside_scope", "signaling_outside_scope", "capture_died", "cancelled"}
 FATAL_ERRORS = SCOPE_ERRORS | {"tls_verification_failed", "tls_verification_not_observed"}
 
 

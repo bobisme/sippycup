@@ -729,7 +729,7 @@ def execute_campaign(
         if cancel_signal is None:
             cancel_signal = signum
 
-    for signum in (signal.SIGINT, signal.SIGTERM):
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         previous_handlers[signum] = signal.signal(signum, request_cancel)
     try:
         if capture_argv:

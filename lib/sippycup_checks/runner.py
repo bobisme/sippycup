@@ -401,7 +401,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
 
     try:
         if deps.install_signal_handlers:
-            for signum in (signal.SIGINT, signal.SIGTERM):
+            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                 previous[signum] = signal.signal(signum, handle)
         _write_json(run_dir / "profile.json", document)
         local_networks: list[str] = []

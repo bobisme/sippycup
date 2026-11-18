@@ -68,6 +68,10 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
         "The negotiated media peer is not an approved address",
         "The far end's media address is outside the profile's approved addresses and outside every owner-approved media network (media.networks), or its port is outside media.port_range, so Sippycup hung the call up. This is a safety stop, not a target failure. Review the SDP in the capture, then ask the owner for the media-server addresses or range (see ./bin/sippycup scope questions) before changing the scope.",
     ),
+    "call.signaling-outside-scope": (
+        "PJSUA sent SIP to an address that is not the approved target",
+        "The far end's Record-Route or Contact told PJSUA to send in-dialog requests (ACK, BYE) to another address. PJSIP sent the first one before anything could intervene, so Sippycup killed PJSUA at once instead of hanging up along that route; the far end's dialog times out by itself. This is a safety stop, not a target failure. The address is in result.json (softphone.scope_violation). Ask the owner whether that address is part of the service and, if so, get it approved as the target, or have the far end record-route through the approved address.",
+    ),
     "call.capture-failed": (
         "Packet capture did not start; nothing was sent",
         "Capture needs CAP_NET_RAW inside a private network namespace, which ./bin/sippycup call provides. See capture.log in the run directory.",

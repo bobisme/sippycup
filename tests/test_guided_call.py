@@ -868,7 +868,9 @@ class SecretTests(GuidedCallCase):
 
 class SignalTests(GuidedCallCase):
     def test_interrupt_and_terminate_cancel_with_evidence(self):
-        for signum, expected in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
+        # bn-2jg: SIGHUP (the terminal closed) used to kill the call outright,
+        # without BYE, unregistration, or result.json; it now stops like SIGTERM.
+        for signum, expected in ((signal.SIGINT, 130), (signal.SIGTERM, 143), (signal.SIGHUP, 143)):
             with self.subTest(signal=signum):
                 def interrupted(call, cancel):
                     os.kill(os.getpid(), signum)

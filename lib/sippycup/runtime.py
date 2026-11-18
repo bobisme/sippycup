@@ -1132,7 +1132,7 @@ def run_plan(
         def cancel(signum: int, _frame: object) -> None:
             supervisor.request_cancel(signum)
 
-        for signum in (signal.SIGINT, signal.SIGTERM):
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             previous[signum] = signal.signal(signum, cancel)
         try:
             return supervisor.run()

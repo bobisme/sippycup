@@ -213,6 +213,9 @@ triage, and assertions, with a new private run directory:
 ```
 
 See `docs/GUIDED-CALL.md` for credentials, verdicts, and the emergency stop.
+`docs/SAFETY-AUDIT.md` lists which guardrails were tested and how, and the
+residual risks to manage by procedure (campaigns have no approval window;
+ceilings are per process).
 
 `checks` runs owner-approved, low-volume posture checks (banners, TLS,
 cleartext signaling, unauthenticated REGISTER/INVITE, Digest quality, user

@@ -313,6 +313,8 @@ class RuntimeSignalTests(unittest.TestCase):
         for signum, expected_code in (
             (signal.SIGINT, EXIT_SIGINT),
             (signal.SIGTERM, EXIT_SIGTERM),
+            # bn-2jg: a closed terminal stops the campaign like SIGTERM.
+            (signal.SIGHUP, EXIT_SIGTERM),
         ):
             with self.subTest(signal=signum), tempfile.TemporaryDirectory() as directory:
                 plan_path = Path(directory) / "plan.json"

@@ -854,6 +854,10 @@ def _peer_unknown_but_approved(
     peer = softphone.get("media_peer")
     if peer and _peer_address(str(peer)) is not None:
         return False
+    if softphone.get("scope_violation"):
+        # bn-2jg: the driver refused a destination the far end's SDP named
+        # (an RTCP address, a port), not merely an unknown peer.
+        return False
     if not remote_media or not approved:
         return False
     scope = MediaScope(tuple(str(ipaddress.ip_address(item)) for item in approved), tuple(media_networks))
@@ -1048,6 +1052,14 @@ def _classify_core(
     if softphone is None:
         return "failed", "call-not-placed", EXIT_NOT_PASS, notes
     error = softphone.get("error")
+    if error == "signaling_outside_scope":
+        violation = softphone.get("scope_violation") or {}
+        notes.append(
+            f"PJSUA sent SIP to {violation.get('address') or 'an address'} that is not the approved target "
+            "(the far end's Record-Route or Contact named it), so Sippycup stopped PJSUA at once, "
+            "without a BYE along that route; the far end's dialog times out by itself."
+        )
+        return "failed", "signaling-outside-scope", EXIT_NOT_PASS, notes
     if error == "media_peer_outside_scope" and _peer_unknown_but_approved(
         softphone, approved, remote_media, media_networks
     ):
@@ -1924,7 +1936,7 @@ def _execute(
 
     try:
         if deps.install_signal_handlers:
-            for signum in (signal.SIGINT, signal.SIGTERM):
+            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                 previous_handlers[signum] = signal.signal(signum, handle_signal)
         # JSON rather than YAML: the evidence privacy lint reads a line that
         # starts with "authorization:" as SIP authorization material.
