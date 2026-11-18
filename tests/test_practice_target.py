@@ -111,7 +111,7 @@ class PrepareTests(unittest.TestCase):
         self.assertTrue(ready.ready, ready.errors)
         expired = rehearse(profile, now=self.now + practice.VALIDITY)
         self.assertFalse(expired.ready)
-        self.assertIn("authorization has expired", expired.errors)
+        self.assertTrue(any(error.startswith("authorization has expired") for error in expired.errors), expired.errors)
 
     def test_checked_in_profile_template_is_not_an_approval(self) -> None:
         template = load_profile(ROOT / "examples" / "practice" / "target-profile.template.yaml")

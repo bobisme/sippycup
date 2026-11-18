@@ -422,9 +422,16 @@ def rehearse(
         valid_from = valid_until = None
     instant = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if valid_from and instant < valid_from:
-        errors.append("authorization is not valid yet")
+        errors.append(
+            f"authorization is not valid yet (valid_from {valid_from.strftime('%Y-%m-%dT%H:%M:%SZ')}); "
+            "wait for the window to open"
+        )
     if valid_until and instant >= valid_until:
-        errors.append("authorization has expired")
+        errors.append(
+            f"authorization has expired (valid_until {valid_until.strftime('%Y-%m-%dT%H:%M:%SZ')}); "
+            "send nothing; ask the owner for a new written window, record it in scope.yaml, "
+            "and run scope compile"
+        )
     if status == "approved" and valid_until is None:
         errors.append("approved profiles require authorization.valid_until")
     if valid_from and valid_until and valid_from >= valid_until:
