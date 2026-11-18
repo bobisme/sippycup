@@ -123,7 +123,7 @@ compile` writes from the scope. The details are in `CAMPAIGN-MANIFEST.md`,
   `result.json`, a warning in `ready` and the cockpit, and a limitation in
   the owner report.
 
-Verified by `tests/test_campaign_window.py` (37 tests with an injected
+Verified by `tests/test_campaign_window.py` (38 tests with an injected
 clock; no test sleeps for the window) and on the practice bench: a
 four-call softphone campaign against the practice Asterisk on 127.0.0.2,
 planned with a window that ended 27 s later. Calls 1 and 2 completed. Before

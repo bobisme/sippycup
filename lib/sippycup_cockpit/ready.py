@@ -248,8 +248,8 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
         approval = plan.get("approval") or {}
         if not plan.get("windowBound"):
             return Check("window", "Approval window", WARN,
-                         lines + ["the frozen campaign plan is NOT bound to an approval window: "
-                                  "campaign run would not stop when the window ends"], replan)
+                         lines + ["the frozen campaign plan is NOT bound to an approval window of its own: "
+                                  "campaign run would rely only on scope.yaml beside the manifest"], replan)
         plan_end = _parse(approval.get("validUntil"))
         if plan_end is None or plan_end.replace(microsecond=0) != end.replace(microsecond=0):
             return Check("window", "Approval window", WARN,

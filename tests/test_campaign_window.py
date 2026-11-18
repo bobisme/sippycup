@@ -12,8 +12,10 @@ runner and report are the local fixture tool.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -23,6 +25,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -264,6 +267,49 @@ class PlanTimeTests(unittest.TestCase):
         process, _ = self.plan_cli(manifest_with(far), "--output", "plan.json")
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertNotIn("WARNING", process.stderr)
+
+    def test_cli_run_warns_when_the_plan_is_not_bound(self):
+        from sippycup import campaign as campaign_cli
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+
+        def run(value, scope=None):
+            manifest = manifest_with(value)
+            raw = yaml.safe_dump(manifest, sort_keys=True).encode()
+            directory = Path(tempfile.mkdtemp(dir=root))
+            (directory / "campaign.yaml").write_bytes(raw)
+            (directory / "plan.json").write_text(
+                json.dumps(compile_plan(manifest, hashlib.sha256(raw).hexdigest())))
+            if scope is not None:
+                (directory / "scope.yaml").write_text(yaml.safe_dump(scope))
+            stderr = io.StringIO()
+            # Stop at the executor: this test is about what is said before it.
+            with mock.patch("sippycup.integration.execute_campaign",
+                            side_effect=CampaignRuntimeError("stopped by the test")) as executor, \
+                    contextlib.redirect_stderr(stderr):
+                code = campaign_cli.main(["run", str(directory / "plan.json"), "--manifest",
+                                          str(directory / "campaign.yaml"), "--run-root", str(directory / "runs")])
+            return code, stderr.getvalue(), executor
+
+        far = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        code, text, executor = run(None)
+        self.assertEqual(code, 2)
+        self.assertIn("WARNING: this campaign plan is not bound to an approval window", text)
+        self.assertEqual(executor.call_count, 1)
+        self.assertTrue(str(executor.call_args.kwargs["manifest_path"]).endswith("campaign.yaml"))
+        code, text, executor = run(window(far))
+        self.assertNotIn("WARNING", text)
+        # A plan without a window beside an approved scope file is bound by it: no warning.
+        code, text, executor = run(None, scope_document("approved", far))
+        self.assertNotIn("WARNING", text)
+        self.assertEqual(executor.call_count, 1)
+        # ...and a revoked scope refuses before the executor is reached.
+        code, text, executor = run(None, scope_document("revoked", far))
+        self.assertEqual((code, executor.call_count), (2, 0))
+        self.assertIn("refusing to run", text)
+        self.assertIn("revoked, not approved", text)
 
     def test_cli_run_refuses_outside_the_window_before_anything_exists(self):
         temporary = tempfile.TemporaryDirectory()
@@ -666,7 +712,7 @@ class ReadyAndCockpitTests(unittest.TestCase):
         self.assertIn("the frozen campaign plan is bound to this window", "\n".join(item.lines))
         item = ready.check_window(self.model(self.facts(None)), self.NOW, timezone.utc, 60)
         self.assertEqual(item.status, "warn")
-        self.assertIn("NOT bound to an approval window", item.lines[-1])
+        self.assertIn("NOT bound to an approval window of its own", item.lines[-1])
         self.assertIn("campaign plan", item.fix)
         item = ready.check_window(self.model(self.facts(window(self.NOW + timedelta(hours=9)))),
                                   self.NOW, timezone.utc, 60)

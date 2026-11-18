@@ -166,7 +166,8 @@ generate the manifest with scope compile, and plan again.
 ```
 
 `result.json` records `"approvalWindow": {"bound": false, ...}`, `ready`
-warns (`the frozen campaign plan is NOT bound to an approval window`), the
+warns (`the frozen campaign plan is NOT bound to an approval window of its
+own`), the
 cockpit's confirmation screen shows the same warning, and the owner report
 lists the run under its limitations (`campaign-window-unbound`). The plan
 bytes of such a manifest are exactly what they were before the field existed
