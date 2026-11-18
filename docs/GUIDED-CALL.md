@@ -31,7 +31,10 @@ already carries the service owner's approval.
 3. **Preflight.** It sends exactly one SIP OPTIONS transaction with the
    in-tree client (over UDP at most two datagrams: the request and one
    retransmission after 0.5 s if nothing arrived). Any final response counts
-   as reachable; `preflight.json` records the status line. No response, a
+   as reachable; `preflight.json` records the status line. (To send only this
+   OPTIONS, bound to the same approval, run
+   `./bin/sippycup preflight --profile work/engagement/profile.yaml --expect-class any`;
+   see "Scope binding" in `CLI.md`.) No response, a
    refused or unreachable destination, or a TLS verification failure stops
    the run without placing a call.
 4. **Call.** It places exactly one PJSUA call to

@@ -232,8 +232,8 @@ triage, and assertions, with a new private run directory:
 
 See `docs/GUIDED-CALL.md` for credentials, verdicts, and the emergency stop.
 `docs/SAFETY-AUDIT.md` lists which guardrails were tested and how, and the
-residual risks to manage by procedure (campaigns have no approval window;
-ceilings are per process).
+residual risks to manage by procedure (ceilings are per process and per profile;
+`shell` and `--` are not bound to any approval).
 
 `checks` runs owner-approved, low-volume posture checks (banners, TLS,
 cleartext signaling, unauthenticated REGISTER/INVITE, Digest quality, user
@@ -321,7 +321,14 @@ Run the low-impact network preflight:
 
 ```sh
 ./bin/sippycup preflight staging.example.invalid 5060 udp --dry-run
+./bin/sippycup preflight --profile work/engagement/profile.yaml --dry-run
 ```
+
+With `--profile` the target comes from the approved profile and the approval
+window is checked first. Without it the output says
+`Scope: UNBOUND (operator-supplied target HOST)`. `media send` needs
+`--profile` for any destination that is not loopback. See "Scope binding" in
+`docs/CLI.md`.
 
 Remove `--dry-run` only after reviewing the target. Live preflight resolves the
 address, checks the selected transport, and sends one SIP OPTIONS transaction

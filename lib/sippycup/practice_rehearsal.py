@@ -7,7 +7,7 @@ will use them on the real engagement, the real public commands:
   --practice call (cockpit 2)   the cockpit's practice call to echo
   scope check, scope compile    from a scope answers file for the practice target
   rehearse                      the compiled profile, no traffic
-  --practice preflight          UDP, then TLS verified against the practice CA
+  --practice preflight          UDP bound to the profile (--profile), then TLS verified against the practice CA
   --practice call               the cockpit's guided call, then one with DTMF
   campaign plan, campaign run   the compiled manifest, UDP and TLS cases
   checks plan, checks run       the scope's approved posture checks
@@ -701,14 +701,25 @@ class Rehearsal:
     def preflight(self) -> None:
         assert self.shape is not None
         address, name = self.shape.signaling, self.shape.server_name
-        udp = self.command([LAUNCHER, "--practice", "preflight", address, str(practice.SIGNALING_PORTS["udp"]), "udp"])
+        # Bound to the compiled profile, as in a real engagement: the target
+        # comes from the profile and the approval is checked first.
+        udp = self.command([LAUNCHER, "--practice", "preflight", "--profile", f"{self.eng}/target-profile.yaml"])
         self.require("Result: PASS" in udp.stdout, "UDP preflight did not PASS")
+        self.require(
+            f"Target:    {address}:{practice.SIGNALING_PORTS['udp']}" in udp.stdout
+            and "Scope: profile " in udp.stdout and f"approval {APPROVAL_ID}" in udp.stdout,
+            "the profile-bound preflight did not show the profile's target and approval",
+        )
+        # The compiled profile is the UDP target; the TLS endpoint is probed
+        # with an operator-supplied target, which the output labels UNBOUND.
         tls = self.command([
             LAUNCHER, "--practice", "preflight", address, str(practice.SIGNALING_PORTS["tls"]), "tls",
             "--tls-ca", f"{self.eng}/practice-ca.crt", "--tls-server-name", name,
         ])
         self.require("Result: PASS" in tls.stdout and f"TLS: verified for name '{name}'" in tls.stdout,
                      "TLS preflight did not PASS with a verified server name")
+        self.require("Scope: UNBOUND (operator-supplied target " in tls.stdout,
+                     "the preflight without a profile did not say it is UNBOUND")
         self.fact(f"UDP 200 OK from {address}; TLS 200 OK verified as {name} against the engagement's CA copy")
 
     def calls(self) -> None:

@@ -64,7 +64,7 @@ _sippycup() {
             )
             ;;
         preflight)
-            COMPREPLY=($(compgen -W "--dry-run --help udp tcp tls" -- "${current}"))
+            COMPREPLY=($(compgen -W "--profile --require-profile --format --expect-status --expect-class --tls-ca --tls-server-name --tls-unverified --dry-run --help udp tcp tls" -- "${current}"))
             ;;
         call)
             COMPREPLY=(

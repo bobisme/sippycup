@@ -93,6 +93,62 @@ An activity label describes what a command *can* do; it is never target
 authorization. `offline` help or planning does not make a later execution
 authorized.
 
+## Scope binding
+
+Every command that can send traffic is in one of three classes. The class says
+whether the command checks an owner approval before it sends.
+
+| Command | Class | What is checked before the first packet |
+| --- | --- | --- |
+| `call`, `matrix`, `checks` | Scope-bound | The profile must pass `rehearse` (approved, inside its window, literal approved addresses), and the window must cover the run. |
+| `campaign` | Scope-bound | The frozen plan must match the reviewed manifest and its authorized networks. The plan carries the approval window when the manifest states it (`scope compile` writes it); a manifest without a window runs with a warning (see `SAFETY-AUDIT.md`, finding 5). |
+| `mcp-live` | Scope-bound | A signed capability and a profile-bound plan (`MCP-LIVE.md`). |
+| `go` | Scope-bound | The cockpit sends nothing itself. It starts only the commands above, after its own profile and approval checks. |
+| `preflight` | Optionally bound | With `--profile`: the same profile checks, and the target is the profile's. Without: nothing. |
+| `media` | Optionally bound | `media send --profile`: the same profile checks, and the SDP destination must be in the media scope. Without: loopback destinations only. |
+| `capture` | Unbound | It sends nothing. It records the host or network that you name. |
+| `chaos`, `chaos-exit-gate` | Unbound | Local network impairment. The topology file names the scope. |
+| `webrtc` | Unbound | The optional peer has its own admission boundary (`WEBRTC-WORKFLOW.md`). |
+| `media-echo`, `selftest`, `practice-target`, `ready`, `stop` | Unbound (local only) | Loopback or a private namespace. They take no target. |
+| `shell`, `-- COMMAND` | Unbound | Nothing. They run arbitrary in-image tools. |
+
+Commands that are not in the table are offline.
+
+`preflight` and `media send` print one `Scope:` line in human output and a
+`scope` object in JSON output:
+
+```text
+Scope: profile acme-staging (approval CHG-4711, window 2026-11-20T08:00:00Z to 2026-11-20T16:00:00Z)
+Scope: UNBOUND (operator-supplied target 192.0.2.10)
+Scope: UNBOUND (loopback only)
+```
+
+```json
+{"binding":"profile","profile":"acme-staging","profileFile":"work/acme/target-profile.yaml",
+ "approvalId":"CHG-4711","validFrom":"2026-11-20T08:00:00Z","validUntil":"2026-11-20T16:00:00Z"}
+{"binding":"unbound","operatorSuppliedTarget":"192.0.2.10"}
+{"binding":"unbound","reason":"loopback only"}
+```
+
+For `media send` the bound object also has `destinations`: each remote SDP
+endpoint with the rule that admitted it (`approved-address`, or
+`media-network` and the network).
+
+`--require-profile`, or `SIPPYCUP_REQUIRE_PROFILE=1` in the environment, makes
+`preflight` and `media send` refuse to run without `--profile` (exit 2, nothing
+sent). Any value other than empty or `0` turns it on. It does not change
+`shell` or `-- COMMAND`.
+
+`shell` and `-- COMMAND` print this on stderr before they start, and enforce
+nothing:
+
+```text
+Scope: UNBOUND (the -- escape hatch: no approval, window, address or port is checked here; it can send to any address this host can reach). Send only to addresses copied from the approved profile.
+```
+
+A refused bound command exits 2 before it resolves a name or opens a socket.
+The message says what was refused, that nothing was sent, and what to do.
+
 ## Preflight
 
 `preflight HOST [PORT] [udp|tcp|tls]` resolves HOST, checks TCP reachability
@@ -100,8 +156,18 @@ for TCP and TLS, prints an informational `openssl s_client` certificate
 summary for TLS, and sends one SIP OPTIONS transaction with the in-image
 `sippycup-options` client. Over UDP it sends at most two datagrams.
 
+For an engagement use `preflight --profile PROFILE`. The approval and its
+window (which must cover the 40 s that a preflight can take) are checked
+first. HOST, PORT, the transport, the TLS server name and the CA come from the
+profile, and `target.host` must be a literal approved address. You may also
+type them, but then each one must equal the profile's value. A mismatch, or
+`--tls-unverified`, is refused with exit 2 before any packet.
+
 | Option | Meaning |
 | --- | --- |
+| `--profile PROFILE` | Bind to an approved target profile (see "Scope binding") |
+| `--require-profile` | Refuse to run without `--profile` |
+| `--format text\|json` | `json` prints one `sippycup.dev/preflight-result/v1` object on stdout (`target`, `scope`, `dryRun`, `networkActivity`, `exitStatus`, and `options`: the `sippycup-options` result) and the stage output on stderr |
 | `--expect-status N` | Require this final status (default: any 2xx) |
 | `--expect-class C` | Require `2xx`, `3xx`, `4xx`, `5xx`, `6xx`, or `any` |
 | `--tls-ca /work/PATH` | Also trust this PEM CA file; it must be under `/work` |
@@ -123,6 +189,7 @@ failing stage decides the exit code:
 | 5 | TLS handshake or certificate verification failed |
 
 ```sh
+./bin/sippycup preflight --profile work/engagement/profile.yaml --expect-class any
 ./bin/sippycup preflight staging.example.invalid 5060 udp --expect-class any
 ./bin/sippycup --practice preflight 127.0.0.2 5061 tls \
   --tls-ca /work/practice/ca.crt --tls-server-name sippycup-practice
@@ -151,7 +218,9 @@ command:
 ```
 
 The escape hatch intentionally exposes the container toolbox and is not part
-of the stable first-party command contract.
+of the stable first-party command contract. Both print a `Scope: UNBOUND`
+notice on stderr first: nothing they run is checked against an approval (see
+"Scope binding").
 
 ## Compatibility
 

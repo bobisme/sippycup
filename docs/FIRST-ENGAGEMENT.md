@@ -129,11 +129,23 @@ run the dry run command that the cockpit prints, without `--dry-run` and with
 the password source, from a shell.
 
 ```sh
-./bin/sippycup --practice preflight 127.0.0.2 5060 udp
+./bin/sippycup --practice preflight --profile work/acme/target-profile.yaml
 ./bin/sippycup --practice call work/acme/target-profile.yaml --dial echo --username practice --dry-run
 ./bin/sippycup --practice call work/acme/target-profile.yaml --dial echo --username practice \
   --secret-file work/acme/account.password
 ```
+
+Give `preflight` the profile, not a host. With `--profile` the address, port
+and transport (and the TLS name and CA) come from the approved profile, and the
+approval and its window are checked before any packet. The output then has the
+line `Scope: profile NAME (approval ID, window FROM to UNTIL)`. A `preflight
+HOST PORT TRANSPORT` without a profile still runs, but it prints
+`Scope: UNBOUND (operator-supplied target HOST)`: nothing checked that host
+against the approval. On the day of a real engagement, set
+`export SIPPYCUP_REQUIRE_PROFILE=1` in your shell; `preflight` and `media send`
+then refuse to run without `--profile`. `./bin/sippycup shell` and
+`./bin/sippycup -- COMMAND` are never checked against an approval and say so
+(`Scope: UNBOUND ...` on stderr). See "Scope binding" in [CLI.md](CLI.md).
 
 When it is right:
 

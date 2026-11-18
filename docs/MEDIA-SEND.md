@@ -20,10 +20,49 @@ Preview the exact packet plan without opening a socket:
 ```
 
 After replacing the example SDP with completed SDP from an authorized isolated
-call, send it with:
+call, send it bound to the approved profile:
 
 ```sh
-./bin/sippycup media send work/media-session.json --format json
+./bin/sippycup media send work/media-session.json \
+  --profile work/engagement/profile.yaml --format json
+```
+
+## Scope binding
+
+The destination comes from the remote SDP, so it is checked against the
+owner's approval before any socket is opened.
+
+- With `--profile PROFILE` the profile must pass `rehearse` (approved, inside
+  its window, literal approved addresses), and the window must cover the send
+  (the last packet time plus the echo timeout). The remote address of every
+  revision must be one of `target.approved_addresses` or lie in an
+  owner-approved `media.networks` entry. When the profile has
+  `media.port_range`, the remote port must lie in it. A loopback destination
+  is checked like any other.
+- Without a profile, only loopback destinations (127.0.0.0/8, ::1) are
+  allowed. This mode is for fixture tests, and the output labels it
+  `Scope: UNBOUND (loopback only)`.
+- `--require-profile`, or `SIPPYCUP_REQUIRE_PROFILE=1` in the environment,
+  refuses the unbound mode too.
+
+A refused send exits 2. It opens no socket, sends no packet, and writes no
+file. The message names the refused destination (address and port only, never
+the SDP), says that nothing was sent, and says what to do:
+
+```text
+media send refused: the session's remote SDP is outside the scope of profile acme-staging (work/acme/target-profile.yaml)
+  - destination 8.8.8.8:5353 is not an approved address
+Nothing was sent: no socket was opened and no name was resolved.
+What to do: do not send. Check that the session file holds the SDP of the approved call. ...
+```
+
+`--dry-run` makes the same decision and stays network-free. Human output
+starts with the scope line, and JSON output has a `scope` object (see "Scope
+binding" in `CLI.md`):
+
+```text
+Scope: profile acme-staging (approval CHG-4711, window 2026-11-20T08:00:00Z to 2026-11-20T16:00:00Z)
+media plan: PCMU caller_to_callee; 71 packets; no traffic sent
 ```
 
 The local source address must exist on the sending host. The sender rejects
@@ -87,5 +126,6 @@ isolated loopback tests. For example:
 
 The checked-in `tests/fixtures/media/packet-plan-v1.json` is the exact
 packet-level expectation. Regenerate it with `make media-packet-golden`; verify
-behavior with `make media-send-test`. Exit status 2 means invalid session/SDP,
-and status 3 means bind, send, timeout, or echo validation failure.
+behavior with `make media-send-test`. Exit status 2 means invalid session/SDP
+or a scope refusal, and status 3 means bind, send, timeout, or echo validation
+failure.

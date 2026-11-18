@@ -169,6 +169,11 @@ def tls_summary(tls: dict[str, Any]) -> str:
     )
 
 
+def _work_spelling(path: str) -> str:
+    """``/work/...`` (the in-image mount) as the operator types it: ``work/...``."""
+    return "work/" + path[len("/work/"):] if path.startswith("/work/") else path
+
+
 def _one_call_plan(profile_path: str) -> dict[str, Any]:
     document = load_profile(profile_path)
     rehearsal = rehearse(document)
@@ -193,15 +198,11 @@ def _one_call_plan(profile_path: str) -> dict[str, Any]:
             "one-call v1 requires target.host itself to be one of the literal approved_addresses"
         )
     tls = rehearsal.facts.get("tls") if rehearsal.facts else None
-    tls_arguments: list[str] = []
-    if tls:
-        if tls.get("server_name"):
-            tls_arguments.extend(["--tls-server-name", str(tls["server_name"])])
-        if tls.get("ca_file"):
-            tls_arguments.extend(["--tls-ca-file", str(tls["ca_file"])])
     commands = [
         ["./bin/sippycup", "capture", *scope_arguments, "--interface", interface, "--output", output, "--dry-run"],
-        ["./bin/sippycup", "preflight", host, port, transport, *tls_arguments],
+        # Bound to this profile: host, port, transport, TLS name and CA come
+        # from it and its approval is checked first (docs/CLI.md, Scope binding).
+        ["./bin/sippycup", "preflight", "--profile", _work_spelling(profile_path)],
         ["./bin/sippycup", "report", output],
         ["./bin/sippycup", "triage", output],
     ]

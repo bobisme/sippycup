@@ -142,6 +142,12 @@ Discovery:
 The activity label is a warning about what a command can do, not authorization
 to do it. Planning and help remain network-free. Use `-- COMMAND` only as the
 advanced escape hatch for arbitrary in-image tools.
+
+Scope: call, matrix, checks and campaign send only under an approved profile
+or manifest. preflight and `media send` are bound when given --profile PROFILE
+and print a `Scope:` line that says so; SIPPYCUP_REQUIRE_PROFILE=1 makes them
+refuse to run without one. shell and `-- COMMAND` are UNBOUND: nothing they
+run is checked against an approval. See docs/CLI.md, "Scope binding".
 EOF
     render_commands_human
     printf '\nNetwork activity: none\n'
@@ -287,10 +293,32 @@ EOF
         --hostname=sippycup \
         "${stop_labels[@]}" \
         --env=SIPPYCUP_NETWORK_MODE="${network_mode}" \
+        "${require_profile_environment[@]}" \
         "${secret_environment[@]}" \
         --volume="${mount}" \
         "${image}" \
         "${command[@]}"
+}
+
+# SIPPYCUP_REQUIRE_PROFILE (anything but empty or 0) makes the optionally
+# bound senders (preflight, media send) refuse to run without --profile. It
+# is forwarded so the in-image commands see it too (docs/CLI.md, Scope binding).
+declare -a require_profile_environment=()
+case "${SIPPYCUP_REQUIRE_PROFILE:-}" in
+    ""|0) ;;
+    *) require_profile_environment=(--env=SIPPYCUP_REQUIRE_PROFILE=1) ;;
+esac
+
+# `shell` and the `--` escape hatch run arbitrary in-image tools. Nothing
+# there is checked against an approval, and this notice does not pretend
+# otherwise. It goes to stderr so stdout stays the tool's own output.
+unbound_notice() {
+    local what="$1" reach="it can send to any address this host can reach"
+    if (( practice != 0 )); then
+        reach="it runs in the practice target's loopback-only namespace"
+    fi
+    printf 'Scope: UNBOUND (%s: no approval, window, address or port is checked here; %s). Send only to addresses copied from the approved profile.\n' \
+        "${what}" "${reach}" >&2
 }
 
 # Forward only the variables a first-party command names with --secret-env
@@ -494,10 +522,12 @@ if (( practice != 0 && (isolated != 0 || admin != 0) )); then
 fi
 
 if (( advanced != 0 )); then
+    unbound_notice "the -- escape hatch"
     run_container "" "$@"
 fi
 
 if (($# == 0)); then
+    unbound_notice "toolbox shell"
     run_container "/bin/bash"
 fi
 
@@ -609,6 +639,9 @@ EOF
         exec "${project_dir}/bin/${host_target}" "$@"
         ;;
     container)
+        if [[ "${command_name}" == shell ]]; then
+            unbound_notice "toolbox shell"
+        fi
         if [[ "${command_name}" == preflight ]]; then
             # preflight always runs in the image, so --tls-ca work/... must
             # be spelled the way the container sees it.
