@@ -87,6 +87,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "chaos",
                 "selftest",
                 "chaos-exit-gate",
+                "practice-target",
                 "shell",
             },
         )
@@ -436,6 +437,138 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             self.assertNotIn(
                 "--add-host=sippycup:127.0.0.1", result.stdout.splitlines()
             )
+
+    def make_practice_runtime(self, root: Path, inspect: str | None) -> tuple[Path, Path]:
+        """A fake runtime that answers `container inspect` like a practice target."""
+        hosts = root / "practice-hosts"
+        hosts.write_text("127.0.0.1\tsippycup\n127.0.0.2\tsippycup-practice\n", encoding="utf-8")
+        runtime = root / "practice-runtime"
+        if inspect is None:
+            inspect_branch = "exit 125"
+        else:
+            inspect_branch = f"printf '%s\\n' '{inspect.replace('HOSTS', str(hosts))}'"
+        runtime.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = container ] && [ "$2" = inspect ]; then\n'
+            f"    {inspect_branch}\n"
+            "    exit 0\n"
+            "fi\n"
+            "printf '%s\\n' \"$@\"\n",
+            encoding="utf-8",
+        )
+        runtime.chmod(runtime.stat().st_mode | stat.S_IXUSR)
+        return runtime, hosts
+
+    def test_practice_joins_the_running_target_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime, hosts = self.make_practice_runtime(
+                Path(root_name), "true|practice|none|HOSTS"
+            )
+            env = {
+                "SIPPYCUP_RUNTIME": str(runtime),
+                "SIPPYCUP_PRACTICE_CONTAINER": "ws-test-practice",
+            }
+            preflight = run_cli("--practice", "preflight", "127.0.0.2", "5060", "udp", env=env)
+            escape = run_cli("--practice", "--", "pjsua", "--config-file", "/work/x.cfg", env=env)
+        for result in (preflight, escape):
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = result.stdout.splitlines()
+            self.assertIn("--network=container:ws-test-practice", arguments)
+            self.assertIn(f"--volume={hosts}:/etc/hosts:ro", arguments)
+            self.assertIn("--cap-add=NET_RAW", arguments)
+            self.assertIn("--interactive", arguments)
+            self.assertNotIn("--network=host", arguments)
+            self.assertNotIn("--add-host=sippycup:127.0.0.1", arguments)
+            self.assertNotIn("--cap-add=NET_ADMIN", arguments)
+        self.assertIn("sippycup-preflight", preflight.stdout.splitlines())
+
+    def test_practice_routes_packaged_commands_and_translates_work_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime, _ = self.make_practice_runtime(
+                Path(root_name), "true|practice|none|HOSTS"
+            )
+            env = {
+                "SIPPYCUP_RUNTIME": str(runtime),
+                "SIPPYCUP_PRACTICE_CONTAINER": "sippycup-practice",
+            }
+            campaign = run_cli(
+                "--practice", "campaign", "execute", "work/practice/plan.json",
+                "--manifest", "work/practice/campaign.yaml", "--interface", "lo",
+                env=env,
+            )
+            triage = run_cli("--practice", "triage", "work/practice/call.pcap", env=env)
+        self.assertEqual(campaign.returncode, 0, campaign.stderr)
+        arguments = campaign.stdout.splitlines()
+        self.assertIn("--network=container:sippycup-practice", arguments)
+        self.assertEqual(
+            arguments[arguments.index("campaign") + 1 :],
+            [
+                "execute", "/work/practice/plan.json",
+                "--manifest", "/work/practice/campaign.yaml", "--interface", "lo",
+            ],
+        )
+        self.assertEqual(triage.returncode, 0, triage.stderr)
+        tail = triage.stdout.splitlines()
+        self.assertEqual(
+            tail[tail.index("sippycup-workbench") + 1 :],
+            ["triage", "/work/practice/call.pcap"],
+        )
+
+    def test_practice_fails_closed_unless_a_loopback_only_target_is_up(self) -> None:
+        cases = {
+            "absent": None,
+            "stopped": "false|practice|none|HOSTS",
+            "unlabelled": "true||none|HOSTS",
+            "host-network": "true|practice|host|HOSTS",
+            "bridge-network": "true|practice|bridge|HOSTS",
+            "missing-hosts": "true|practice|none|/definitely/missing/hosts",
+        }
+        for name, inspect in cases.items():
+            with self.subTest(case=name):
+                with tempfile.TemporaryDirectory() as root_name:
+                    runtime, _ = self.make_practice_runtime(Path(root_name), inspect)
+                    result = run_cli(
+                        "--practice", "preflight", "127.0.0.2",
+                        env={
+                            "SIPPYCUP_RUNTIME": str(runtime),
+                            "SIPPYCUP_PRACTICE_CONTAINER": "sippycup-practice",
+                        },
+                    )
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("practice target sippycup-practice is not up", result.stderr)
+                self.assertIn("practice-target up", result.stderr)
+
+    def test_practice_rejects_conflicting_options_and_fixed_sandboxes(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime, _ = self.make_practice_runtime(
+                Path(root_name), "true|practice|none|HOSTS"
+            )
+            env = {"SIPPYCUP_RUNTIME": str(runtime)}
+            root = Path(root_name)
+            live_env = {
+                **env,
+                "SIPPYCUP_MCP_LIVE_TRUST_ROOT": str(root),
+                "SIPPYCUP_MCP_LIVE_STATE_ROOT": str(root),
+                "SIPPYCUP_MCP_LIVE_CLIENT_ID": "test-client",
+            }
+            cases = {
+                "admin": (("--practice", "--admin", "preflight", "127.0.0.2"), env, "cannot be combined"),
+                "admin-first": (("--admin", "--practice", "shell"), env, "cannot be combined"),
+                "isolated": (("--isolated", "--practice", "preflight", "127.0.0.2"), env, "cannot be combined"),
+                "mcp": (("--practice", "mcp"), env, "fixed offline sandbox"),
+                "mcp-live": (("--practice", "mcp-live"), live_env, "fixed least-privilege"),
+                "selftest": (("--practice", "selftest"), env, "fixed isolated network"),
+                "host-command": (("--practice", "report", "work/x.pcap"), env, "host-side"),
+                "practice-target": (("--practice", "practice-target", "status"), env, "host-side"),
+                "doctor-host": (("--practice", "doctor", "--host"), env, "doctor --host"),
+            }
+            for name, (arguments, environment, message) in cases.items():
+                with self.subTest(case=name):
+                    result = run_cli(*arguments, env=environment)
+                    self.assertEqual(result.returncode, 2, result.stdout)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn(message, result.stderr)
 
     def test_mcp_rejects_privilege_broadening(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:

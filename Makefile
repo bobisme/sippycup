@@ -1,8 +1,9 @@
 IMAGE ?= localhost/sippycup:latest
 WEBRTC_IMAGE ?= localhost/sippycup-webrtc:latest
+PRACTICE_IMAGE ?= localhost/sippycup-practice:latest
 CAPTURE ?= work/selftest.pcap
 
-.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate mcp-exit-gate mcp-test media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test web-security-test webrtc-build webrtc-selftest webrtc-test workbench-test
+.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate mcp-exit-gate mcp-test media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test practice-build practice-gate report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test web-security-test webrtc-build webrtc-selftest webrtc-test workbench-test
 
 build:
 	"$$(./bin/container-runtime)" build --tag "$(IMAGE)" --file Containerfile .
@@ -67,8 +68,9 @@ campaign-gate:
 	$(MAKE) campaign-selftest
 
 # Includes the real rootless Podman host-isolation matrix and therefore needs
-# /dev/net/tun plus the documented namespace capabilities.
-full-gate: campaign-gate chaos-exit-gate
+# /dev/net/tun plus the documented namespace capabilities. The practice gate
+# needs the optional practice image (make practice-build).
+full-gate: campaign-gate chaos-exit-gate practice-gate
 
 media-canary:
 	PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_audio_canaries.py media/canary-v1
@@ -128,6 +130,18 @@ webrtc-build:
 
 webrtc-selftest:
 	SIPPYCUP_WEBRTC_IMAGE="$(WEBRTC_IMAGE)" ./bin/sippycup webrtc self-test
+
+practice-build:
+	SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" ./bin/sippycup practice-target build
+
+# Live, rootless, loopback-only rehearsal against the optional Asterisk
+# practice target. Starts the target when it is not already up and removes
+# only what it started. Needs both images; see docs/PRACTICE-TARGET.md.
+practice-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_PRACTICE_GATE=1 SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		PYTHONDONTWRITEBYTECODE=1 \
+		python3 -m unittest tests.test_practice_gate -v
 
 web-security-test:
 	PYTHONPATH=lib PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_web_security_contracts tests.test_web_security_evidence -v

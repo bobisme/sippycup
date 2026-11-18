@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -38,6 +39,11 @@ OPTIONAL_PROFILES = {
         "inspect": "./bin/sippycup webrtc status",
         "install": "./bin/sippycup webrtc build",
         "verify": "./bin/sippycup webrtc signaling-self-test",
+    },
+    "practice-target": {
+        "inspect": "./bin/sippycup practice-target status",
+        "install": "./bin/sippycup practice-target build",
+        "verify": "make practice-gate",
     },
 }
 _VERSION_ARGUMENTS = {
@@ -115,6 +121,29 @@ def _effective_capabilities() -> set[int]:
     return {bit for bit in range(64) if mask & (1 << bit)}
 
 
+def _practice_target(root: Path) -> dict[str, Any]:
+    """Report the practice profile from its records in the work directory.
+
+    Doctor never calls the container runtime, so it reads the build record
+    that `practice-target build` writes and the connection facts that `up`
+    writes. `practice-target status` remains the authoritative live check.
+    """
+    state = root / "practice"
+    image = None
+    try:
+        record = json.loads((state / "image.json").read_text(encoding="utf-8"))
+        if isinstance(record, dict) and isinstance(record.get("image"), str):
+            image = record["image"]
+    except (OSError, ValueError):
+        pass
+    return {
+        "installed": image is not None,
+        "image": image,
+        "up": (state / "connection.json").is_file(),
+        "source": "work/practice build and up records",
+    }
+
+
 def diagnose(workdir: str | Path) -> dict[str, Any]:
     tools = {
         name: {"available": shutil.which(name) is not None, "version": _version(name)}
@@ -163,5 +192,6 @@ def diagnose(workdir: str | Path) -> dict[str, Any]:
         "checks": checks,
         "tools": tools,
         "optional_profiles": OPTIONAL_PROFILES,
+        "practice_target": _practice_target(root),
         "problems": problems,
     }

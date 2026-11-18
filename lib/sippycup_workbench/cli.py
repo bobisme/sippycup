@@ -88,6 +88,16 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
             "WebRTC WSS verification: "
             "./bin/sippycup webrtc signaling-self-test"
         )
+        practice = value.get("practice_target", {})
+        if practice.get("installed"):
+            print(f"Practice target profile: installed ({practice['image']})")
+        else:
+            print(
+                "Practice target profile: not installed; "
+                "install: ./bin/sippycup practice-target build"
+            )
+        print(f"Practice target: {'up' if practice.get('up') else 'down'} "
+              "(live check: ./bin/sippycup practice-target status)")
         print("Network activity: none")
         return
     if value.get("schema_version") == "sippycup.dev/triage/v1":

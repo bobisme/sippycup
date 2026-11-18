@@ -145,6 +145,31 @@ class DoctorTests(unittest.TestCase):
             "./bin/sippycup webrtc build",
             result["optional_profiles"]["webrtc"]["install"],
         )
+        self.assertEqual(
+            "./bin/sippycup practice-target build",
+            result["optional_profiles"]["practice-target"]["install"],
+        )
+        self.assertFalse(result["practice_target"]["installed"])
+        self.assertFalse(result["practice_target"]["up"])
+
+    def test_doctor_reports_practice_target_records(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            state = Path(root) / "practice"
+            state.mkdir()
+            (state / "image.json").write_text(
+                '{"image": "localhost/sippycup-practice:latest"}', encoding="utf-8"
+            )
+            (state / "connection.json").write_text("{}", encoding="utf-8")
+            result = diagnose(root)
+        self.assertEqual(
+            result["practice_target"],
+            {
+                "installed": True,
+                "image": "localhost/sippycup-practice:latest",
+                "up": True,
+                "source": "work/practice build and up records",
+            },
+        )
 
 
 class TriageTests(unittest.TestCase):

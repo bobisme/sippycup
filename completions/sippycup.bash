@@ -17,7 +17,7 @@ _sippycup() {
     for ((index = 1; index < COMP_CWORD; index++)); do
         word="${COMP_WORDS[index]}"
         case "${word}" in
-            --admin|--isolated)
+            --admin|--isolated|--practice)
                 ;;
             --)
                 return 0
@@ -34,7 +34,7 @@ _sippycup() {
     if [[ -z "${command_name}" ]]; then
         COMPREPLY=(
             $(compgen -W \
-                "--admin --isolated --help --version $(_sippycup_public_commands)" \
+                "--admin --isolated --practice --help --version $(_sippycup_public_commands)" \
                 -- "${current}")
         )
         return 0
@@ -59,6 +59,13 @@ _sippycup() {
             ;;
         preflight)
             COMPREPLY=($(compgen -W "--dry-run --help udp tcp tls" -- "${current}"))
+            ;;
+        practice-target)
+            COMPREPLY=(
+                $(compgen -W \
+                    "build up down status info help --address --format" \
+                    -- "${current}")
+            )
             ;;
         *)
             COMPREPLY=($(compgen -W "--help" -- "${current}"))

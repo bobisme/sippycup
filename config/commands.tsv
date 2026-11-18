@@ -31,4 +31,5 @@ resilience|direct|sippycup-resilience|sippycup-resilience|Robustness|offline|Run
 chaos|direct|sippycup-chaos|sippycup-chaos|Robustness|network-admin|Plan or run scoped network impairment workflows
 selftest|container-isolated||sippycup-selftest|Verification|local-network|Run a closed-loop SIP call in an isolated container
 chaos-exit-gate|host|chaos-exit-gate||Verification|local-network-admin|Run the real host-isolation and cleanup gate
+practice-target|host|sippycup-practice||Verification|local-network|Manage the optional loopback-only Asterisk practice target
 shell|container||/bin/bash|Advanced|network|Open an interactive toolbox shell

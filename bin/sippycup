@@ -129,6 +129,8 @@ robustness workflows. No arguments preserves the legacy toolbox-shell behavior.
 Global options:
   --isolated       Use the container's private network namespace.
   --admin          Add NET_ADMIN. Combine with --isolated whenever possible.
+  --practice       Join the running local practice target's loopback-only
+                   network namespace (see docs/PRACTICE-TARGET.md).
   -h, --help       Show this network-free command index.
   --version        Show the Sippycup CLI version.
 
@@ -234,6 +236,13 @@ run_container() {
     if [[ "${network[*]}" == "--network=host" ]]; then
         name_resolution=(--add-host=sippycup:127.0.0.1)
     fi
+    if (( practice != 0 && offline_container == 0 )); then
+        join_practice_target "${runtime}"
+        network=(--network="container:${practice_container}")
+        # The runtime forbids --add-host in a joined namespace; reuse the
+        # target's name table, which maps sippycup and the target's DNS name.
+        name_resolution=(--volume="${practice_hosts}:/etc/hosts:ro")
+    fi
     if (( admin != 0 && offline_container == 0 )); then
         caps+=(--cap-add=NET_ADMIN)
     fi
@@ -280,6 +289,30 @@ EOF
         --volume="${mount}" \
         "${image}" \
         "${command[@]}"
+}
+
+# --practice joins the network namespace of the running practice target. Fail
+# closed unless that container is running, carries the practice label, and has
+# no network other than its private loopback (--network=none).
+join_practice_target() {
+    local runtime="$1" state running profile network_mode
+    practice_container="${SIPPYCUP_PRACTICE_CONTAINER:-sippycup-practice}"
+    if [[ ! "${practice_container}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$ ]]; then
+        printf 'Invalid SIPPYCUP_PRACTICE_CONTAINER: %s\n' "${practice_container}" >&2
+        exit 2
+    fi
+    state="$("${runtime}" container inspect \
+        --format '{{.State.Running}}|{{index .Config.Labels "dev.sippycup.profile"}}|{{.HostConfig.NetworkMode}}|{{.HostsPath}}' \
+        -- "${practice_container}" 2>/dev/null || true)"
+    IFS='|' read -r running profile network_mode practice_hosts <<<"${state}"
+    if [[ "${running}" != true || "${profile}" != practice \
+        || "${network_mode}" != none || ! -f "${practice_hosts:-}" ]]
+    then
+        printf 'The practice target %s is not up.\n' "${practice_container}" >&2
+        printf 'Run: ./bin/sippycup practice-target up\n' >&2
+        printf 'No container or network activity was started.\n' >&2
+        exit 2
+    fi
 }
 
 # Packaged first-party commands see the host work directory as /work. Rewrite
@@ -369,6 +402,9 @@ load_registry
 
 isolated=0
 admin=0
+practice=0
+practice_container=""
+practice_hosts=""
 advanced=0
 offline_container=0
 while (($# > 0)); do
@@ -379,6 +415,10 @@ while (($# > 0)); do
             ;;
         --admin)
             admin=1
+            shift
+            ;;
+        --practice)
+            practice=1
             shift
             ;;
         --)
@@ -404,6 +444,11 @@ while (($# > 0)); do
             ;;
     esac
 done
+
+if (( practice != 0 && (isolated != 0 || admin != 0) )); then
+    printf -- '--practice joins the practice target namespace and cannot be combined with --isolated or --admin.\n' >&2
+    exit 2
+fi
 
 if (( advanced != 0 )); then
     run_container "" "$@"
@@ -480,7 +525,7 @@ EOF
         ;;
     doctor)
         if [[ "${1:-}" == "--host" ]]; then
-            if (( isolated != 0 || admin != 0 )); then
+            if (( isolated != 0 || admin != 0 || practice != 0 )); then
                 printf 'doctor --host cannot be combined with container options.\n' >&2
                 exit 2
             fi
@@ -490,7 +535,7 @@ EOF
         run_container "${container_target}" doctor "$@"
         ;;
     workbench)
-        if (( isolated != 0 || admin != 0 )); then
+        if (( isolated != 0 || admin != 0 || practice != 0 )); then
             translate_work_arguments "$@"
             run_container "${container_target}" "${host_target}" \
                 "${translated_arguments[@]}"
@@ -498,14 +543,14 @@ EOF
         exec "${project_dir}/bin/sippycup-workbench" "${host_target}" "$@"
         ;;
     direct)
-        if (( isolated != 0 || admin != 0 )); then
+        if (( isolated != 0 || admin != 0 || practice != 0 )); then
             translate_work_arguments "$@"
             run_container "${container_target}" "${translated_arguments[@]}"
         fi
         exec "${project_dir}/bin/${host_target}" "$@"
         ;;
     host)
-        if (( isolated != 0 || admin != 0 )); then
+        if (( isolated != 0 || admin != 0 || practice != 0 )); then
             printf '%s is host-side and cannot use container options.\n' "${command_name}" >&2
             exit 2
         fi
@@ -515,11 +560,16 @@ EOF
         run_container "${container_target}" "$@"
         ;;
     container-isolated)
+        if (( practice != 0 )); then
+            printf '%s has a fixed isolated network and rejects --practice.\n' \
+                "${command_name}" >&2
+            exit 2
+        fi
         isolated=1
         run_container "${container_target}" "$@"
         ;;
     container-offline)
-        if (( isolated != 0 || admin != 0 )); then
+        if (( isolated != 0 || admin != 0 || practice != 0 )); then
             printf '%s has a fixed offline sandbox and rejects container options.\n' \
                 "${command_name}" >&2
             exit 2
@@ -528,7 +578,7 @@ EOF
         run_container "${container_target}" "$@"
         ;;
     container-live-mcp)
-        if (( isolated != 0 || admin != 0 )); then
+        if (( isolated != 0 || admin != 0 || practice != 0 )); then
             printf '%s has a fixed least-privilege live sandbox and rejects container options.\n' \
                 "${command_name}" >&2
             exit 2

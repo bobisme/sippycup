@@ -32,6 +32,12 @@ The registry makes execution location explicit:
   read-only root and work files, and no `--isolated`/`--admin` broadening.
 - Adding `--isolated` or `--admin` before a packaged first-party command runs
   that command in the image with the requested boundary.
+- `--practice` runs container commands in the network namespace of the
+  running local practice target (loopback only) with `NET_RAW`, and routes
+  packaged commands into the image like `--isolated`. It fails closed when
+  the target is not up and cannot be combined with `--isolated` or
+  `--admin`; `mcp`, `mcp-live`, `selftest`, and host-side commands reject it.
+  See `PRACTICE-TARGET.md`.
 
 Examples:
 

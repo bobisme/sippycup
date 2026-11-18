@@ -49,6 +49,28 @@ The trust boundaries, authorization classes, evidence requirements, and live
 admission criteria are defined in
 [`WEBRTC-THREAT-MODEL.md`](WEBRTC-THREAT-MODEL.md).
 
+## Practice target profile: Asterisk
+
+The practice target is a disposable Asterisk 22 LTS server built from a
+pinned, checksum-verified upstream release with only the modules it needs.
+It provides a Digest-authenticated registrar with one throwaway account,
+UDP/TCP/TLS signaling with a certificate generated at `up`, echo, prompt,
+and reject destinations, and plain RTP or SDES-SRTP media. It listens only on
+loopback inside its own network namespace; the global option `--practice`
+runs toolbox commands in that namespace, so the complete operator sequence,
+including packet capture, runs rootlessly without sudo. Its generated
+profile names only the loopback practice address and cannot authorize
+traffic to a real host.
+
+```sh
+./bin/sippycup practice-target build
+./bin/sippycup practice-target up
+make practice-gate
+./bin/sippycup practice-target down
+```
+
+See [`PRACTICE-TARGET.md`](PRACTICE-TARGET.md).
+
 ## Admission gates
 
 Each optional profile must have:
