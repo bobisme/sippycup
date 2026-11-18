@@ -6,12 +6,19 @@ guided call (`GUIDED-CALL.md`), placed strictly one after another through the
 same code path and gates as `./bin/sippycup call`.
 
 ```sh
-./bin/sippycup matrix plan work/ENGAGEMENT/profile-udp.yaml work/ENGAGEMENT/profile-tls.yaml \
+./bin/sippycup matrix plan work/ENGAGEMENT/target-profile.yaml work/ENGAGEMENT/target-profile-tls.yaml \
   --dial 1001 --codecs PCMU,PCMA,G722 --srtp off,mandatory --max-calls 12
-./bin/sippycup matrix run work/ENGAGEMENT/profile-udp.yaml work/ENGAGEMENT/profile-tls.yaml \
+./bin/sippycup matrix run work/ENGAGEMENT/target-profile.yaml work/ENGAGEMENT/target-profile-tls.yaml \
   --dial 1001 --codecs PCMU,PCMA,G722 --srtp off,mandatory --max-calls 12 \
   --username 1001 --secret-env SIP_PASSWORD
 ```
+
+The two files are what `./bin/sippycup scope compile` writes for a scope with
+two targets: `target-profile.yaml` for the first entry of `targets` and
+`target-profile-NAME.yaml` for each other entry, NAME being that target's
+`name` (here a target named `tls`). See `SCOPE-INTAKE.md`, "One profile per
+target". Do not copy or edit a profile to get a second transport: add the
+target to `scope.yaml` and compile.
 
 `plan` (and `run --dry-run`) runs on the host, reads only the profiles, and
 sends nothing. `run` always runs in the prepared image with a private network
@@ -30,6 +37,20 @@ exit 2 before anything starts:
 | `--transports T[,T]` | `udp`, `tcp`, `tls`; default every profile's | a given profile with that `target.transport` |
 | `--codecs C[,C]` | the `call --codec` names; default the profiles' common `media.codecs` | the profile's `media.codecs` when it has one |
 | `--srtp M[,M]` | `off`, `optional`, `mandatory`; default `off` | `features.srtp: true` for anything but `off` |
+| `--dial D` | one destination for every cell | each given profile's `target.approved_destinations` when it has one |
+
+`--dial` must be on the approved destination list of every profile that
+has one (`GUIDED-CALL.md`, "Approved destinations"). A matrix over two
+targets therefore needs the destination under both targets in `scope.yaml`.
+Otherwise the plan is blocked (exit 2, nothing sent) with one line per
+profile:
+
+```text
+BLOCK: work/ENGAGEMENT/target-profile-tls.yaml: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml, and run scope compile
+```
+
+For a profile without the list, the plan prints a `NOTE:` line that the
+destination is not restricted by that profile.
 
 Each cell offers only its one codec (plus telephone-event). SRTP over UDP or
 TCP is allowed when approved, and the plan prints the

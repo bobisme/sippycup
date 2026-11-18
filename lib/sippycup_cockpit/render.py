@@ -107,6 +107,29 @@ def _target_line(target: dict[str, Any]) -> str:
             f"{account_text}; destinations: {destinations}{media}")
 
 
+def _profile_lines(profiles: list[dict[str, Any]]) -> list[str]:
+    """One line per compiled profile when the scope has more than one target."""
+    if len(profiles) < 2:
+        return []
+    lines = []
+    for item in profiles:
+        state = item.get("state")
+        if not item.get("present"):
+            marker, status = "[!!]", "MISSING; run scope compile"
+        elif state not in (None, "current"):
+            marker, status = "[!!]", f"{state}; run scope compile"
+        elif not item.get("ready"):
+            marker, status = "[!!]", "rehearse refuses it: " + "; ".join(item.get("errors") or ["not ready"])[:160]
+        else:
+            marker, status = "[ok]", "ready and current"
+        approved = item.get("approvedDestinations")
+        dial = "destinations not restricted" if approved is None else f"dial {', '.join(approved) or 'nothing'}"
+        role = "the cockpit's actions use this one" if item.get("first") else "its own rehearse and dry run below"
+        lines.append(f"{marker} {item['path']}: target {item.get('target') or '?'} "
+                     f"{item.get('host')} port {item.get('port')}/{item.get('transport')}; {dial}; {status} ({role})")
+    return lines
+
+
 def _journal_line(journal: dict[str, Any]) -> str:
     if not journal.get("valid"):
         return f"[!!] {journal.get('error') or 'invalid'}"
@@ -175,7 +198,9 @@ def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, ques
     lines.append(f"Scope          {scope_lines[0]}")
     lines.extend(scope_lines[1:])
     lines.append(f"Target         {_target_line(model['target'])}")
-    lines.append(f"Image          {_image_line(model['readiness']['image'])}")
+    for line in _profile_lines(model.get("profiles") or []):
+        lines.append(f"Profile        {line}")
+    lines.append(f"Image         {_image_line(model['readiness']['image'])}")
     lines.append(f"Practice       {_practice_line(model['readiness']['practice'], now)}")
     lines.append(f"Journal        {_journal_line(model['journal'])}")
     lines.append(f"Go/no-go       {_go_line(model['readiness'].get('goNoGo') or {}, model)}")

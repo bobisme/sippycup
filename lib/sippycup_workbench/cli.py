@@ -80,6 +80,14 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
         if target:
             print(f"Target: {target['host']}:{target['port']} ({target['transport']})")
         facts = value.get("facts", {})
+        if "approved_destinations" in facts:
+            approved_dial = facts["approved_destinations"]
+            if approved_dial is None:
+                print("Destinations: NOT RESTRICTED by this profile (no target.approved_destinations); "
+                      "call and matrix will dial whatever --dial names")
+            else:
+                print(f"Destinations: {', '.join(approved_dial) or 'none'} "
+                      "(the only values call and matrix accept for --dial with this profile)")
         if facts.get("media_networks") or facts.get("media_ports"):
             from .media_scope import describe
 

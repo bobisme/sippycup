@@ -47,6 +47,17 @@ container), so the dashboard comes from files alone.
   never their values), `inconsistent`, `stale` derivatives, or `complete`.
 - **Target**: host, port, transport, whether the host is a literal approved
   address, whether an account is needed, and the destinations.
+- **Profile** (only when the scope has more than one target): one line for
+  each profile that `scope compile` wrote, `target-profile.yaml` for the
+  first target and `target-profile-NAME.yaml` for each other one. Each line
+  gives the target, the destinations that profile accepts for `--dial`,
+  and whether the profile is ready and current, stale, edited, or missing.
+  The numbered actions (rehearse, go/no-go, the guided call, the checks) use
+  `target-profile.yaml`. For each other profile the cockpit offers two
+  `[offline]` actions, its `rehearse` and its dry run. To place a call with
+  such a profile, run the printed dry run command from a shell without
+  `--dry-run` and with the password source. The destination the cockpit
+  suggests is always one that the profile in the command approves.
 - **Image**: whether the toolbox image exists and whether it is older than
   the last change to its inputs. `make build` records a fingerprint of the
   image inputs in `work/.image-builds/`; without that record the cockpit

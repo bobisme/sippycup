@@ -208,6 +208,72 @@ def check_profile(model: dict[str, Any]) -> Check:
     return Check("profile", "Profile passes rehearse", GO, lines)
 
 
+def other_profiles(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """The compiled profiles of every further target (scope compile writes one per target)."""
+    return [item for item in model.get("profiles") or [] if not item.get("first")]
+
+
+def _other_profile_path(model: dict[str, Any], item: dict[str, Any]) -> Path:
+    return Path(model["engagement"]["path"]) / Path(str(item["path"])).name
+
+
+def check_other_profiles(host: "Host", model: dict[str, Any], mode: str, now: datetime, zone: Any) -> list[Check]:
+    """One line per further target's profile: present, current, passes rehearse, TLS trust, route."""
+    from sippycup_workbench.profile import ProfileError, load_profile
+
+    eng = model["engagement"]["display"]
+    checks: list[Check] = []
+    for item in other_profiles(model):
+        name = Path(str(item["path"])).name
+        identifier = f"profile:{item.get('target')}"
+        title = f"Profile {name}"[:26]
+        shown = f"{eng}/{name}"
+        if not item.get("present"):
+            checks.append(Check(identifier, title, NOGO,
+                                [f"{shown} (target {item.get('target')}) was compiled but is missing"],
+                                f"{LAUNCHER} scope compile {eng}"))
+            continue
+        if item.get("state") not in (None, "current"):
+            checks.append(Check(identifier, title, NOGO,
+                                [f"{shown} (target {item.get('target')}) is {item.get('state')}: it no longer "
+                                 "matches scope.yaml"], f"{LAUNCHER} scope compile {eng}"))
+            continue
+        if not item.get("ready"):
+            checks.append(Check(identifier, title, NOGO,
+                                [f"{shown} (target {item.get('target')}): rehearse refuses it: {error}"
+                                 for error in item.get("errors") or ["not ready"]][:8],
+                                f"{LAUNCHER} rehearse {shown}   (fix scope.yaml, then scope compile {eng})"))
+            continue
+        approved = item.get("approvedDestinations")
+        lines = [f"{shown}: target {item.get('target')} {item.get('host')} port {item.get('port')}/"
+                 f"{item.get('transport')}; rehearse: ready; current against scope.yaml",
+                 "destinations: " + ("NOT RESTRICTED by this profile" if approved is None
+                                     else ", ".join(approved) or "none approved")]
+        status, fix = GO, None
+        try:
+            document = load_profile(_other_profile_path(model, item))
+        except ProfileError:
+            document = None
+        tls = check_tls(host, model, document, now, zone)
+        if tls is not None:
+            lines += [f"TLS: {line}" for line in tls.lines]
+            if tls.status in {NOGO, WARN}:
+                status, fix = tls.status, tls.fix
+        address = item.get("host")
+        if address and address != model["target"].get("host") and mode != "--practice":
+            route = host_route(host, str(address))
+            if route.get("ok"):
+                lines.append(f"route to {address}: source {route.get('source')}, interface "
+                             f"{route.get('interface') or '?'} (host lookup only; the container route was "
+                             "probed for the first target)")
+            else:
+                status = NOGO
+                fix = f"connect the network or VPN that reaches {address} (ip route get {address})"
+                lines.append(f"the kernel has no route to {address}: {route.get('error', 'no route')}")
+        checks.append(Check(identifier, title, status, lines, fix))
+    return checks
+
+
 def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes: int) -> Check:
     auth = model["authorization"]
     eng = model["engagement"]["display"]
@@ -652,6 +718,16 @@ def authorizes(model: dict[str, Any], document: dict[str, Any] | None, zone: Any
         f"Approved addrs {', '.join(str(item) for item in target.get('approved_addresses') or []) or 'none'}"
         " (signaling and media)",
     ]
+    approved_dial = target.get("approved_destinations")
+    lines.append("Destinations   " + (
+        "NOT RESTRICTED by this profile: check every --dial against the owner's written approval"
+        if not isinstance(approved_dial, list) else
+        (", ".join(str(item) for item in approved_dial) or "none approved") + " (the only --dial values accepted)"))
+    for item in other_profiles(model):
+        also = item.get("approvedDestinations")
+        lines.append(f"Other profile  {Path(str(item['path'])).name}: target {item.get('target')} "
+                     f"{item.get('host')} port {item.get('port')}/{item.get('transport')}; destinations "
+                     + ("NOT RESTRICTED" if also is None else ", ".join(also) or "none approved"))
     networks = model["target"].get("mediaNetworks") or []
     ports = model["target"].get("mediaPorts")
     lines.append(f"Media only     {', '.join(networks) if networks else 'no extra networks'}"
@@ -701,6 +777,7 @@ def assess(engagement: Path, *, host: Host, image: str, margin_minutes: int = DE
     mode = route_mode(model)
     image_check = check_image(host, image)
     checks = [check_engagement(model), check_scope(model), check_profile(model),
+              *check_other_profiles(host, model, mode, now, zone),
               check_window(model, now, zone, margin_minutes), check_clock(host), image_check]
     probe, problem = (None, "skipped (--no-container)")
     if container and image_check.status == NOGO and "built from" not in " ".join(image_check.lines):
@@ -729,6 +806,9 @@ def assess(engagement: Path, *, host: Host, image: str, margin_minutes: int = DE
         "engagement": model["engagement"]["display"],
         "profile": model["profile"]["path"] if model["profile"]["present"] else None,
         "profileSha256": file_sha256(profile_path) if model["profile"]["present"] else None,
+        # Every further target's compiled profile this verdict covers (file name -> SHA-256).
+        "otherProfiles": {Path(str(item["path"])).name: file_sha256(_other_profile_path(model, item))
+                          for item in other_profiles(model)},
         "approvalId": model["authorization"].get("approvalId"),
         "route": mode,
         "sourceAddress": source,
@@ -794,7 +874,13 @@ def latest_record(engagement: Path) -> dict[str, Any] | None:
 
 def gate_facts(engagement: Path, profile_present: bool, now: datetime) -> dict[str, Any]:
     """What the cockpit shows and gates on: the newest record against the current profile."""
+    from sippycup_workbench.scope_derive import compiled_profiles
+
     current = file_sha256(engagement / "target-profile.yaml") if profile_present else None
+    # A GO covers every compiled profile: a further target's profile that was
+    # added, removed, or changed since makes the record "for another profile".
+    others = {item["path"]: file_sha256(engagement / item["path"])
+              for item in compiled_profiles(engagement) if not item["first"]}
     latest = latest_record(engagement)
     facts: dict[str, Any] = {"command": None, "present": latest is not None, "verdict": None, "generatedAt": None,
                              "path": None, "current": False, "go": False, "ageSeconds": None}
@@ -803,7 +889,8 @@ def gate_facts(engagement: Path, profile_present: bool, now: datetime) -> dict[s
     generated = _parse(latest.get("generatedAt"))
     facts.update(
         verdict=latest.get("verdict"), generatedAt=latest.get("generatedAt"), path=latest.get("recordPath"),
-        current=bool(current) and latest.get("profileSha256") == current,
+        current=bool(current) and latest.get("profileSha256") == current
+        and (latest.get("otherProfiles") or {}) == others,
         sourceAddress=latest.get("sourceAddress"), blocking=latest.get("blocking"),
         ageSeconds=(now - generated).total_seconds() if generated else None,
     )

@@ -108,7 +108,8 @@ def _guided_call(model: dict[str, Any], *, dry_run: bool, json_output: bool = Fa
         return None
     dial = model["target"].get("dial")
     if not dial:
-        return "no destination to dial: add destinations[] (user, expect) to scope.yaml and compile"
+        return ("no approved destination to dial on this target: add it to destinations[] (user, expect, target) "
+                "in scope.yaml from the owner's written answer, then run scope compile")
     if not _DIAL.fullmatch(str(dial)):
         return f"destination user {dial!r} has characters the cockpit will not pass on"
     if model["scope"]["state"] == "stale":
@@ -398,6 +399,50 @@ def _runs_actions(model: dict[str, Any]) -> list[dict[str, Any]]:
     return actions
 
 
+def _profile_actions(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Network-free actions for each further target's compiled profile.
+
+    The table's actions use the first target's profile (target-profile.yaml).
+    A scope with more targets compiles one profile per target; for each the
+    cockpit offers its rehearse and its dry run, with that target's own
+    approved destination. The live call on such a profile is the printed dry
+    run command without --dry-run, run from a shell: the cockpit's typed
+    confirmation is wired to the first profile only.
+    """
+    actions: list[dict[str, Any]] = []
+    eng = _eng(model)
+    for item in model.get("profiles") or []:
+        if item.get("first") or not item.get("present"):
+            continue
+        name = item.get("target") or "other"
+        path = item["path"] if str(item["path"]).startswith(eng) else f"{eng}/{Path(str(item['path'])).name}"
+        label = f"target {name} ({item.get('transport')} port {item.get('port')})"
+        actions.append(_action_dict(
+            f"rehearse-{name}", "rehearse", f"Rehearse the profile of {label}",
+            "Parses that target's scope and expiration without network traffic.", network="none",
+            argv=[LAUNCHER, "rehearse", path], unavailable=None, source="cockpit"))
+        dial = item.get("dial")
+        unavailable = None
+        argv: list[str] | None = None
+        if model["scope"]["state"] == "stale":
+            unavailable = "scope derivatives are stale; run scope compile first"
+        elif not dial:
+            unavailable = (f"no approved destination to dial on target {name}: add it to destinations[] "
+                           "(user, expect, target) in scope.yaml, then run scope compile")
+        elif not _DIAL.fullmatch(str(dial)):
+            unavailable = f"destination user {dial!r} has characters the cockpit will not pass on"
+        else:
+            argv = [*_route(model), "call", path, "--dial", str(dial), *_account_args(model), "--dry-run"]
+        actions.append(_action_dict(
+            f"call-dry-run-{name}", "first-call", f"Review the guided call on {label} (dry run)",
+            "Prints the plan for that target's profile; sends nothing. To place the call, run the same "
+            "command from a shell without --dry-run (add the password source).",
+            network="none", argv=argv, unavailable=unavailable, source="cockpit"))
+    for action in actions:
+        action["progress"] = False  # never the single "next" step; the first profile leads
+    return actions
+
+
 def build_actions(
     model: dict[str, Any],
     advisor_actions: list[dict[str, Any]],
@@ -423,6 +468,7 @@ def build_actions(
             spec.identifier, spec.stage, spec.title, spec.why, network=spec.network, argv=argv,
             unavailable=unavailable, source="cockpit", spec=spec,
             instruction=spec.instruction(model) if spec.instruction else None))
+    collected.extend(_profile_actions(model))
     collected.extend(_runs_actions(model))
     root = model["engagement"]["path"]
     display = model["engagement"]["display"]
@@ -431,7 +477,8 @@ def build_actions(
         if identifier in ADVISOR_COVERED:
             continue
         stage = advisor_stage.get(identifier) or (
-            "evidence" if identifier.startswith(("manifest-", "privacy-", "calls-manifest-")) else current)
+            "evidence" if identifier.startswith(("manifest-", "privacy-", "calls-manifest-")) else
+            "rehearse" if identifier.startswith("rehearse-target-profile-") else current)
         argv = item.get("argv") if isinstance(item.get("argv"), list) else None
         if argv is not None:
             argv = [display + value[len(root):] if value.startswith(root) else value for value in argv]

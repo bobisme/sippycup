@@ -255,7 +255,8 @@ def build_plan(
         if type(rate) is int and rate >= 1:
             spacing = max(spacing, 1.0 / rate)
         for message in guided.gate(
-            document, now=now, planned_seconds=int(wall_seconds) + 1, work_root=work_root
+            document, now=now, planned_seconds=int(wall_seconds) + 1, work_root=work_root,
+            destination=options.destination,
         ):
             blocking.append(f"{path}: {message}")
         limits_view[path] = {
@@ -264,6 +265,10 @@ def build_plan(
             "max_calls": max_calls,
             "max_calls_per_second": rate,
             "approved_codecs": None if entry["approved"] is None else list(entry["approved"]),
+            # None: this profile does not restrict the destination.
+            "approved_destinations": guided._destination_record(
+                document, options.destination, key="snake"
+            )["approved_destinations"],
             "srtp_approved": (document.get("features") or {}).get("srtp") is True,
         }
     return {
@@ -513,6 +518,12 @@ def render_human(value: dict[str, Any]) -> str:
             f"{', '.join(facts['approved_codecs']) if facts['approved_codecs'] else 'any'}, "
             f"SRTP {'approved' if facts['srtp_approved'] else 'not approved'})"
         )
+        if "approved_destinations" in facts and facts["approved_destinations"] is None:
+            lines.append(
+                f"    NOTE: {path} has no target.approved_destinations, so it does not restrict "
+                f"which destination is dialed; check {value['destination']} against the owner's "
+                "written approval yourself"
+            )
     lines.append(
         f"  Each cell is one guided call ({value['callSeconds']}s, offering only its codec), "
         f"strictly in order, at least {value['spacingSeconds']:.1f}s apart."

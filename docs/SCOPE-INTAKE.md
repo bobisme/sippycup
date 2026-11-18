@@ -127,7 +127,11 @@ Generates, atomically and mode 0600, into the engagement directory:
   `approved_addresses`, the approval and window, the limits (`max_duration_seconds`
   is the per-call duration), and SRTP features from `media.protection`. It is
   `approved` only when the whole scope checks clean; otherwise it stays
-  `pending` and `rehearse` blocks it.
+  `pending` and `rehearse` blocks it. It also carries
+  `target.approved_destinations`: the `user` of every destination the scope
+  lists for that target (see "Approved destinations" below).
+- `target-profile-NAME.yaml`, one for each further entry of `targets`, where
+  NAME is that target's `name` (see "One profile per target" below).
 - `campaign.yaml`, a baseline manifest: one `options` and one `call` case per
   approved target (a `call` case only for a target that has a destination),
   with the campaign ceilings and stop conditions taken directly from the scope.
@@ -162,9 +166,102 @@ skipped, and the output says which and why; the profile is written as
 `pending` whenever its own structural inputs exist. The campaign manifest also
 depends on the authorization answers because a manifest carries no approval of
 its own. Nothing is invented: no placeholder host, approval, or limit is ever
-substituted. Exit 0 only when all three were written and the scope is clean; 1
+substituted. Exit 0 only when every derivative (one profile per target, the
+manifest, and the expectations) was written and the scope is clean; 1
 when some were skipped or the profile is pending; 2 for an invalid scope file
 or a refusal.
+
+### Approved destinations
+
+The owner approves what may be dialed: `destinations[]` in `scope.yaml`.
+Compile writes the `user` of each destination into the profile of its
+target, as `target.approved_destinations`. `call` (also with `--dry-run`) and
+`matrix plan|run` compare `--dial` with that list, exactly and with the same
+upper and lower case. A value that is not on the list (a typo such as `ecoh`,
+or a number the owner did not list) is refused with exit 2 before anything
+starts: no capture, no preflight, no call. The message names the approved
+destinations:
+
+```text
+Guided call: BLOCKED
+BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml, and run scope compile
+Nothing was started and no packets were sent.
+Network activity: none
+```
+
+To dial a new destination, get the owner's written approval, add it to
+`destinations` in `scope.yaml` (with `target:` when the scope has more than
+one target), and run `scope compile`. Do not edit the profile: a hand edit
+is reported as an edited derivative and blocks the next compile.
+
+- Every destination of the target is on the list, also one with
+  `expect: reject`.
+- A target with no destination gets an empty list. Its profile approves no
+  call destination, and `rehearse` prints `Destinations: none`.
+- The list holds at most 64 entries of 1 to 64 characters from letters,
+  digits, and `. _ + * # -` (the characters `destinations[].user` accepts).
+  `rehearse` refuses a profile whose list breaks these rules, or whose
+  `security_checks.destination` is not on it.
+- `rehearse` prints the list (`Destinations: echo, dtmf (...)`), and the
+  dry run prints it as `approved dial:`.
+- A profile without the field (made by hand, or compiled by an older
+  version) still works and does not restrict the destination. `rehearse`
+  then prints a `WARN:` line and `Destinations: NOT RESTRICTED by this
+  profile`, and the call result prints `Destination: ... (NOT CHECKED: ...)`.
+  Run `scope compile` to get the list.
+
+`checks` dials only `security_checks.destination`, which compile takes from
+the same scope destinations. The MCP live path sends one OPTIONS preflight
+and dials nothing. The campaign manifest's `dial.user` comes from the scope
+too, and `campaign plan` freezes it.
+
+### One profile per target
+
+A profile approves exactly one target (one address, port, and transport).
+A scope with more than one entry in `targets` (for example the same
+platform over UDP and over TLS) therefore compiles into one profile for each:
+
+| Target | File | Sidecar key |
+|---|---|---|
+| the first entry of `targets` | `target-profile.yaml` | `profile` |
+| every other entry | `target-profile-NAME.yaml`, NAME = that target's `name` | `profile:NAME` |
+
+The first target keeps the name that `status`, the cockpit, and `ready` look
+for, so nothing changes for a scope with one target. Target names are unique
+and are 1 to 41 characters from `a-z`, `0-9`, and `-`, so the file names are
+predictable and cannot collide.
+
+Each profile has its own `target` (`host`, `port`, `transport`, and for TLS
+`tls_server_name` and `tls_ca_file`), its own `target.approved_destinations`
+(only the destinations whose `target:` names it), and its own `name` (the
+scope name, then `-NAME` for the other targets). All of them share the
+approval, the window, `approved_addresses`, the limits, and the media scope
+(`media.codecs`, `media.networks`, `media.port_range`). `security_checks`
+goes only into the first target's profile. The limits are written into each
+profile, so each profile bounds the calls placed through it; the scope's
+totals for the whole engagement are in the campaign manifest.
+
+Compile prints which file belongs to which target:
+
+```text
+NOTE: one target profile per target: target-profile.yaml (udp, udp port 5060); target-profile-tls.yaml (tls, tls port 5061). Pass the profile of the target you are testing to rehearse, call, and matrix; each approves only the destinations the scope lists for its target
+```
+
+Pass the profile of the target under test to `rehearse` and `call`, and one
+profile per transport to `matrix` (`CALL-MATRIX.md`). Every profile is a
+managed derivative: `scope-derivatives.json` records its hash, `status`
+reports it as `current`, `stale`, `edited`, or `missing`, and `ready` and
+the cockpit report each profile's readiness (see "Staleness and hand edits").
+
+When a target leaves `targets` (or becomes the first one), the next compile
+removes its `target-profile-NAME.yaml`, so an approved profile for a target
+that is no longer in scope does not stay behind. A file that was edited by
+hand is not removed: compile leaves it, stops tracking it, and says so.
+
+A `target-profile-NAME.yaml` that exists but was not written by compile (for
+example a hand copy from an earlier version of this procedure) makes compile
+refuse with `scope.derivative_unmanaged`; `scope compile --force` replaces
+it with the generated profile.
 
 ### Signaling and media on different addresses
 
@@ -226,19 +323,9 @@ ranges in the profile's `approved_addresses` (they go to the media-only
 `media.networks`), a final-status expectation
 for a destination that should reject, capture settings other than the profile
 defaults, and anything about test classes beyond `options` and `call`. A
-profile represents one target; the manifest carries all of them.
-
-A guided call or a call matrix over a second target (for example the TLS
-target next to a UDP first target) needs a profile for it, and compile writes
-only the first. Copy the generated profile to a new name in the same
-directory (for example `target-profile-tls.yaml`), change only `name`,
-`target.port`, `target.transport`, and for TLS add `target.tls_server_name`
-and `target.tls_ca_file` exactly as the scope's second target says, then run
-`rehearse` on the copy. Keep the approval, window, addresses, and limits
-unchanged. The copy is not a managed derivative, so compile neither updates
-nor refuses because of it: copy it again after every `scope compile`.
-`summary` checks its runs against the scope like any other run.
-[FIRST-ENGAGEMENT.md](FIRST-ENGAGEMENT.md) shows the copy step.
+profile represents one target, so compile writes one profile per target (see
+"One profile per target" above); the manifest carries all of them.
+`summary` checks the runs of every profile against the scope.
 
 The one exception is the `security_checks` answer. When `test_scope.allowed_classes`
 includes `security-checks`, `scope check` validates `security_checks.approved`
@@ -257,7 +344,8 @@ instead writes one sidecar, `scope-derivatives.json` (mode 0600), recording the
 scope file's SHA-256, each derivative's path and SHA-256, the scope hash each
 was generated from, the generation time, and what was skipped.
 
-`status` (and `derivative_state`) report each derivative as `current`, `stale`
+`status` (and `derivative_state`) report each derivative (`profile`, each
+`profile:NAME` of a further target, `campaign`, `expectations`) as `current`, `stale`
 (the scope changed since it was generated), `edited` (its hash no longer
 matches), or `missing`. Any of these makes the overall state `stale`, a
 blocker, with `scope compile` as the next safe action. A sidecar that cannot be

@@ -642,12 +642,30 @@ def h_invite_reject(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
         d.stop_and_ask("Stop and ask the owner: retrying with the same identity will not help.")
     elif verdict == "call-not-found":
         d.outcome(f"The far end answered {status}: no such destination.")
-        d.attribute(
-            UNKNOWN, LOW,
-            ["The platform was reachable and understood the request, but has no route for the dialed user: most often the destination we dialed is wrong, occasionally their dial plan does not yet include it."],
-            ["Ask the owner for the exact test destination and compare it with this run's --dial."],
-        )
-        d.stop_and_ask("Ask the owner for the correct test destination before retrying; do not try other numbers by guessing.")
+        approved = run.approved_destinations
+        if approved is None:
+            d.attribute(
+                UNKNOWN, LOW,
+                ["The platform was reachable and understood the request, but has no route for the dialed user: most often the destination we dialed is wrong, occasionally their dial plan does not yet include it.",
+                 "The profile this run used has no target.approved_destinations, so the dialed destination was NOT checked against the owner's approved list before it was sent."],
+                ["Ask the owner for the exact test destination and compare it with this run's --dial."],
+            )
+            d.stop_and_ask("Ask the owner for the correct test destination before retrying; do not try other numbers by guessing. Record it under destinations in scope.yaml and run scope compile, so a mistyped --dial is refused before anything is sent.")
+        elif run.dialed in approved:
+            d.attribute(
+                THEIR, MEDIUM,
+                [f"The dialed destination was on the approved list of the profile this run used ({len(approved)} approved destination(s)), so it is what the scope recorded, not a typing mistake on the command line.",
+                 "The platform was reachable and understood the request, but has no route for that user: their dial plan does not include it (yet), or the destination was recorded wrongly in scope.yaml."],
+                ["Ask the owner to confirm the exact test destination, character for character, against scope.yaml."],
+            )
+            d.stop_and_ask("Ask the owner whether the destination in scope.yaml is exact and provisioned; if it was recorded wrongly, correct destinations in scope.yaml and run scope compile. Do not try other numbers by guessing.")
+        else:
+            d.attribute(
+                UNKNOWN, LOW,
+                ["The dialed destination is NOT on the approved list recorded with this run's profile; a current sippycup refuses such a call before sending, so this run predates that check or its records were changed."],
+                ["Ask the owner for the exact test destination and compare it with this run's --dial."],
+            )
+            d.stop_and_ask("Ask the owner for the correct test destination before retrying; do not try other numbers by guessing.")
     elif verdict == "call-unavailable":
         d.outcome(f"The far end answered {status}: the service or callee is temporarily unavailable.")
         d.attribute(THEIR, MEDIUM, [f"{status} means the far end or something behind it cannot take the call now."], ["A repeat tells you whether it is momentary; a persistent 503 is an owner question."])

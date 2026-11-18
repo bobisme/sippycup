@@ -63,7 +63,10 @@ from sippycup_softphone import evidence as softphone_evidence
 
 from .profile import (
     ProfileError,
+    DESTINATIONS_UNRESTRICTED,
     approved_codecs,
+    approved_destinations,
+    destination_refusal,
     host_is_approved_literal,
     load_profile,
     rehearse,
@@ -395,10 +398,20 @@ def gate(
     now: datetime,
     planned_seconds: int,
     work_root: Path | None = None,
+    destination: str | None = None,
 ) -> list[str]:
-    """Every reason this profile cannot send a packet right now (empty when ready)."""
+    """Every reason this profile cannot send a packet right now (empty when ready).
+
+    With ``destination`` (every caller that dials passes it) the dial string
+    must also be one of the profile's ``target.approved_destinations`` when
+    the profile carries that list.
+    """
     rehearsal = rehearse(document, now=now, work_root=work_root)
     errors = list(rehearsal.errors)
+    if destination is not None:
+        refusal = destination_refusal(document, destination)
+        if refusal:
+            errors.append(refusal)
     if not host_is_approved_literal(document):
         errors.append(
             "guided calls require target.host itself to be one of the literal approved_addresses"
@@ -607,6 +620,7 @@ def _softphone_parameters(
         uri = f"<invalid: {error}>"
     return {
         "destination_uri": uri,
+        **_destination_record(document, options.destination, key="snake"),
         "transport": transport,
         "tls": (
             None
@@ -673,6 +687,34 @@ def _softphone_parameters(
     }
 
 
+def _destination_record(
+    document: dict[str, Any], destination: str, *, key: str = "camel"
+) -> dict[str, Any]:
+    """What was dialed against the profile's approved destinations.
+
+    ``approved`` is ``None`` when the profile does not restrict the
+    destination (no ``target.approved_destinations``).
+    """
+    try:
+        approved = approved_destinations(document)
+    except ProfileError:
+        approved = ()
+    listed = None if approved is None else list(approved)
+    if key == "snake":
+        return {
+            "approved_destinations": listed,
+            "destination_restricted": approved is not None,
+        }
+    return {
+        "destination": {
+            "dialed": destination,
+            "approved": listed,
+            "restricted": approved is not None,
+            "onApprovedList": None if approved is None else destination in approved,
+        }
+    }
+
+
 def dry_run_plan(
     options: CallOptions,
     document: dict[str, Any],
@@ -685,7 +727,8 @@ def dry_run_plan(
     plan = _one_call_plan(str(options.profile))
     duration, limit = effective_duration(options.duration, document)
     blocking = gate(
-        document, now=now, planned_seconds=planned_wall_seconds(options, duration), work_root=work_root
+        document, now=now, planned_seconds=planned_wall_seconds(options, duration), work_root=work_root,
+        destination=options.destination,
     )
     for message in blocking:
         if message not in plan["blocking_errors"]:
@@ -1815,7 +1858,10 @@ def _execute(
         plan = dry_run_plan(options, document, now=now, work_root=work_root)
         return (EXIT_PASS if plan["ready"] else EXIT_REFUSED), plan
 
-    blocking = gate(document, now=now, planned_seconds=planned, work_root=work_root)
+    blocking = gate(
+        document, now=now, planned_seconds=planned, work_root=work_root,
+        destination=options.destination,
+    )
     if blocking:
         return EXIT_REFUSED, {
             "apiVersion": RESULT_VERSION,
@@ -2330,6 +2376,7 @@ def _execute(
         "profile": profile_name,
         "target": {"host": host, "port": port, "transport": transport},
         "destinationUri": uri,
+        **_destination_record(document, options.destination),
         **(
             {
                 "tls": {
@@ -2458,6 +2505,14 @@ def render_human(value: dict[str, Any]) -> str:
         softphone = value["softphone"]
         lines.append("Softphone parameters:")
         lines.append(f"  destination:     {softphone['destination_uri']}")
+        if softphone.get("destination_restricted"):
+            lines.append(
+                "  approved dial:   "
+                + (", ".join(softphone.get("approved_destinations") or []) or "none")
+                + " (the owner-approved destinations for this target)"
+            )
+        elif "destination_restricted" in softphone:
+            lines.append("  approved dial:   NOT RESTRICTED: " + DESTINATIONS_UNRESTRICTED)
         lines.append(f"  transport:       {softphone['transport']}")
         tls = softphone.get("tls")
         if tls:
@@ -2528,6 +2583,17 @@ def render_human(value: dict[str, Any]) -> str:
     lines.append(f"Guided call: {value['verdict'].upper()} ({value['state']})")
     target = value["target"]
     lines.append(f"  Target:       {target['host']}:{target['port']}/{target['transport']}  {value['destinationUri']}")
+    dialed = value.get("destination")
+    if isinstance(dialed, dict):
+        lines.append(
+            f"  Destination:  {dialed.get('dialed')} "
+            + (
+                "is on the profile's approved destination list"
+                if dialed.get("restricted")
+                else "(NOT CHECKED: this profile has no target.approved_destinations, "
+                "so it does not restrict which destination is dialed)"
+            )
+        )
     tls = value.get("tls")
     if tls:
         trust = f"CA file {tls['caFile']}" if tls["trust"] == "file" else "system trust store"

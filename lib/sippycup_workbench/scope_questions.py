@@ -103,7 +103,7 @@ QUESTIONS: tuple[Question, ...] = (
              "If yes: how will you deliver the password? (Secret manager, encrypted message, in person, phone call.) Do NOT send the password in your written answer; we record only a reference name for it.",
              ("account.credential_ref", "account.credential_delivery"), applies=_needs_account),
     Question("destinations", "Destinations",
-             "Which destination(s) should we dial (extension, echo service, voice agent) and what should each do: echo the audio, answer as an agent, or reject the call?",
+             "Which destination(s) may we dial (extension, echo service, voice agent)? Write each one exactly as it must be dialed, say on which target (for example the UDP or the TLS one) it is reachable, and what it should do: echo the audio, answer as an agent, or reject the call. We dial only the destinations you list here; anything else is refused by our tools before a packet is sent.",
              ("destinations",), answered=_destinations_answered),
     Question("media.addresses", "Media",
              "Which IP addresses will your media servers send RTP from and receive it on? Give each media-server "

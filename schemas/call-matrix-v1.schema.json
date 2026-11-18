@@ -44,6 +44,11 @@
           "max_calls": {"type": ["integer", "null"]},
           "max_calls_per_second": {"type": ["integer", "null"]},
           "approved_codecs": {"type": ["array", "null"], "items": {"type": "string"}},
+          "approved_destinations": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "description": "The profile's target.approved_destinations; null when the profile does not restrict the destination. A --dial outside a list blocks the plan."
+          },
           "srtp_approved": {"type": "boolean"}
         }
       }

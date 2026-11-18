@@ -86,6 +86,22 @@ class CallRun:
         return isinstance(authorization, dict) and authorization.get("approval_id") == "LOCAL-PRACTICE-ONLY"
 
     @property
+    def dialed(self) -> Optional[str]:
+        """The user part this run dialed, from the recorded destination URI."""
+        uri = str(self.plan_phone.get("destination_uri") or self.result.get("destinationUri") or "")
+        match = re.match(r"^sips?:([^@]+)@", uri)
+        return match.group(1) if match else None
+
+    @property
+    def approved_destinations(self) -> Optional[list]:
+        """The run's profile's approved dial strings; None when it did not restrict them."""
+        target = self.profile.get("target")
+        value = target.get("approved_destinations") if isinstance(target, dict) else None
+        if not isinstance(value, list):
+            return None
+        return [item for item in value if isinstance(item, str)]
+
+    @property
     def local_address(self) -> Optional[str]:
         return self.result.get("localAddress") or self.plan.get("local_address")
 

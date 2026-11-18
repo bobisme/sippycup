@@ -86,6 +86,17 @@
       }
     },
     "destinationUri": {"type": "string", "pattern": "^sip:"},
+    "destination": {
+      "type": "object",
+      "description": "The dialed user part against the profile's target.approved_destinations. approved and onApprovedList are null when the profile carried no list (restricted false): the destination was then not checked.",
+      "required": ["dialed", "approved", "restricted", "onApprovedList"],
+      "properties": {
+        "dialed": {"type": "string"},
+        "approved": {"type": ["array", "null"], "items": {"type": "string"}},
+        "restricted": {"type": "boolean"},
+        "onApprovedList": {"type": ["boolean", "null"]}
+      }
+    },
     "localAddress": {"type": "string"},
     "networkMode": {"enum": ["private", "host", "none", "unknown"]},
     "durationSeconds": {

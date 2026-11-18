@@ -12,6 +12,10 @@ target:
   transport: udp
   approved_addresses:
     - '@ADDRESS@'
+  # Every practice destination (`practice-target info`), each numeric alias, and
+  # `nobody-home`, which the dial plan does not have on purpose (the drill's 404
+  # scenario). `call` and `matrix` refuse any other --dial with this profile.
+  approved_destinations: [echo, tone, busy, decline, dtmf, noanswer, late, silent, silence, drop, unavailable, forbidden, ratelimit, earlymedia, '600', '601', '602', '486', '603', nobody-home]
 authorization:
   status: approved
   approved_by: sippycup practice-target up (local loopback practice only)

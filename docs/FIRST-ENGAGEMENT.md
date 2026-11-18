@@ -55,22 +55,33 @@ Write the owner's answers into `work/acme/scope.yaml`, then:
 - Proxy shape: rehearse also prints
   `Media only: 127.0.0.2/31 (2 addresses) (owner-approved media networks; never a signaling target)`
   and `Media ports: 20000-20019`.
-- **Second (TLS) target:** compile writes a profile only for the first target.
-  For a TLS call or a UDP+TLS matrix, copy the profile:
+- `rehearse` also prints the only destinations that `call` and `matrix`
+  accept for `--dial` with that profile, for example
+  `Destinations: echo, dtmf (the only values call and matrix accept for --dial with this profile)`.
+  They are the `destinations[].user` values of that target in `scope.yaml`.
+  To dial another destination, ask the owner, add it to `destinations` in
+  `scope.yaml`, and run `scope compile` again. Never edit a profile.
+- **More than one target (for example UDP and TLS):** compile writes one
+  profile for each entry of `targets` in `scope.yaml`. Do not copy or edit a
+  profile by hand.
+
+  | Target in `scope.yaml` | Profile to pass |
+  |---|---|
+  | the first one | `work/acme/target-profile.yaml` |
+  | each other one, by its `name` (for example `tls`) | `work/acme/target-profile-tls.yaml` |
+
+  Compile prints the list (`NOTE: one target profile per target: ...`). Each
+  profile has its own transport, port, TLS name and CA file, and its own
+  destinations. Give each destination in `scope.yaml` a `target:` line. Run
+  `rehearse` on each profile:
 
   ```sh
-  (umask 077; cp work/acme/target-profile.yaml work/acme/target-profile-tls.yaml)
+  ./bin/sippycup rehearse work/acme/target-profile-tls.yaml
   ```
 
-  In the copy, change these fields:
-  - `name` (for example `acme-tls`);
-  - `target.port`;
-  - `target.transport: tls`;
-  - add `target.tls_server_name` and `target.tls_ca_file` (for example
-    `work/acme/owner-ca.crt`).
-
-  Then run `./bin/sippycup rehearse work/acme/target-profile-tls.yaml`.
-  Copy it again after every `scope compile`. See `SCOPE-INTAKE.md`.
+  A `target-profile-NAME.yaml` that you made by hand earlier makes compile
+  stop with `scope.derivative_unmanaged`. Run `scope compile --force` once to
+  replace it with the generated one. See `SCOPE-INTAKE.md`.
 
 ## 2. The password
 
@@ -107,6 +118,15 @@ Continue only on `VERDICT: GO`. On `NO-GO`, each blocking line has a `fix:`
 line; do it and run `ready` again. Run the `Journal:` line it prints. The
 cockpit refuses LIVE actions until a GO exists for the current profile. See
 [COCKPIT.md](COCKPIT.md).
+
+With more than one target, `ready` has one `Profile target-profile-NAME`
+line for each other profile (present, current against `scope.yaml`, passes
+`rehearse`, TLS trust, route), and a missing, stale, or blocked one is
+`NO-GO`. The cockpit shows one `Profile` line for each compiled profile. Its
+numbered actions use `target-profile.yaml`; for each other profile it offers
+that profile's `rehearse` and dry run. To place a call with another profile,
+run the dry run command that the cockpit prints, without `--dry-run` and with
+the password source, from a shell.
 
 ```sh
 ./bin/sippycup --practice preflight 127.0.0.2 5060 udp
@@ -251,7 +271,8 @@ Clean up at the end:
 Stop and send nothing more if one of these happens:
 
 - `scope check` reports any `ERROR`, or `rehearse` prints `Ready: no`.
-- A call prints `Guided call: BLOCKED`. Nothing was sent.
+- A call prints `Guided call: BLOCKED`. Nothing was sent. For a destination
+  that is not approved, the `BLOCK:` line names the approved ones.
 - The authorization window has ended or has not started yet.
 - `registration-failed` or `call-auth-failed`. Do not try the password again
   without the owner: every attempt is a credentialed attempt on their account.
@@ -284,7 +305,8 @@ Each row is an error or verdict seen in this walk-through:
 | You see | Cause | Do |
 |---|---|---|
 | `Guided call: REGISTRATION-FAILED` (401) | wrong password | Stop. Check the password file with the owner. Do not retry. |
-| `Guided call: CALL-NOT-FOUND` (404) | typo in `--dial` (`ecoh`) | Use the destination exactly as written in the scope. |
+| `Guided call: BLOCKED` / `BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf)` (exit 2) | typo in `--dial` (`ecoh`), or a destination that is not in the scope | Nothing was sent. Use a destination from the `approved:` list. For a new one, ask the owner, add it to `destinations` in `scope.yaml`, and run `scope compile`. |
+| `Guided call: CALL-NOT-FOUND` (404) | the destination is in the scope, but the platform has no such user; or the profile has no destination list (`rehearse` prints `Destinations: NOT RESTRICTED`) and `--dial` has a typo | Run the `Diagnose:` line: it says whether the destination was on the approved list. Ask the owner for the exact destination. Do not guess. |
 | `Guided call: PREFLIGHT-FAILED` ... `Hostname mismatch ... [TLS UNVERIFIED]` | wrong `tls_server_name` | Use the certificate name that the owner gave. |
 | `PREFLIGHT-FAILED` ... `unable to get local issuer certificate` | wrong or stale `tls_ca_file` | Get the owner's CA again. |
 | `PREFLIGHT-FAILED` `no_response: timeout`, target on 127.x | `--practice` is missing | Add `--practice` (the call prints this hint). |
