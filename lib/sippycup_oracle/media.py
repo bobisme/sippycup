@@ -1096,13 +1096,43 @@ def evaluate_invariants(
         and _evidence_time(packet.evidence) is not None
         and _evidence_time(packet.evidence) < first_answer
     ]
+    # The side that sends BYE must stop at its BYE. The other side may still
+    # have packets in flight until it receives the BYE, which can take a
+    # relay hop through a proxy, so its media counts as late only after it
+    # accepted the BYE (its 2xx), when that response was captured.
+    bye_sender: MediaDirection | None = None
+    for item in dialog.transitions:
+        if item.event in {"local_bye", "remote_bye"} and _evidence_time(item.evidence) == teardown:
+            bye_sender = (
+                MediaDirection.CALLER_TO_CALLEE
+                if item.event == "local_bye"
+                else MediaDirection.CALLEE_TO_CALLER
+            )
+            break
+    bye_accepted_times = [
+        _evidence_time(item.evidence)
+        for item in dialog.transitions
+        if item.event.startswith("bye_")
+        and _evidence_time(item.evidence) is not None
+        and teardown is not None
+        and _evidence_time(item.evidence) >= teardown
+    ]
+    bye_accepted = min(bye_accepted_times) if bye_accepted_times else None
+
+    def _late(packet_time: Decimal, direction: MediaDirection) -> bool:
+        if teardown is None:
+            return False
+        if bye_sender is not None and direction is not bye_sender and bye_accepted is not None:
+            return packet_time > bye_accepted
+        return packet_time > teardown
+
     after_teardown = [
         packet
         for stream in streams
         for packet in stream.frames
         if teardown is not None
         and _evidence_time(packet.evidence) is not None
-        and _evidence_time(packet.evidence) > teardown
+        and _late(_evidence_time(packet.evidence), stream.direction)
     ]
     setup_ms = (
         (first_answer - first_invite) * Decimal(1000)

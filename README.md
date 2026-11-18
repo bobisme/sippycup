@@ -143,6 +143,10 @@ See `docs/PRACTICE-TARGET.md` for the step-by-step rehearsal and its limits.
 To learn what failures look like, `./bin/sippycup practice-target drill` places the
 guided call against destinations that misbehave on purpose (no answer, one-way
 media, a hang-up from the server, 403/429/503) and explains each verdict.
+The same target also runs a Kamailio proxy on `127.0.0.3` in front of
+Asterisk (407 challenges, Record-Route, media on `127.0.0.2`), the shape of a
+typical SBC edge; `work/practice/target-profile-proxy.yaml` approves both
+addresses and `make practice-proxy-gate` runs every path through it.
 
 Do not casually add `--privileged`.
 
