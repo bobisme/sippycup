@@ -733,7 +733,7 @@ class EndToEndSecretTests(unittest.TestCase):
             ]
             self.assertEqual(len(outputs), 1)
             self.assertEqual(outputs[0]["outcome"], "passed")
-            # The OPTIONS step ran on the SIPp/sipsak fixture, which prints
+            # The OPTIONS step ran on the SIPp runner fixture, which prints
             # every credential it is given: it was given none.
             step_one = [
                 json.loads(line)

@@ -68,10 +68,11 @@ all see the same loopback interface. Rootless Podman permits packet capture
 there because the namespace belongs to the rootless user namespace; no sudo is
 needed at any step.
 
-Because the runtime refuses `--add-host` in a joined namespace, `--practice`
-mounts the target's own hosts file read-only. That file maps `sippycup`
-(the toolbox's fixed hostname, which sipsak resolves before it sends) to
-`127.0.0.1` and `sippycup-practice` to the practice address.
+No name entries are added on either side. Every client addresses the target
+by its literal address, and nothing in the toolbox resolves its own fixed
+hostname any more (sipsak did; it was replaced by the in-tree OPTIONS
+client). To verify the certificate's DNS name, pass it as a TLS server name
+(`--tls-server-name sippycup-practice`) instead of resolving it.
 
 Safety rules:
 
@@ -159,13 +160,19 @@ Run each step from the repository root. Use two terminals for the capture.
    network, which cannot reach the practice namespace. For the practice
    target, use the `--practice` forms in steps 3 and 5 instead.
 
-3. Send one bounded OPTIONS preflight over each transport:
+3. Send one bounded OPTIONS preflight over each transport. TLS verifies the
+   server certificate; trust the generated CA and verify its DNS name:
 
    ```sh
    ./bin/sippycup --practice preflight 127.0.0.2 5060 udp
    ./bin/sippycup --practice preflight 127.0.0.2 5060 tcp
-   ./bin/sippycup --practice preflight 127.0.0.2 5061 tls
+   ./bin/sippycup --practice preflight 127.0.0.2 5061 tls \
+     --tls-ca /work/practice/ca.crt --tls-server-name sippycup-practice
    ```
+
+   Without `--tls-ca` the TLS preflight fails with exit 5 (the practice CA is
+   not a system CA). `--tls-unverified` skips verification and is always
+   reported as `UNVERIFIED`.
 
 4. Plan and execute the baseline campaign. Execution captures its own
    packets and runs the campaign's own OPTIONS preflight first:
@@ -235,14 +242,23 @@ make practice-gate
 already up and removes only what it started. With no sudo, it:
 
 - rehearses the generated profile;
-- runs the launcher preflight over UDP, TCP, and TLS and requires success,
-  and requires a non-zero exit against closed UDP and TCP ports;
-- checks that a host-network toolbox resolves its fixed hostname (the
-  practice route never uses the host network, so this checks that fix
-  directly; `getent` sends no packets);
+- requires that `sipsak` is absent from the toolbox image;
+- runs the launcher preflight over UDP and TCP and requires `200 OK`; over
+  TLS requires success when verified against the practice CA as
+  `sippycup-practice` and by its IP SAN, exit 5 (a verification failure, not
+  a pass) with no trust anchor and with a wrong server name, and an
+  `UNVERIFIED` report for `--tls-unverified`; requires exit 3 (no response)
+  against a closed UDP port and exit 4 (refused) against a closed TCP port;
+- checks that the practice route carries no hosts entry for the toolbox
+  hostname, so every later check proves that no tool needs one (`getent`
+  sends no packets);
 - plans the practice campaign and runs `campaign execute` in the practice
   namespace, which requires the campaign's own `sip_options_preflight` to get
-  `200 OK` over UDP and TCP;
+  `200 OK` (status class `2xx`, no warning) over UDP and TCP, and both
+  `options` steps to report the in-tree client's JSON summary with
+  `finalStatus` 200 met. Because Asterisk runs with `force_rport` off, a
+  client that drops its real Via port and `rport` gets no reply and fails
+  these checks;
 - sends one unauthenticated INVITE and requires a `401` with a Digest
   challenge;
 - registers and places one authenticated PJSUA echo call with in-namespace
@@ -270,8 +286,9 @@ sets `SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1` so a missing image fails it.
   the target challenges every unauthenticated INVITE, so an unauthenticated
   `call` case could only fail. The authenticated call uses PJSUA.
 - The campaign has no TLS case. Its TLS preflight validates against the
-  container's system trust store, which does not contain the practice CA.
-  The launcher preflight and PJSUA cover TLS.
+  container's system trust store, which does not contain the practice CA,
+  and profiles and plans cannot carry a TLS server name or CA yet. The
+  launcher preflight (`--tls-ca`, `--tls-server-name`) and PJSUA cover TLS.
 - Only IPv4 loopback is supported. IPv6, NAT behavior, DTLS-SRTP, WebRTC,
   video, DTMF verification, hold, and transfer are not exercised.
 - The target answers one realistic shape of SIP edge (Asterisk with
@@ -279,8 +296,8 @@ sets `SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1` so a missing image fails it.
   authentication, and routing.
 - The recording check proves that audio returned; it is not a quality
   measurement.
-- `--practice` uses Podman's `HostsPath` and `container:` network mode.
-  Other runtimes are not verified.
+- `--practice` uses Podman's `container:` network mode. Other runtimes are
+  not verified.
 
 ## Why it can never authorize real traffic
 

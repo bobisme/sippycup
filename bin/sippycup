@@ -229,19 +229,11 @@ run_container() {
     if (( isolated != 0 && offline_container == 0 )); then
         network=()
     fi
-    # A host-network container inherits the host's name table, which does not
-    # know the fixed container hostname. Tools that resolve their own name
-    # (sipsak, and so the OPTIONS preflight) otherwise fail before sending.
-    local -a name_resolution=()
-    if [[ "${network[*]}" == "--network=host" ]]; then
-        name_resolution=(--add-host=sippycup:127.0.0.1)
-    fi
+    # No tool needs the fixed container hostname to resolve: the in-tree
+    # OPTIONS client, SIPp, PJSUA, and the capture tools all use addresses.
     if (( practice != 0 && offline_container == 0 )); then
         join_practice_target "${runtime}"
         network=(--network="container:${practice_container}")
-        # The runtime forbids --add-host in a joined namespace; reuse the
-        # target's name table, which maps sippycup and the target's DNS name.
-        name_resolution=(--volume="${practice_hosts}:/etc/hosts:ro")
     fi
     if (( admin != 0 && offline_container == 0 )); then
         caps+=(--cap-add=NET_ADMIN)
@@ -292,7 +284,6 @@ EOF
         "${devices[@]}" \
         "${confinement[@]}" \
         --hostname=sippycup \
-        "${name_resolution[@]}" \
         --env=SIPPYCUP_NETWORK_MODE="${network_mode}" \
         "${secret_environment[@]}" \
         --volume="${mount}" \
@@ -340,11 +331,11 @@ join_practice_target() {
         exit 2
     fi
     state="$("${runtime}" container inspect \
-        --format '{{.State.Running}}|{{index .Config.Labels "dev.sippycup.profile"}}|{{.HostConfig.NetworkMode}}|{{.HostsPath}}' \
+        --format '{{.State.Running}}|{{index .Config.Labels "dev.sippycup.profile"}}|{{.HostConfig.NetworkMode}}' \
         -- "${practice_container}" 2>/dev/null || true)"
-    IFS='|' read -r running profile network_mode practice_hosts <<<"${state}"
+    IFS='|' read -r running profile network_mode <<<"${state}"
     if [[ "${running}" != true || "${profile}" != practice \
-        || "${network_mode}" != none || ! -f "${practice_hosts:-}" ]]
+        || "${network_mode}" != none ]]
     then
         printf 'The practice target %s is not up.\n' "${practice_container}" >&2
         printf 'Run: ./bin/sippycup practice-target up\n' >&2
@@ -442,7 +433,6 @@ isolated=0
 admin=0
 practice=0
 practice_container=""
-practice_hosts=""
 advanced=0
 offline_container=0
 while (($# > 0)); do
@@ -596,7 +586,14 @@ EOF
         exec "${project_dir}/bin/${host_target}" "$@"
         ;;
     container)
-        run_container "${container_target}" "$@"
+        if [[ "${command_name}" == preflight ]]; then
+            # preflight always runs in the image, so --tls-ca work/... must
+            # be spelled the way the container sees it.
+            translate_work_arguments "$@"
+            run_container "${container_target}" "${translated_arguments[@]}"
+        else
+            run_container "${container_target}" "$@"
+        fi
         ;;
     container-isolated)
         if (( practice != 0 )); then

@@ -12,7 +12,7 @@ from typing import Any
 ESSENTIAL_TOOLS = (
     "python3",
     "sipp",
-    "sipsak",
+    "sippycup-options",
     "tshark",
     "dumpcap",
     "tcpdump",
@@ -49,7 +49,6 @@ OPTIONAL_PROFILES = {
 _VERSION_ARGUMENTS = {
     "python3": ("--version",),
     "sipp": ("-v",),
-    "sipsak": ("--version",),
     "tshark": ("--version",),
     "dumpcap": ("--version",),
     "tcpdump": ("--version",),

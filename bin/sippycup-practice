@@ -153,18 +153,15 @@ case "${command_name}" in
             --container "${container}" \
             --image "${image}" >/dev/null
         # --network=none leaves only loopback in the target's namespace, so it
-        # cannot be reached from or reach any real host. The hosts entries let
-        # toolbox containers that join the namespace resolve their own fixed
-        # hostname (sipsak needs it) and the certificate's DNS name.
+        # cannot be reached from or reach any real host. No name entries are
+        # needed: every client addresses the target by its literal address,
+        # and TLS clients verify the DNS name with an explicit server name.
         "${runtime}" run \
             --detach \
             --name "${container}" \
             --label dev.sippycup.profile=practice \
             --network=none \
             --hostname=sippycup-practice \
-            --hosts-file=none \
-            --add-host=sippycup:127.0.0.1 \
-            --add-host="sippycup-practice:${address}" \
             --cap-drop=ALL \
             --security-opt=no-new-privileges=true \
             --read-only \

@@ -26,8 +26,12 @@ already carries the service owner's approval.
    example `(host 192.0.2.10) and (udp port 5060 or udp)`. Nothing is sent
    until tcpdump reports that it is listening. If capture stops at any
    point, the run fails and the call hangs up.
-3. **Preflight.** It sends exactly one SIP OPTIONS request. A failed or
-   unanswered preflight stops the run without placing a call.
+3. **Preflight.** It sends exactly one SIP OPTIONS transaction with the
+   in-tree client (over UDP at most two datagrams: the request and one
+   retransmission after 0.5 s if nothing arrived). Any final response counts
+   as reachable; `preflight.json` records the status line. No response, a
+   refused or unreachable destination, or a TLS verification failure stops
+   the run without placing a call.
 4. **Call.** It places exactly one PJSUA call to
    `sip:DESTINATION@HOST:PORT` over the profile's transport. When you give
    an account, PJSUA registers first and dials only after registration

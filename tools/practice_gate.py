@@ -10,6 +10,7 @@ removes only what it started. Evidence is kept under
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -241,30 +242,101 @@ class Gate:
         ready = result.returncode == 0 and json.loads(result.stdout or "{}").get("ready") is True
         self.record("rehearse generated practice profile", ready, result.stderr.strip()[:200] or None)
 
+    def check_sipsak_absent(self) -> None:
+        # The OPTIONS client is in-tree; nothing may fall back to sipsak.
+        result = self.run("--practice", "--", "bash", "-c", "command -v sipsak", timeout=60)
+        self.record(
+            "sipsak is absent from the toolbox image",
+            result.returncode != 0 and not result.stdout.strip(),
+            f"exit {result.returncode}",
+        )
+
+    def preflight(self, port: str, transport: str, *options: str) -> subprocess.CompletedProcess[str]:
+        result = self.run(
+            "--practice", "preflight", self.address, port, transport, *options, timeout=60
+        )
+        name = "-".join(["preflight", transport, port, *options])
+        name = "".join(c if c.isalnum() or c in "-." else "_" for c in name)
+        self.host_path(f"{name[:120]}.txt").write_text(
+            result.stdout + result.stderr, encoding="utf-8"
+        )
+        return result
+
     def check_preflight(self) -> None:
-        for port, transport in (("5060", "udp"), ("5060", "tcp"), ("5061", "tls")):
-            result = self.run("--practice", "preflight", self.address, port, transport, timeout=60)
+        ca = "/work/practice/ca.crt"
+        for port, transport in (("5060", "udp"), ("5060", "tcp")):
+            result = self.preflight(port, transport)
             self.record(
                 f"launcher preflight {transport}",
-                result.returncode == 0 and "SIP/2.0 200 OK" in result.stdout,
+                result.returncode == 0
+                and "SIP/2.0 200 OK [class 2xx]" in result.stdout
+                and "Result: PASS (exit 0)" in result.stdout,
                 f"exit {result.returncode}",
             )
-        for port, transport in (("5099", "udp"), ("5099", "tcp")):
-            result = self.run("--practice", "preflight", self.address, port, transport, timeout=60)
+        result = self.preflight(
+            "5061", "tls", "--tls-ca", ca, "--tls-server-name", practice.DNS_NAME
+        )
+        self.record(
+            "launcher preflight tls verified against the practice CA as sippycup-practice",
+            result.returncode == 0
+            and f"TLS: verified for name '{practice.DNS_NAME}'" in result.stdout
+            and "SIP/2.0 200 OK" in result.stdout
+            and "Result: PASS (exit 0)" in result.stdout,
+            f"exit {result.returncode}",
+        )
+        result = self.preflight("5061", "tls", "--tls-ca", ca)
+        self.record(
+            "launcher preflight tls verified against the practice CA by IP SAN",
+            result.returncode == 0 and "TLS: verified for name" in result.stdout,
+            f"exit {result.returncode}",
+        )
+        result = self.preflight("5061", "tls")
+        self.record(
+            "launcher preflight tls without the practice CA fails verification (exit 5)",
+            result.returncode == 5
+            and "TLS: FAILED (tls_verification)" in result.stdout
+            and "Result: TLS FAILURE" in result.stdout
+            and "SIP/2.0 200" not in result.stdout,
+            f"exit {result.returncode}",
+        )
+        result = self.preflight(
+            "5061", "tls", "--tls-ca", ca, "--tls-server-name", "wrong-name.invalid"
+        )
+        self.record(
+            "launcher preflight tls with a wrong server name fails (exit 5)",
+            result.returncode == 5 and "TLS: FAILED (tls_verification)" in result.stdout,
+            f"exit {result.returncode}",
+        )
+        result = self.preflight("5061", "tls", "--tls-unverified")
+        self.record(
+            "launcher preflight --tls-unverified is reported UNVERIFIED",
+            result.returncode == 0
+            and "TLS: UNVERIFIED" in result.stdout
+            and "Result: PASS, TLS UNVERIFIED" in result.stdout
+            and "Result: PASS (exit" not in result.stdout,
+            f"exit {result.returncode}",
+        )
+        for port, transport, code, label in (
+            ("5099", "udp", 3, "times out (exit 3)"),
+            ("5099", "tcp", 4, "is refused (exit 4)"),
+        ):
+            result = self.preflight(port, transport)
             self.record(
-                f"launcher preflight {transport} against a closed port fails",
-                result.returncode != 0,
+                f"launcher preflight {transport} against a closed port {label}",
+                result.returncode == code,
                 f"exit {result.returncode}",
             )
 
-    def check_host_network_name_resolution(self) -> None:
-        # The practice route never uses the host network, so check the
-        # host-network fix directly: the fixed toolbox hostname must resolve
-        # there (sipsak needs it). getent reads /etc/hosts and sends nothing.
-        result = self.run("--", "getent", "hosts", "sippycup", timeout=60)
+    def check_no_name_workaround(self) -> None:
+        # sipsak resolved its own hostname before sending, which once needed
+        # hosts entries on both routes. They are gone: the fixed toolbox
+        # hostname must not resolve in the practice namespace, so every later
+        # preflight, campaign, and PJSUA check proves nothing depends on it.
+        # getent reads /etc/hosts and sends nothing.
+        result = self.run("--practice", "--", "getent", "hosts", "sippycup", timeout=60)
         self.record(
-            "host-network toolbox resolves its fixed hostname",
-            result.returncode == 0 and "sippycup" in result.stdout,
+            "practice route has no hosts entry for the toolbox hostname",
+            result.returncode != 0 and not result.stdout.strip(),
             f"exit {result.returncode}",
         )
 
@@ -293,7 +365,11 @@ class Gate:
             "campaign execute: sip_options_preflight answered on udp and tcp",
             executed.returncode == 0
             and len(preflight) == 2
-            and all(item.get("ok") and item.get("detail") == "SIP/2.0 200 OK" for item in preflight),
+            and all(
+                item.get("ok") and item.get("detail") == "SIP/2.0 200 OK"
+                and item.get("statusClass") == "2xx" and item.get("warning") is None
+                for item in preflight
+            ),
             {"exit": executed.returncode, "preflight": [item.get("detail") for item in preflight],
              "stderr": executed.stderr.strip()[-300:] or None},
         )
@@ -301,6 +377,25 @@ class Gate:
             "campaign execute succeeded with both OPTIONS steps",
             result.get("state") == "succeeded" and result.get("completedSteps") == 2,
             result,
+        )
+        # The options steps run the in-tree client, which prints one JSON
+        # summary per step; sipsak would print nothing of the kind.
+        events = runs[-1].parent / "events.jsonl" if runs else None
+        summaries = []
+        if events is not None and events.exists():
+            for line in events.read_text(encoding="utf-8").splitlines():
+                event = json.loads(line)
+                if event.get("event") == "step.output" and event.get("stream") == "stdout":
+                    for text in str(event.get("text", "")).splitlines():
+                        with contextlib.suppress(ValueError):
+                            summaries.append(json.loads(text))
+        self.record(
+            "campaign options steps used the in-tree client and met finalStatus 200",
+            len(summaries) == 2
+            and all(item.get("met") is True and item.get("status_code") == 200
+                    and item.get("expectation") == 200 for item in summaries),
+            [(item.get("transport"), item.get("status_code"), item.get("requests_sent"))
+             for item in summaries],
         )
 
     def check_unauthenticated_invite(self) -> None:
@@ -460,8 +555,9 @@ class Gate:
         try:
             self.ensure_target()
             self.check_profile()
+            self.check_sipsak_absent()
             self.check_preflight()
-            self.check_host_network_name_resolution()
+            self.check_no_name_workaround()
             self.check_campaign()
             self.check_unauthenticated_invite()
             self.check_authenticated_call()

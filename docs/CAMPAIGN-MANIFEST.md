@@ -383,7 +383,7 @@ path on the command line can change it:
 
 | Step | Runner |
 | --- | --- |
-| `options` | `campaign-sipp-runner` (sipsak), unchanged |
+| `options` | `campaign-sipp-runner` (in-tree OPTIONS transaction)  |
 | `call` without `dial` and without `credentialRef` | `campaign-sipp-runner` (SIPp `uac`), unchanged |
 | `call` with `dial` or `credentialRef` | `campaign-softphone-runner` (PJSUA) |
 
@@ -499,7 +499,9 @@ network namespace and rewrites arguments that resolve beneath the host `work/`
 directory to `/work/...`, so the plan, manifest, and run root must live there.
 The other `campaign execute` examples in this document omit `--isolated` and
 `work/` for brevity. Without container options the command runs directly on
-the host and needs host SIPp, sipsak, tcpdump, and capture privileges.
+the host and needs host SIPp, tcpdump, and capture privileges. OPTIONS
+preflights and `options` steps use the in-tree Python client
+(`lib/sippycup/options.py`), so no separate OPTIONS tool is needed.
 
 Isolated traffic leaves through the runtime's NAT. Signaling and the bounded
 preflight use symmetric response routing, but media returns only if the
@@ -508,8 +510,9 @@ target sends RTP to the observed source address.
 It creates a collision-safe UTC run directory with mode 0700, starts `tcpdump`
 and waits for its output file before any packet is sent, sends one bounded SIP
 OPTIONS preflight to every used frozen destination, and only then dispatches
-steps to SIPp/sipsak. A failed preflight stops capture and writes a failure
-result without starting a call. Capture is stopped before the offline report
+steps: `call` steps to SIPp, `options` steps to the in-tree OPTIONS client. A
+failed preflight stops capture and writes a failure result without starting
+a call. Capture is stopped before the offline report
 is generated. The directory includes the frozen plan, start/finish timestamps,
 redacted command metadata, executable identities and hashes, preflight
 results, structured events, capture log and PCAP, report output, and a final
@@ -550,7 +553,7 @@ Known values and SIP Authorization headers are redacted before event
 persistence. A credentialed `call` step always runs on the softphone runner;
 the bundled SIPp runner still refuses any step with credentials because SIPp's
 password option would expose the value in argv. OPTIONS steps of a
-credentialed target run on sipsak unauthenticated, and their envelope carries
+credentialed target are sent unauthenticated, and their envelope carries
 no credential value.
 
 Secret source variables and any environment variable containing a resolved
@@ -680,6 +683,50 @@ is `failed`, `authentication.REGISTER` is `{"attempts": 1, "rejected": 1}`,
 and the capture holds exactly one REGISTER with an `Authorization` header and
 no INVITE.
 
+## OPTIONS preflight and `options` step contract
+
+Both use one bounded transaction from `lib/sippycup/options.py`, sent only to
+the frozen literal address:
+
+- UDP: a connected socket, the real local address and port plus `;rport` in
+  Via, at most two datagrams (the request and one retransmission after 0.5 s),
+  and no retransmission once any matching response arrived. A reply counts
+  only when its status line is strict (`SIP/2.0 NNN reason`) and its Call-ID,
+  `CSeq: 1 OPTIONS`, and top Via branch match this transaction; any other
+  datagram is counted as ignored. An ICMP port-unreachable is recorded as a
+  note, never as a refusal, and the outcome is still no response.
+- TCP/TLS: one connection and one request; the reply is read until the header
+  terminator (and any body), across segments, bounded at 64 KiB and the same
+  deadline. Provisional responses are skipped until a final one.
+- IPv6 literals are bracketed in the Request-URI, To, and Via sent-by.
+- The preflight deadline is 2 seconds per destination.
+
+The pre-call **preflight** answers "is the destination reachable": any final
+response passes, because many servers answer OPTIONS with 401, 403, 404, or
+405 and are still valid targets. Each `preflight.json` entry records `ok`,
+the status line in `detail`, `statusCode`, `statusClass`, and `warning`. A 5xx
+or 6xx still proves reachability, so it does not stop the run (failing would
+block assessments of degraded or deliberately rejecting edges), but it is
+never silent: `warning` is `server_error_response` and `campaign execute`
+prints a warning to standard error. No response, refusal, an unreachable
+network, or a TLS failure fails the preflight as before.
+
+An **`options` step** is judged against the frozen case: when the case has
+`expectations.finalStatus`, the final status must equal it; otherwise a 2xx is
+required. The step prints one JSON summary (outcome, status, requests sent,
+retransmissions, ignored datagrams, TLS verification, elapsed time,
+expectation, `met`) that appears as a `step.output` event. The step
+retransmits over UDP only when its frozen `budget.packets` is at least 4 (two
+requests and two responses), and its deadline is the smaller of the step's
+`durationSeconds` and 5 seconds.
+
+Preflight traffic is not part of `plannedTotals`, but it is captured: the
+watchdog starts before the first preflight packet and counts preflight packets
+against every `hardMaxima` ceiling, and execution stops before any step if a
+ceiling is already crossed. Budget headroom for it: up to four UDP packets per
+used destination in the worst case (two requests, two responses), or one TCP
+or TLS connection (handshake, request, response, and teardown).
+
 ## Errors and emergency stop
 
 Human-readable errors are the default. Automation can request a stable,
@@ -719,7 +766,13 @@ genuinely stale nonce is not retried (one attempt per transaction is the
 lockout rule), so that call fails. PJSUA's local RTP port is not forced into
 the authorized media range; only the remote port is checked. Digest
 authentication itself is exercised only against a real registrar, not by the
-loopback self-test. TLS preflight uses normal
-certificate validation against the frozen literal address, so it fails unless
-the certificate carries that IP as a subject alternative name. Campaign execution
+loopback self-test. TLS preflight and TLS
+`options` steps verify the certificate against the frozen literal address and
+the image's system trust store, so they fail unless the certificate chains to
+a system CA and carries that IP as a subject alternative name. There is no
+unverified mode for campaigns. The OPTIONS function already accepts a TLS
+server name and an extra CA file; profiles and plans cannot carry a reviewed
+TLS server name yet, so a target whose certificate names only a DNS name
+cannot be preflighted by a campaign. Use the launcher preflight with
+`--tls-server-name` and `--tls-ca` to check such a target by hand. Campaign execution
 is local and sequential—there is no distributed controller.
