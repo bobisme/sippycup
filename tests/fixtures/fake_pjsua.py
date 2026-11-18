@@ -68,8 +68,24 @@ def main():
         log_line('Authorization: Digest username="alice", realm="x", response="deadbeef"')
         log_line('Proxy-Authorization: Digest username="alice", response="cafef00d"')
     say("main.c  Ready: Success")
+    # TLS: FAKE_PJSUA_TLS is ok (default), mismatch, untrusted, or none (no
+    # verification line at all). The verified host is the outbound proxy's.
+    tls_mode = os.environ.get("FAKE_PJSUA_TLS", "ok") if "--use-tls" in options else None
+    if tls_mode is not None and tls_mode != "none":
+        outbound = options["--outbound"][0][len("sip:"):].split(";", 1)[0]
+        message = {
+            "ok": "OK",
+            "mismatch": "The server identity does not match to any identities specified in the certificate",
+            "untrusted": "The certificate is untrusted",
+        }[tls_mode]
+        log_line(f"sip_transport_tls.c  TLS cert verification result of {outbound} : {message}")
+    tls_failed = tls_mode in ("mismatch", "untrusted")
+    if tls_failed:
+        mode = "tlsfail"
     if "--registrar" in options:
-        if mode == "regfail":
+        if mode == "tlsfail":
+            say("pjsua_acc.c  SIP registration failed, status=171165 (PJSIP_TLS_ECERTVERIF)")
+        elif mode == "regfail":
             say("pjsua_acc.c  SIP registration failed, status=403 (Forbidden)")
         else:
             say("pjsua_acc.c  sip:alice@x: registration success, status=200 (OK), will re-register in 300 seconds")
@@ -140,6 +156,8 @@ def main():
                 say("pjsua_app.c  .....Call 0 state changed to CONFIRMED")
                 state["confirmed"] = True
                 threading.Thread(target=duration_timer, daemon=True).start()
+            elif mode == "tlsfail":
+                disconnect("171165 (PJSIP_TLS_ECERTVERIF)")
             elif mode == "reject":
                 log_line("Incoming Response msg 486/INVITE/cseq=1 (rdata0x1) in state Proceeding")
                 disconnect("486 (Busy Here)")

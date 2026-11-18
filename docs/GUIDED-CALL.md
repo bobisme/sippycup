@@ -37,6 +37,20 @@ already carries the service owner's approval.
    an account, PJSUA registers first and dials only after registration
    succeeds. PJSUA plays a WAV file and records what it receives. It hangs up
    at `min(--duration, limits.max_duration_seconds)` seconds after answer.
+   Over TLS, PJSUA always verifies the server certificate
+   (`--tls-verify-server`) against `target.tls_ca_file`, or the system bundle
+   `/etc/ssl/certs/ca-certificates.crt` when the profile names none. With
+   `target.tls_server_name`, the destination, registrar, identity, and
+   outbound proxy use that name, so PJSUA sends it as SNI and checks it
+   against the certificate; PJSUA runs in a private user and mount namespace
+   in which `/etc/hosts` holds exactly `LITERAL NAME` and
+   `/etc/nsswitch.conf` holds `hosts: files`, so the name maps only to the
+   literal address and no DNS query can be made. The driver proves that
+   mapping with `getent` inside the namespace before PJSUA starts and
+   refuses (`tls_name_pinning_unavailable` or `tls_name_pinning_mismatch`)
+   otherwise. Without a name, PJSUA verifies the literal address against the
+   certificate's IP SAN. The preflight loads the same CA bytes, which are
+   read once; PJSUA gets a private copy of them (`trust-anchor.pem`).
 5. **Offline analysis.** After capture stops it runs the standard report,
    triage, and the call-path oracle. Oracle expectations are generated from
    the profile: allowed endpoints are the approved addresses plus the local
@@ -125,6 +139,7 @@ never reused. Files are mode 0600:
 | `heard.wav` | Audio received from the far end. |
 | `expectations.yaml` | Generated oracle expectations. |
 | `report.txt`, `triage.json`, `assert.json` | Offline report, triage, and oracle result (with `.stderr` files). |
+| `tls-media.txt` | TLS calls only: RTP to and from the negotiated media peer, decoded by tshark from the capture. |
 | `result.json` | Stable result, `schemas/call-result-v1.schema.json`. |
 | `evidence-manifest.json` | Hashes, sensitivity labels, and privacy findings. |
 
@@ -145,6 +160,24 @@ identifiers; use the evidence privacy workflow before sharing anything.
 | `capture-failed`, `capture-died`, `authorization-lapsed`, `internal-error` | The run stopped for safety; see `notes` in the result. | 1 |
 | `cancelled` | Ctrl-C or SIGTERM. | 130 / 143 |
 | `blocked` | Refused before anything started; no run directory. | 2 |
+
+| `tls-not-verified` | TLS verification failed or was not confirmed; PJSUA sent no SIP request on that connection. | 1 |
+| `tls-name-pinning-failed` | The reviewed name could not be pinned to the literal address; PJSUA was not started. | 1 |
+
+### TLS calls
+
+Over TLS the packet oracle cannot see SIP (the signaling is encrypted), so
+its result is recorded but does not decide the verdict, and a `notes` entry
+says so. A TLS call passes only when the preflight verified the certificate,
+PJSUA logged `TLS cert verification result of NAME:PORT : OK` for the
+expected name (and no failed result), registration (when requested) and the
+call succeeded, and RTP in both directions was decoded from the capture on
+the negotiated media port (`tls-media.txt`). Missing RTP counts give
+`inconclusive`; RTP in one direction gives the same NAT-aware verdicts as
+UDP. `result.json` carries `tls`: `verified`, `serverName` (the name, or the
+literal address when the IP SAN is verified), `trust` (`system` or `file`),
+`caFile`, `caSha256`, `preflightVerified`, `softphoneVerified`,
+`softphoneDetail`, `connectsTo`, and `media`.
 
 RTP counts come from PJSUA's own call statistics and are labelled as such.
 Codec, media peer, and recording level are reported only when observed;

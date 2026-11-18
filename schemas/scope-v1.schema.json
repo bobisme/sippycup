@@ -48,7 +48,8 @@
           "address": {"type": "string"},
           "transport": {"enum": ["udp", "tcp", "tls"]},
           "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-          "tls_server_name": {"type": ["string", "null"]}
+          "tls_server_name": {"type": ["string", "null"]},
+          "tls_ca_file": {"type": ["string", "null"], "pattern": "^work/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"}
         }
       }
     },

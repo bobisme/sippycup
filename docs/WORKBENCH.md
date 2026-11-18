@@ -94,8 +94,33 @@ This command composes the exact operator sequence:
 It prints `BLOCKED` while rehearsal fails and always reports that it sent no
 packets. The current one-call planner also requires `target.host` itself to be
 one of the approved literal addresses; this prevents a reviewed plan from
-later following a changed DNS answer. Hostname/SNI pinning needs a separate
-reviewed transport feature rather than an implicit lookup.
+later following a changed DNS answer.
+
+A TLS target whose certificate names a DNS name instead of the IP keeps the
+literal `target.host` and adds the reviewed name:
+
+```yaml
+target:
+  host: 192.0.2.10                       # every packet goes here
+  port: 5061
+  transport: tls
+  tls_server_name: sbc.voice.example-corp.net   # SNI and certificate name only
+  tls_ca_file: work/ENGAGEMENT/owner-ca.crt      # optional: a private CA (PEM, no key)
+  approved_addresses: [192.0.2.10]
+```
+
+The name is used only for SNI, certificate verification, and the SIP domain;
+it is never resolved, so no DNS answer can move the target. It must be
+lowercase LDH labels (at most 253 characters), not an IP address, not a
+wildcard, and not a reserved or placeholder name (`localhost`, `*.invalid`,
+`example.com`, `changeme`, ...). `tls_ca_file` must be a regular PEM file
+beneath `work/` that contains a CA certificate and no private key; without it
+the system trust store is used. Both fields are valid only with transport
+`tls`, and there is no field that turns verification off: without a name,
+the certificate must carry the literal address as an IP SAN. `rehearse` and
+`one-call` print the name, the trust source (and the CA file's SHA-256 in
+JSON), and that every connection goes only to the literal address;
+`one-call` passes `--tls-server-name` and `--tls-ca-file` to its preflight.
 
 The plan now has an executor. `./bin/sippycup call PROFILE --dial
 DESTINATION` runs the same sequence in one terminal and one isolated

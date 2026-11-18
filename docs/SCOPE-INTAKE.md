@@ -25,7 +25,7 @@ approved profile.
 | top level | `schema_version`, `name` (`[a-z][a-z0-9-]{0,62}`) |
 | `authorization` | `status` (`pending`, `approved`, `revoked`), `approval_id`, `approved_by`, `valid_from`, `valid_until` (RFC 3339 with a timezone; unquoted is fine) |
 | `signaling` | `networks` (literal IPs or CIDRs), `ports`, `transports` (`udp`, `tcp`, `tls`) |
-| `targets[]` | `name`, `address` (literal IP), `transport`, `port`, optional `tls_server_name` (required for `tls`) |
+| `targets[]` | `name`, `address` (literal IP), `transport`, `port`, `tls_server_name` (required for `tls`: the DNS name on the certificate), optional `tls_ca_file` (`tls` only: `work/...` PEM of a private CA; omit for a public CA) |
 | `media` | `networks`, `port_range` (`start`, `end`), `protection` (`rtp`, `sdes-srtp`, `dtls-srtp`), `codecs` (`PCMU`, `PCMA`, `G722`, `OPUS`), `dtmf` (`rfc4733`, `sip-info`, `inband`, `none`), `symmetric_rtp` |
 | `client` | `source_addresses`: the address(es) the service sees our tests come from, plus the local address your own capture shows when that differs (behind NAT, the private address) |
 | `account` | `required`; when true: `username`, `realm`, `credential_ref`, `credential_delivery` |
@@ -102,6 +102,8 @@ artifacts it blocks.
 | `scope.target_outside_networks` | A target address is outside `signaling.networks` |
 | `scope.port_not_approved`, `scope.transport_not_approved` | A target uses an unapproved port or transport |
 | `scope.tls_server_name_missing` | A TLS target has no server name |
+| `scope.tls_ca_unreadable` | `tls_ca_file` is not a readable PEM CA certificate beneath `work/` (or holds a private key) |
+| `scope.tls_ca_without_tls` | `tls_ca_file` on a target whose transport is not `tls` |
 | `scope.credential_ref_missing` | An account is required but no credential reference name is recorded |
 | `scope.concurrency_exceeds_calls` | More concurrent calls than total calls |
 | `scope.ceiling_infeasible` | The ceilings cannot hold one baseline call (see below) |

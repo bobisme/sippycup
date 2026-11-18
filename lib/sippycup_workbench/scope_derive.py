@@ -135,15 +135,23 @@ def _build_profile(doc: dict[str, Any], report: Report) -> dict[str, Any]:
     approved_by = auth.get("approved_by")
     approval_id = auth.get("approval_id")
     limits = doc["limits"]
+    profile_target: dict[str, Any] = {
+        "host": first["address"],
+        "port": first["port"],
+        "transport": first["transport"],
+    }
+    if first["transport"] == "tls":
+        # The reviewed certificate name and trust anchor; the profile still
+        # connects only to the literal host.
+        if first.get("tls_server_name"):
+            profile_target["tls_server_name"] = first["tls_server_name"]
+        if first.get("tls_ca_file"):
+            profile_target["tls_ca_file"] = first["tls_ca_file"]
+    profile_target["approved_addresses"] = addresses
     return {
         "schema_version": PROFILE_VERSION,
         "name": doc["name"],
-        "target": {
-            "host": first["address"],
-            "port": first["port"],
-            "transport": first["transport"],
-            "approved_addresses": addresses,
-        },
+        "target": profile_target,
         "authorization": {
             "status": status,
             "approved_by": approved_by if isinstance(approved_by, str) else "",
@@ -193,10 +201,16 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
     media = doc["media"]["port_range"]
     manifest_targets = []
     for item in targets:
+        signaling: dict[str, Any] = {"transport": item["transport"], "port": item["port"]}
+        if item["transport"] == "tls":
+            if item.get("tls_server_name"):
+                signaling["tlsServerName"] = item["tls_server_name"]
+            if item.get("tls_ca_file"):
+                signaling["tlsCaFile"] = item["tls_ca_file"]
         entry: dict[str, Any] = {
             "name": item["name"],
             "address": item["address"],
-            "signaling": {"transport": item["transport"], "port": item["port"]},
+            "signaling": signaling,
         }
         if credential:
             entry["credentialRef"] = credential

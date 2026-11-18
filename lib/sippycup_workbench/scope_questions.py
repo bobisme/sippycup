@@ -78,7 +78,10 @@ QUESTIONS: tuple[Question, ...] = (
              "Which signaling port(s) and which transport(s) (UDP, TCP, TLS) may we use against each address?",
              ("signaling.ports", "signaling.transports"), answered=_targets_answered),
     Question("signaling.tls", "Signaling",
-             "For TLS: what server name (SNI / certificate name) should we validate for each TLS address?",
+             "For TLS: what server name is on the certificate for each TLS address, and which CA "
+             "issued it: a public CA or a private one? If private, send us the CA certificate "
+             "(never a private key). We verify that name and CA while still connecting only to the "
+             "literal address; the name is never looked up in DNS.",
              ("targets",), applies=_uses_tls, answered=_tls_name_answered),
     Question("client.source", "Signaling",
              "Which source address(es) will our tests come from as you see them, so you can allow them?",

@@ -370,10 +370,40 @@ def select_runner(step: Mapping[str, Any]) -> str:
     ``service``). OPTIONS and plain credential-free calls keep the SIPp runner.
     """
     if step["type"] == "call" and (
-        "dial" in step or step.get("credentialRef") is not None
+        "dial" in step or step.get("credentialRef") is not None or "tls" in step
     ):
+        # A reviewed TLS server name or trust anchor needs a client that
+        # verifies the certificate; the bundled SIPp TLS client does not.
         return SOFTPHONE_RUNNER
     return SIPP_RUNNER
+
+
+def target_tls(plan: Mapping[str, Any]) -> dict[str, dict[str, Any] | None]:
+    """The frozen TLS block of each target (validation keeps it uniform)."""
+    result: dict[str, dict[str, Any] | None] = {}
+    for step in plan["steps"]:
+        result.setdefault(step["target"], step.get("tls"))
+    return result
+
+
+def verified_trust_anchors(plan: Mapping[str, Any]) -> dict[str, bytes]:
+    """Read every frozen CA file once and refuse any whose digest changed.
+
+    Runs before any directory, process, or packet exists. The returned bytes
+    are what the in-process preflight uses; each runner re-checks the digest
+    of the bytes it loads itself.
+    """
+    from sippycup.tls_trust import TrustError, read_verified_ca
+
+    anchors: dict[str, bytes] = {}
+    for tls in target_tls(plan).values():
+        if tls is None or tls["caFile"] is None or tls["caFile"] in anchors:
+            continue
+        try:
+            anchors[tls["caFile"]] = read_verified_ca(tls["caFile"], tls["caSha256"])
+        except TrustError as error:
+            raise RuntimeError(f"{error}; refusing to execute, nothing was sent") from error
+    return anchors
 
 
 def _bundled_runners(names: Sequence[str]) -> dict[str, list[str]]:
@@ -491,6 +521,7 @@ def sip_options_preflight(
     *,
     tls_server_name: str | None = None,
     tls_ca_file: str | None = None,
+    tls_ca_data: bytes | None = None,
 ) -> tuple[bool, str]:
     """Reachability preflight: ok when any final response arrived.
 
@@ -498,6 +529,8 @@ def sip_options_preflight(
     line for a response (so ``options.status_of_detail`` recovers the class)
     and a categorized error otherwise. TLS always verifies; the keyword
     arguments let a reviewed TLS server name and trust anchor be passed down.
+    A server name is also the SIP domain of the Request-URI and To; the
+    connection still goes only to ``destination["address"]``.
     """
     try:
         result = options.send_options(
@@ -507,6 +540,8 @@ def sip_options_preflight(
             timeout=options.DEFAULT_TIMEOUT_SECONDS,
             tls_server_name=tls_server_name,
             tls_ca_file=tls_ca_file,
+            tls_ca_data=tls_ca_data,
+            request_host=tls_server_name,
         )
     except options.OptionsUsageError as error:
         return False, f"usage: {error}"
@@ -566,6 +601,8 @@ def execute_campaign(
         verify_frozen_plan(plan, manifest_bytes)
     except ManifestError as error:
         raise RuntimeError(str(error)) from error
+    trust_anchors = verified_trust_anchors(plan)
+    tls_by_target = target_tls(plan)
     if runner is not None and not allow_test_runner:
         raise RuntimeError("custom runners are disabled for active campaign execution")
     if not plan["evidence"]["capture"]:
@@ -728,7 +765,15 @@ def execute_campaign(
                 code = 130 if cancel_signal == signal.SIGINT else 143
                 result = RunResult(code, "cancelled", 0)
                 raise _FinishExecution
-            ok, detail = preflight(destination)
+            tls = tls_by_target.get(destination["target"])
+            if tls is None:
+                ok, detail = preflight(destination)
+            else:
+                ok, detail = preflight(
+                    destination,
+                    tls_server_name=tls["serverName"],
+                    tls_ca_data=trust_anchors.get(tls["caFile"]),
+                )
             status_code, status_class = options.status_of_detail(detail)
             preflight_results.append(
                 {
@@ -749,6 +794,15 @@ def execute_campaign(
                     ),
                 }
             )
+            if tls is not None:
+                # A response over TLS implies a verified handshake: the client
+                # never disables verification.
+                preflight_results[-1]["tls"] = {
+                    "verified": bool(ok) and "[TLS UNVERIFIED]" not in detail,
+                    "serverName": tls["serverName"] or destination["address"],
+                    "trust": "file" if tls["caFile"] is not None else "system",
+                    "caSha256": tls["caSha256"],
+                }
             if preflight_results[-1]["warning"] is not None:
                 print(
                     f"campaign: preflight warning: {destination['target']} answered "

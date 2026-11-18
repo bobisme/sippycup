@@ -76,6 +76,9 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
         target = value.get("facts", {}).get("target")
         if target:
             print(f"Target: {target['host']}:{target['port']} ({target['transport']})")
+        tls = value.get("facts", {}).get("tls")
+        if tls:
+            print(tls_summary(tls))
         print("Network activity: none")
         return
     if value.get("schema_version") == "sippycup.dev/doctor/v1":
@@ -122,6 +125,24 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
 
 
+def tls_summary(tls: dict[str, Any]) -> str:
+    """One line that says what TLS verifies and where packets go."""
+    trust = (
+        f"CA file {tls['ca_file']}" if tls.get("trust") == "file" else "the system trust store"
+    )
+    if tls.get("server_name"):
+        name = (
+            f"server name {tls['server_name']} (SNI and certificate name; "
+            "never resolved through DNS)"
+        )
+    else:
+        name = f"the literal address {tls.get('connects_to')} (certificate IP SAN)"
+    return (
+        f"TLS: the server certificate must verify for {name} against {trust}; "
+        f"every connection goes only to the literal address {tls.get('connects_to')}"
+    )
+
+
 def _one_call_plan(profile_path: str) -> dict[str, Any]:
     document = load_profile(profile_path)
     rehearsal = rehearse(document)
@@ -145,13 +166,20 @@ def _one_call_plan(profile_path: str) -> dict[str, Any]:
         blocking_errors.append(
             "one-call v1 requires target.host itself to be one of the literal approved_addresses"
         )
+    tls = rehearsal.facts.get("tls") if rehearsal.facts else None
+    tls_arguments: list[str] = []
+    if tls:
+        if tls.get("server_name"):
+            tls_arguments.extend(["--tls-server-name", str(tls["server_name"])])
+        if tls.get("ca_file"):
+            tls_arguments.extend(["--tls-ca-file", str(tls["ca_file"])])
     commands = [
         ["./bin/sippycup", "capture", *scope_arguments, "--interface", interface, "--output", output, "--dry-run"],
-        ["./bin/sippycup", "preflight", host, port, transport],
+        ["./bin/sippycup", "preflight", host, port, transport, *tls_arguments],
         ["./bin/sippycup", "report", output],
         ["./bin/sippycup", "triage", output],
     ]
-    return {
+    plan: dict[str, Any] = {
         "schema_version": "sippycup.dev/one-call-plan/v1",
         "ready": rehearsal.ready and host_is_approved_literal,
         "blocking_errors": blocking_errors,
@@ -170,12 +198,17 @@ def _one_call_plan(profile_path: str) -> dict[str, Any]:
             {"name": "offline_triage", "network_active": False, "argv": commands[3]},
         ],
     }
+    if tls:
+        plan["tls"] = tls
+    return plan
 
 
 def _render_plan(value: dict[str, Any]) -> None:
     print(f"One-call plan: {'READY' if value['ready'] else 'BLOCKED'}")
     for error in value["blocking_errors"]:
         print(f"BLOCK: {error}")
+    if value.get("tls"):
+        print(tls_summary(value["tls"]))
     for index, step in enumerate(value["steps"], 1):
         marker = "NETWORK" if step["network_active"] else "OFFLINE"
         print(f"{index}. [{marker}] {step['name']}")

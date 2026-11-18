@@ -51,6 +51,7 @@ from sippycup_softphone import (
     destination_uri,
     place_call,
 )
+from sippycup_softphone.driver import registrar_uri
 
 from .profile import ProfileError, host_is_approved_literal, load_profile, rehearse
 
@@ -329,9 +330,15 @@ def planned_wall_seconds(options: CallOptions, duration: int) -> int:
     return 10 + registration + options.answer_timeout + duration + 15
 
 
-def gate(document: dict[str, Any], *, now: datetime, planned_seconds: int) -> list[str]:
+def gate(
+    document: dict[str, Any],
+    *,
+    now: datetime,
+    planned_seconds: int,
+    work_root: Path | None = None,
+) -> list[str]:
     """Every reason this profile cannot send a packet right now (empty when ready)."""
-    rehearsal = rehearse(document, now=now)
+    rehearsal = rehearse(document, now=now, work_root=work_root)
     errors = list(rehearsal.errors)
     if not host_is_approved_literal(document):
         errors.append(
@@ -518,13 +525,27 @@ def _softphone_parameters(
     host = str(target.get("host", ""))
     port = target.get("port")
     transport = str(target.get("transport", "udp"))
+    server_name = target.get("tls_server_name") if transport == "tls" else None
     try:
-        uri = destination_uri(options.destination, host, port, transport)
+        uri = destination_uri(options.destination, host, port, transport, server_name)
     except SoftphoneError as error:
         uri = f"<invalid: {error}>"
     return {
         "destination_uri": uri,
         "transport": transport,
+        "tls": (
+            None
+            if transport != "tls"
+            else {
+                "verify_server": True,
+                "server_name": server_name,
+                "verify_name": server_name or host,
+                "trust": "file" if target.get("tls_ca_file") else "system",
+                "ca_file": target.get("tls_ca_file"),
+                "connects_to": host,
+                "name_pinned_without_dns": server_name is not None,
+            }
+        ),
         "duration_seconds": {"requested": options.duration, "limit": limit, "effective": duration},
         "answer_timeout_seconds": options.answer_timeout,
         "codecs": list(options.codecs),
@@ -552,12 +573,20 @@ def _softphone_parameters(
     }
 
 
-def dry_run_plan(options: CallOptions, document: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+def dry_run_plan(
+    options: CallOptions,
+    document: dict[str, Any],
+    *,
+    now: datetime,
+    work_root: Path | None = None,
+) -> dict[str, Any]:
     from .cli import _one_call_plan
 
     plan = _one_call_plan(str(options.profile))
     duration, limit = effective_duration(options.duration, document)
-    blocking = gate(document, now=now, planned_seconds=planned_wall_seconds(options, duration))
+    blocking = gate(
+        document, now=now, planned_seconds=planned_wall_seconds(options, duration), work_root=work_root
+    )
     for message in blocking:
         if message not in plan["blocking_errors"]:
             plan["blocking_errors"].append(message)
@@ -653,8 +682,16 @@ def classify(
     media_required: bool,
     network_mode: str,
     host: str,
+    tls_media: dict[str, Any] | None = None,
 ) -> tuple[str, str, int, list[str]]:
-    """Return (state, verdict, exit code, notes). Unknown stays unknown."""
+    """Return (state, verdict, exit code, notes). Unknown stays unknown.
+
+    ``tls_media`` is given for a TLS call: the signaling is encrypted on the
+    wire, so the packet oracle cannot reconstruct the dialog. The verdict
+    then rests on PJSUA's own signaling facts (including a verified TLS
+    handshake) plus RTP decoded from the capture on the negotiated media
+    port, and never on the oracle's ``unknown``.
+    """
     notes: list[str] = []
     if cancelled_signal is not None:
         return "cancelled", "cancelled", 130 if cancelled_signal == signal.SIGINT else 143, notes
@@ -668,6 +705,21 @@ def classify(
     if error == "media_peer_outside_scope":
         notes.append("The negotiated media peer is not an approved address; the call was hung up.")
         return "failed", "media-outside-scope", EXIT_NOT_PASS, notes
+    if error in ("tls_verification_failed", "tls_verification_not_observed") or (
+        tls_media is not None and softphone.get("tls_verified") is not True
+    ):
+        notes.append(
+            "TLS server verification did not succeed, so PJSUA sent no SIP request on the connection."
+            if error == "tls_verification_failed"
+            else "TLS verification was not confirmed by PJSUA."
+        )
+        return "failed", "tls-not-verified", EXIT_NOT_PASS, notes
+    if error in ("tls_name_pinning_unavailable", "tls_name_pinning_mismatch"):
+        notes.append(
+            "The reviewed TLS server name could not be pinned to the literal address in a private "
+            "namespace, so PJSUA was not started and nothing was sent by it."
+        )
+        return "failed", "tls-name-pinning-failed", EXIT_NOT_PASS, notes
     if softphone.get("registered") is False:
         return "failed", "registration-failed", EXIT_NOT_PASS, notes
     if not softphone.get("answered"):
@@ -679,6 +731,8 @@ def classify(
         return "failed", "call-error", EXIT_NOT_PASS, notes
     tx = softphone.get("rtp_tx_packets")
     rx = softphone.get("rtp_rx_packets")
+    if tls_media is not None:
+        return _classify_tls(softphone, tls_media, media_required, network_mode, host, notes)
     directions = set((oracle or {}).get("stream_directions") or [])
     inbound_missing = (rx == 0 and bool(tx)) or (
         oracle is not None and bool(directions) and directions == {"caller_to_callee"}
@@ -698,6 +752,85 @@ def classify(
     if verdict == "fail":
         return "completed", "fail", EXIT_NOT_PASS, notes
     return "completed", "inconclusive", EXIT_NOT_PASS, notes
+
+
+def _classify_tls(
+    softphone: dict[str, Any],
+    media: dict[str, Any],
+    media_required: bool,
+    network_mode: str,
+    host: str,
+    notes: list[str],
+) -> tuple[str, str, int, list[str]]:
+    notes.append(
+        "Signaling was TLS-encrypted on the wire, so the packet oracle cannot reconstruct the SIP "
+        "dialog; its result is recorded but does not decide the verdict. Signaling facts come from "
+        f"PJSUA's own log (TLS verified for {softphone.get('tls_server_name')}); media facts come "
+        "from the capture, with RTP decoded on the negotiated media port."
+    )
+    outbound = media.get("outbound")
+    inbound = media.get("inbound")
+    if outbound is None or inbound is None:
+        notes.append(f"RTP in the capture could not be counted: {media.get('note', 'unknown')}.")
+        return "completed", "inconclusive", EXIT_NOT_PASS, notes
+    if not media_required:
+        return "completed", "pass", EXIT_PASS, notes
+    if outbound > 0 and inbound > 0:
+        return "completed", "pass", EXIT_PASS, notes
+    if outbound > 0:
+        if network_mode == "private" and not ipaddress.ip_address(host).is_loopback:
+            notes.append(
+                "Signaling succeeded and RTP was sent, but no inbound RTP was captured. In isolated "
+                "mode this is consistent with NAT or one-way media and is not, by itself, a target defect."
+            )
+            return "completed", "possible-nat-one-way-media", EXIT_NOT_PASS, notes
+        notes.append("Signaling succeeded and RTP was sent, but no inbound RTP was captured.")
+        return "completed", "one-way-media", EXIT_NOT_PASS, notes
+    notes.append("No RTP to or from the negotiated media peer was captured.")
+    return "completed", "fail", EXIT_NOT_PASS, notes
+
+
+def tls_media_argv(tshark: str, capture: Path, peer: str | None) -> list[str] | None:
+    """tshark argv that decodes RTP on the negotiated media port, or None."""
+    if not peer:
+        return None
+    from sippycup_softphone.driver import _peer_address, _peer_port
+
+    address = _peer_address(peer)
+    port = _peer_port(peer)
+    if address is None or port is None:
+        return None
+    field = "ipv6" if ":" in address else "ip"
+    return [
+        tshark, "-n", "-r", str(capture), "-d", f"udp.port=={port},rtp",
+        "-Y", f"rtp && {field}.addr == {address} && udp.port == {port}",
+        "-T", "fields", "-e", f"{field}.src", "-e", f"{field}.dst",
+    ]
+
+
+def count_tls_media(path: Path, peer: str | None, exit_code: int | None) -> dict[str, Any]:
+    """Count RTP packets to and from the media peer in tshark field output."""
+    from sippycup_softphone.driver import _peer_address
+
+    address = _peer_address(peer) if peer else None
+    if address is None:
+        return {"outbound": None, "inbound": None, "note": "PJSUA reported no media peer"}
+    if exit_code != 0:
+        return {"outbound": None, "inbound": None, "note": f"tshark exited {exit_code}"}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        return {"outbound": None, "inbound": None, "note": f"no tshark output: {error.strerror}"}
+    outbound = inbound = 0
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) < 2:
+            continue
+        if fields[1] == address:
+            outbound += 1
+        elif fields[0] == address:
+            inbound += 1
+    return {"peer": peer, "outbound": outbound, "inbound": inbound, "source": "capture"}
 
 
 def _network_activity(
@@ -748,10 +881,10 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
     now = deps.now()
 
     if options.dry_run:
-        plan = dry_run_plan(options, document, now=now)
+        plan = dry_run_plan(options, document, now=now, work_root=work_root)
         return (EXIT_PASS if plan["ready"] else EXIT_REFUSED), plan
 
-    blocking = gate(document, now=now, planned_seconds=planned)
+    blocking = gate(document, now=now, planned_seconds=planned, work_root=work_root)
     if blocking:
         return EXIT_REFUSED, {
             "apiVersion": RESULT_VERSION,
@@ -769,8 +902,21 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
     transport = target["transport"]
     approved = list(target["approved_addresses"])
     profile_name = str(document["name"])
+    server_name = target.get("tls_server_name") if transport == "tls" else None
+    ca_reference = target.get("tls_ca_file") if transport == "tls" else None
+    ca_data: bytes | None = None
+    ca_sha256: str | None = None
+    if ca_reference is not None:
+        from sippycup.tls_trust import TrustError, read_ca
+
+        # Read the reviewed trust anchor once; the preflight loads these
+        # bytes from memory and PJSUA a private copy of the same bytes.
+        try:
+            ca_data, ca_sha256 = read_ca(ca_reference, work_root)
+        except TrustError as error:
+            raise CallError(str(error)) from error
     try:
-        uri = destination_uri(options.destination, host, port, transport)
+        uri = destination_uri(options.destination, host, port, transport, server_name)
     except SoftphoneError as error:
         raise CallError(str(error)) from error
 
@@ -806,6 +952,8 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
                 account=(SoftphoneAccount(username=options.username, realm=options.realm)
                          if options.username else None),
                 codecs=tuple(options.codecs),
+                tls_server_name=server_name,
+                tls_ca_file=Path("trust-anchor.pem") if ca_data is not None else None,
             ),
             password=password,
         )
@@ -851,7 +999,12 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
 
     def recheck(stage: str) -> bool:
         nonlocal stop_reason
-        errors = gate(document, now=deps.now(), planned_seconds=planned if stage == "preflight" else duration + 30)
+        errors = gate(
+            document,
+            now=deps.now(),
+            planned_seconds=planned if stage == "preflight" else duration + 30,
+            work_root=work_root,
+        )
         if errors:
             stop_reason = "authorization-lapsed"
             (run_dir / "authorization-recheck.txt").write_text(
@@ -873,15 +1026,18 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
         if options.play is None:
             generate_tone(play_path)
             play_info = _validate_wav(play_path)
+        ca_copy: Path | None = None
+        if ca_data is not None:
+            from sippycup.tls_trust import write_private_copy
+
+            ca_copy = write_private_copy(ca_data, run_dir / "trust-anchor.pem")
         account = None
         if options.username:
             account = SoftphoneAccount(
                 username=options.username,
                 realm=options.realm,
                 registrar=(
-                    f"sip:{host}:{port}" + ("" if transport == "udp" else f";transport={transport}")
-                    if options.register
-                    else None
+                    registrar_uri(host, port, transport, server_name) if options.register else None
                 ),
             )
         softphone_call = SoftphoneCall(
@@ -900,6 +1056,8 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
             registration_timeout_seconds=REGISTRATION_TIMEOUT_SECONDS,
             allowed_media_addresses=tuple(approved),
             advertised_address=local,
+            tls_server_name=server_name,
+            tls_ca_file=ca_copy,
         )
         try:
             softphone_options = build_config(softphone_call, password=None).splitlines()
@@ -919,6 +1077,21 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
             },
             "evidence": {"capture": True, "retainPayload": True},
             "target": {"host": host, "port": port, "transport": transport},
+            **(
+                {
+                    "tls": {
+                        "verify_server": True,
+                        "server_name": server_name,
+                        "verify_name": server_name or host,
+                        "trust": "file" if ca_data is not None else "system",
+                        "ca_file": ca_reference,
+                        "ca_sha256": ca_sha256,
+                        "connects_to": host,
+                    }
+                }
+                if transport == "tls"
+                else {}
+            ),
             "local_address": local,
             "network_mode": network_mode,
             "capture_filter": scope,
@@ -971,7 +1144,12 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
         destination = {"address": host, "port": port, "transport": transport, "target": "profile"}
         timestamps["preflight_sent"] = _utc(deps.now())
         preflight_sent = True
-        preflight_ok, detail = deps.preflight(destination)
+        if transport == "tls":
+            preflight_ok, detail = deps.preflight(
+                destination, tls_server_name=server_name, tls_ca_data=ca_data
+            )
+        else:
+            preflight_ok, detail = deps.preflight(destination)
         _write_json(
             run_dir / "preflight.json",
             [{
@@ -1036,6 +1214,14 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
             offline_codes["assert"] = deps.run_offline(
                 assert_argv, run_dir / "assert.json", run_dir / "assert.stderr", child_environment
             )
+            media_argv = tls_media_argv(
+                tools["tshark"], capture_path, (softphone_result or {}).get("media_peer")
+            )
+            if transport == "tls" and media_argv is not None:
+                offline_codes["tls_media"] = deps.run_offline(
+                    media_argv, run_dir / "tls-media.txt", run_dir / "tls-media.stderr",
+                    child_environment,
+                )
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
         os.umask(old_umask)
@@ -1043,6 +1229,15 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
     oracle = _oracle_summary(run_dir / "assert.json", offline_codes["assert"])
     triage = _triage_summary(run_dir / "triage.json", offline_codes["triage"])
     recording = analyze_recording(run_dir / "heard.wav") if softphone_result else None
+    tls_media = (
+        count_tls_media(
+            run_dir / "tls-media.txt",
+            (softphone_result or {}).get("media_peer"),
+            offline_codes.get("tls_media"),
+        )
+        if transport == "tls"
+        else None
+    )
     state, verdict, exit_code, notes = classify(
         cancelled_signal=cancel_signal[0] if cancel_signal else None,
         stop_reason=stop_reason,
@@ -1052,6 +1247,7 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
         media_required=options.media_required,
         network_mode=network_mode,
         host=host,
+        tls_media=tls_media,
     )
     notes.insert(0, _network_note(network_mode, host))
     if internal_error is not None:
@@ -1085,6 +1281,30 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
         "profile": profile_name,
         "target": {"host": host, "port": port, "transport": transport},
         "destinationUri": uri,
+        **(
+            {
+                "tls": {
+                    "verified": bool(
+                        softphone_result
+                        and softphone_result.get("tls_verified") is True
+                        and preflight_ok
+                    ),
+                    "serverName": server_name or host,
+                    "trust": "file" if ca_data is not None else "system",
+                    "caFile": ca_reference,
+                    "caSha256": ca_sha256,
+                    "preflightVerified": bool(preflight_ok),
+                    "softphoneVerified": (
+                        None if softphone_result is None else softphone_result.get("tls_verified")
+                    ),
+                    "softphoneDetail": (softphone_result or {}).get("tls_detail"),
+                    "connectsTo": host,
+                    "media": tls_media,
+                }
+            }
+            if transport == "tls"
+            else {}
+        ),
         "localAddress": local,
         "networkMode": network_mode,
         "durationSeconds": {"requested": options.duration, "limit": limit, "effective": duration},
@@ -1096,7 +1316,7 @@ def execute(options: CallOptions, deps: Dependencies | None = None) -> tuple[int
                 "registration_attempted", "registered", "registration_status", "dialed", "answered",
                 "final_status", "disconnect_status", "disconnect_reason", "connected_seconds",
                 "rtp_tx_packets", "rtp_rx_packets", "codec", "media_direction", "media_peer",
-                "hangup", "error", "cancelled",
+                "hangup", "error", "cancelled", "tls_verified", "tls_server_name",
             )
         },
         "triage": triage,
@@ -1150,6 +1370,14 @@ def render_human(value: dict[str, Any]) -> str:
         lines.append("Softphone parameters:")
         lines.append(f"  destination:     {softphone['destination_uri']}")
         lines.append(f"  transport:       {softphone['transport']}")
+        tls = softphone.get("tls")
+        if tls:
+            trust = f"CA file {tls['ca_file']}" if tls["trust"] == "file" else "the system trust store"
+            lines.append(
+                f"  TLS:             verify {tls['verify_name']} against {trust}; "
+                f"connects only to {tls['connects_to']}"
+                + (" (name pinned in a private namespace, never resolved)" if tls["server_name"] else "")
+            )
         duration = softphone["duration_seconds"]
         lines.append(
             f"  duration:        {duration['effective']}s (requested {duration['requested']}s, "
@@ -1183,6 +1411,13 @@ def render_human(value: dict[str, Any]) -> str:
     lines.append(f"Guided call: {value['verdict'].upper()} ({value['state']})")
     target = value["target"]
     lines.append(f"  Target:       {target['host']}:{target['port']}/{target['transport']}  {value['destinationUri']}")
+    tls = value.get("tls")
+    if tls:
+        trust = f"CA file {tls['caFile']}" if tls["trust"] == "file" else "system trust store"
+        lines.append(
+            f"  TLS:          {'verified' if tls['verified'] else 'NOT VERIFIED'} for "
+            f"{tls['serverName']} ({trust}); connections only to {tls['connectsTo']}"
+        )
     preflight = value.get("preflight")
     lines.append(
         "  Preflight:    "
@@ -1211,6 +1446,16 @@ def render_human(value: dict[str, Any]) -> str:
             "  RTP (PJSUA):  "
             + f"sent {tx if tx is not None else 'unknown'}, received {rx if rx is not None else 'unknown'}"
             + (f", codec {softphone['codec']}" if softphone["codec"] else "")
+        )
+    media = (tls or {}).get("media")
+    if media:
+        lines.append(
+            "  RTP (capture): "
+            + (
+                f"to peer {media['outbound']}, from peer {media['inbound']} ({media.get('peer')})"
+                if media.get("outbound") is not None
+                else f"not counted: {media.get('note')}"
+            )
         )
     recording = value.get("recording")
     if recording and recording.get("present") and recording.get("readable"):

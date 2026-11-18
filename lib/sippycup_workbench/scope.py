@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from sippycup.campaign import DOCUMENTATION_NETWORKS, _is_placeholder
+from sippycup.tls_trust import TrustError, read_ca, validate_ca_reference, validate_server_name
 
 from .profile import ProfileError, _parse_time
 
@@ -108,7 +109,7 @@ SPEC: dict[str, Any] = {
     },
     "signaling": {"networks": None, "ports": None, "transports": None},
     "targets": [
-        {"name", "address", "transport", "port", "tls_server_name"}
+        {"name", "address", "transport", "port", "tls_server_name", "tls_ca_file"}
     ],
     "media": {
         "networks": None,
@@ -266,7 +267,7 @@ signaling:
   networks: []           # literal IPs or CIDRs the owner approved for signaling
   ports: []
   transports: []         # udp | tcp | tls
-targets: []              # name, address (literal IP), transport, port, tls_server_name
+targets: []              # name, address (literal IP), transport, port, tls_server_name, tls_ca_file
 media:
   networks: []           # literal IPs or CIDRs the owner approved for media
   port_range: {{start: null, end: null}}
@@ -834,6 +835,7 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
             transport = v.string(item, "transport", f"{where}.transport", "target transport", target_blocks, enum=TRANSPORTS)
             port = v.integer(item, "port", f"{where}.port", "target signaling port", target_blocks, minimum=1, maximum=65535)
             tls_name = item.get("tls_server_name")
+            tls_blocks = (PROFILE, CAMPAIGN)
             if tls_name is not None:
                 if (
                     not isinstance(tls_name, str)
@@ -841,11 +843,36 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
                     or _is_ip(tls_name)
                 ):
                     v.add("scope.malformed", "malformed", f"{where}.tls_server_name",
-                          "TLS server name must be a DNS name, not an IP address", (CAMPAIGN,))
+                          "TLS server name must be a DNS name, not an IP address", tls_blocks)
                     tls_name = None
-            if transport == "tls" and not tls_name:
+                else:
+                    try:
+                        validate_server_name(tls_name)
+                    except TrustError as exc:
+                        placeholder = "placeholder" in str(exc)
+                        v.add(
+                            "scope.placeholder_value" if placeholder else "scope.malformed",
+                            "inconsistent" if placeholder else "malformed",
+                            f"{where}.tls_server_name", str(exc), tls_blocks,
+                        )
+                        tls_name = None
+            if transport == "tls" and item.get("tls_server_name") is None:
                 v.add("scope.tls_server_name_missing", "inconsistent", f"{where}.tls_server_name",
                       "TLS target requires the server name to validate", (CAMPAIGN,))
+            tls_ca = item.get("tls_ca_file")
+            if tls_ca is not None:
+                if transport is not None and transport != "tls":
+                    v.add("scope.tls_ca_without_tls", "inconsistent", f"{where}.tls_ca_file",
+                          "a TLS CA file is only valid for a tls target", tls_blocks)
+                    tls_ca = None
+                else:
+                    try:
+                        read_ca(validate_ca_reference(tls_ca))
+                    except TrustError as exc:
+                        v.add("scope.tls_ca_unreadable", "malformed", f"{where}.tls_ca_file",
+                              f"{exc} (spell it work/ENGAGEMENT/FILE.crt; omit it for a public CA)",
+                              tls_blocks)
+                        tls_ca = None
             if address is not None and _is_placeholder(str(address)):
                 v.add("scope.placeholder_value", "inconsistent", f"{where}.address",
                       "documentation or placeholder address; the campaign planner rejects it", target_blocks)
@@ -868,6 +895,7 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
                         "transport": transport,
                         "port": port,
                         "tls_server_name": tls_name,
+                        "tls_ca_file": tls_ca,
                     }
                 )
         addresses = [t["address"] for t in targets]
@@ -1073,6 +1101,7 @@ def normalized_targets(document: dict[str, Any]) -> list[dict[str, Any]]:
                 "transport": item["transport"],
                 "port": item["port"],
                 "tls_server_name": item.get("tls_server_name"),
+                "tls_ca_file": item.get("tls_ca_file"),
             }
         )
     return result

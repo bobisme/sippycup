@@ -72,7 +72,9 @@ No name entries are added on either side. Every client addresses the target
 by its literal address, and nothing in the toolbox resolves its own fixed
 hostname any more (sipsak did; it was replaced by the in-tree OPTIONS
 client). To verify the certificate's DNS name, pass it as a TLS server name
-(`--tls-server-name sippycup-practice`) instead of resolving it.
+(`--tls-server-name sippycup-practice`) instead of resolving it. The TLS
+profile and campaign do exactly that: they connect to the literal address
+and verify `sippycup-practice` against `work/practice/ca.crt`.
 
 Safety rules:
 
@@ -126,7 +128,9 @@ All files are under the ignored `work/practice/` directory (mode 0700):
 | `account.password` | The throwaway password, mode 0600 |
 | `ca.crt`, `server.crt` | The CA to verify against, and the server certificate |
 | `target-profile.yaml` | Approved profile for the practice address, approval id `LOCAL-PRACTICE-ONLY`, valid for four hours from `up` |
+| `target-profile-tls.yaml` | The same approval for TLS on port 5061: literal address `127.0.0.2`, `tls_server_name: sippycup-practice`, `tls_ca_file: work/practice/ca.crt` |
 | `campaign.yaml` | Baseline campaign: one OPTIONS case on UDP and one on TCP |
+| `campaign-tls.yaml` | TLS campaign: one OPTIONS case and one authenticated softphone call to `echo`, verified as `sippycup-practice` against `work/practice/ca.crt` |
 | `expectations.yaml` | Packet-oracle expectations for the echo call |
 | `uac.cfg`, `uac-tls.cfg`, `uac-srtp.cfg` | PJSUA configurations (UDP, TLS with server verification, SDES-SRTP), mode 0600 |
 | `phrase.wav` | The caller-to-callee canary, decoded, for PJSUA to play |
@@ -226,7 +230,29 @@ Run each step from the repository root. Use two terminals for the capture.
 8. Try the negative cases from `CALL-CHECKLIST.md`: `sip:busy@127.0.0.2`,
    `sip:decline@127.0.0.2`, an unknown destination, and one wrong password.
 
-9. Tear down:
+9. TLS with the reviewed server name, still only to the literal address.
+   The guided call verifies `sippycup-practice` against the practice CA:
+
+   ```sh
+   ./bin/sippycup rehearse work/practice/target-profile-tls.yaml
+   ./bin/sippycup --practice call work/practice/target-profile-tls.yaml \
+     --dial echo --username practice \
+     --secret-file work/practice/account.password
+   ./bin/sippycup campaign plan work/practice/campaign-tls.yaml \
+     --output work/practice/plan-tls.json
+   ./bin/sippycup --practice campaign run work/practice/plan-tls.json \
+     --manifest work/practice/campaign-tls.yaml \
+     --run-root work/practice/runs-tls --interface lo \
+     --secret-env practice-password=PRACTICE_PASSWORD
+   ```
+
+   `campaign run` reads the password from the environment variable named by
+   `--secret-env` (here `PRACTICE_PASSWORD`; set it from
+   `work/practice/account.password` without echoing it). Plan the TLS
+   campaign again after every `up`: each `up` makes a new CA,
+   and execution refuses a plan whose frozen CA digest no longer matches.
+
+10. Tear down:
 
    ```sh
    ./bin/sippycup practice-target down
@@ -270,6 +296,29 @@ already up and removes only what it started. With no sudo, it:
 - places a TLS-signaled call to `tone` with server verification against the
   generated CA, requires a non-silent recording, and requires a TLS attempt
   that trusts only the system CAs to fail;
+- requires `rehearse` and `one-call` to be ready for
+  `work/practice/target-profile-tls.yaml` with server name
+  `sippycup-practice`, the practice CA, and connections only to the literal
+  address, and requires that the name does not resolve on the practice route;
+- runs `./bin/sippycup --practice call work/practice/target-profile-tls.yaml
+  --dial echo --username practice --secret-file work/practice/account.password`
+  under a capture of all loopback traffic and requires `pass` with
+  `tls.verified`, registration, and RTP decoded in both directions; from the
+  capture it requires zero DNS packets (port 53), only `127.0.0.1` and the
+  practice address, every ClientHello carrying SNI `sippycup-practice`, and
+  TLS 1.2;
+- requires a guided call with a wrong server name, and one that trusts only
+  the system store, to exit non-zero with no client application data on the
+  wire, and drives the softphone driver itself into both failures
+  (`tls_verification_failed`, no SIP request), with a positive control that
+  reaches the `401` challenge;
+- plans `work/practice/campaign-tls.yaml` (options case plus an authenticated
+  softphone call that dials `echo`), requires the name and CA SHA-256 in every
+  step, runs it with `./bin/sippycup --practice campaign run ... --secret-env
+  practice-password=VARIABLE`, and requires success with TLS verified in the
+  preflight and the call, and no password in the evidence;
+- plans a copy of that manifest whose CA file is a copy, modifies the copy,
+  and requires execution to refuse with nothing captured;
 - places an SDES-SRTP echo call and requires `RTP/SAVP` with `a=crypto` in
   the offer and answer and a non-silent recording.
 
@@ -285,10 +334,12 @@ sets `SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1` so a missing image fails it.
   refuses authenticated steps (SIPp would expose the password in argv), and
   the target challenges every unauthenticated INVITE, so an unauthenticated
   `call` case could only fail. The authenticated call uses PJSUA.
-- The campaign has no TLS case. Its TLS preflight validates against the
-  container's system trust store, which does not contain the practice CA,
-  and profiles and plans cannot carry a TLS server name or CA yet. The
-  launcher preflight (`--tls-ca`, `--tls-server-name`) and PJSUA cover TLS.
+- Every `up` generates a new CA, so plan `campaign-tls.yaml` again after
+  each `up`; an old plan is refused because the CA digest changed.
+- The no-DNS proof is a capture of the practice namespace's only interface
+  (loopback). The namespace has no route elsewhere, so a query to any other
+  resolver could not leave it either; the gate also requires the name not to
+  resolve outside PJSUA's pinned namespace.
 - Only IPv4 loopback is supported. IPv6, NAT behavior, DTLS-SRTP, WebRTC,
   video, DTMF verification, hold, and transfer are not exercised.
 - The target answers one realistic shape of SIP edge (Asterisk with

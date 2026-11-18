@@ -274,7 +274,7 @@ def _classify_os_error(error: OSError) -> tuple[str, str]:
 
 
 def _tls_context(
-    *, ca_file: str | None, insecure: bool
+    *, ca_file: str | None, insecure: bool, ca_data: bytes | None = None
 ) -> ssl.SSLContext:
     if insecure:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -287,6 +287,13 @@ def _tls_context(
             context.load_verify_locations(cafile=ca_file)
         except (OSError, ssl.SSLError) as error:
             raise OptionsUsageError(f"cannot load TLS CA file {ca_file!r}: {error}") from error
+    if ca_data is not None:
+        # Already digest-checked bytes: loading them from memory closes the
+        # window between checking a reviewed CA file and reading it again.
+        try:
+            context.load_verify_locations(cadata=ca_data.decode("ascii"))
+        except (UnicodeDecodeError, ssl.SSLError) as error:
+            raise OptionsUsageError(f"cannot load TLS CA data: {error}") from error
     return context
 
 
@@ -301,6 +308,7 @@ def send_options(
     tls_ca_file: str | None = None,
     insecure: bool = False,
     request_host: str | None = None,
+    tls_ca_data: bytes | None = None,
 ) -> OptionsResult:
     """Send one OPTIONS transaction to a literal address; never raises on I/O.
 
@@ -319,12 +327,18 @@ def send_options(
         )
     if max_requests not in (1, 2):
         raise OptionsUsageError("max_requests must be 1 or 2")
-    if transport != "tls" and (tls_server_name or tls_ca_file or insecure):
+    if transport != "tls" and (tls_server_name or tls_ca_file or insecure or tls_ca_data):
         raise OptionsUsageError("TLS options require the tls transport")
-    if insecure and tls_ca_file:
+    if insecure and (tls_ca_file or tls_ca_data):
         raise OptionsUsageError("--insecure and a TLS CA file are mutually exclusive")
+    if tls_ca_file and tls_ca_data:
+        raise OptionsUsageError("give a TLS CA file or CA data, not both")
     literal, family = _literal(address)
-    context = _tls_context(ca_file=tls_ca_file, insecure=insecure) if transport == "tls" else None
+    context = (
+        _tls_context(ca_file=tls_ca_file, insecure=insecure, ca_data=tls_ca_data)
+        if transport == "tls"
+        else None
+    )
 
     result = OptionsResult(address=literal, port=port, transport=transport, outcome=NO_RESPONSE)
     if transport == "tls":

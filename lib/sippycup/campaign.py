@@ -87,6 +87,42 @@ class ManifestError(ValueError):
     """An authorization or schema error suitable for command-line display."""
 
 
+def system_trust_reader(reference: str) -> str:
+    """SHA-256 of a reviewed ``work/...`` CA file; never opens a socket."""
+    from sippycup.tls_trust import TrustError, read_ca
+
+    try:
+        return read_ca(reference)[1]
+    except TrustError as error:
+        raise ManifestError(str(error)) from error
+
+
+def _tls(signaling: dict[str, Any], transport: str, field: str,
+         trust_reader: Callable[[str], str]) -> dict[str, Any] | None:
+    """The reviewed TLS server name and trust anchor of one target, if any."""
+    from sippycup.tls_trust import TrustError, validate_ca_reference, validate_server_name
+
+    if "tlsServerName" not in signaling and "tlsCaFile" not in signaling:
+        return None
+    if transport != "tls":
+        raise ManifestError(
+            f"{field}.tlsServerName and {field}.tlsCaFile are only valid with transport tls"
+        )
+    tls: dict[str, Any] = {"serverName": None, "caFile": None, "caSha256": None}
+    try:
+        if "tlsServerName" in signaling:
+            tls["serverName"] = validate_server_name(signaling["tlsServerName"])
+        if "tlsCaFile" in signaling:
+            tls["caFile"] = validate_ca_reference(signaling["tlsCaFile"])
+    except TrustError as error:
+        raise ManifestError(f"{field}: {error}") from error
+    if tls["caFile"] is not None:
+        # The trust anchor is security-relevant input: its digest is frozen so
+        # execution refuses a CA file that changed after review.
+        tls["caSha256"] = trust_reader(tls["caFile"])
+    return tls
+
+
 def _mapping(value: Any, field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ManifestError(f"{field} must be a mapping")
@@ -744,8 +780,13 @@ def compile_plan(
     *,
     resolver: Callable[[str], list[str]] = system_resolver,
     reductions: dict[str, int | None] | None = None,
+    trust_reader: Callable[[str], str] = system_trust_reader,
 ) -> dict[str, Any]:
-    """Validate and resolve a manifest, returning a deterministic frozen plan."""
+    """Validate and resolve a manifest, returning a deterministic frozen plan.
+
+    ``trust_reader`` maps a reviewed ``work/...`` CA file to its SHA-256; it
+    is called only for a target that declares ``signaling.tlsCaFile``.
+    """
     _keys(manifest, "manifest", {"apiVersion", "kind", "metadata", "authorization", "targets", "cases", "expectations", "evidence", "matrix"})
     if manifest.get("apiVersion") != API_VERSION:
         raise ManifestError(f"apiVersion must be {API_VERSION!r}")
@@ -891,7 +932,11 @@ def compile_plan(
                 )
 
         signaling = _mapping(target.get("signaling"), f"targets[{index}].signaling")
-        _keys(signaling, f"targets[{index}].signaling", {"transport", "port"})
+        _keys(
+            signaling,
+            f"targets[{index}].signaling",
+            {"transport", "port", "tlsServerName", "tlsCaFile"},
+        )
         transport = _string(
             signaling.get("transport"), f"targets[{index}].signaling.transport"
         )
@@ -919,6 +964,22 @@ def compile_plan(
                     f"targets[{index}].account requires the target's credentialRef "
                     "(the password is supplied at run time, never in the manifest)"
                 )
+        tls = _tls(signaling, transport, f"targets[{index}].signaling", trust_reader)
+        if tls is not None:
+            trust = (
+                f"CA file {tls['caFile']} (sha256 {tls['caSha256']})"
+                if tls["caFile"] is not None
+                else "the system trust store"
+            )
+            name = (
+                f"server name {tls['serverName']}"
+                if tls["serverName"] is not None
+                else "the IP address SAN"
+            )
+            assumptions.append(
+                f"TLS to {target_name} verifies {name} against {trust}; connections "
+                f"go only to {', '.join(answers)} and the name is never resolved"
+            )
         targets[target_name] = {
             "host": host,
             "addresses": answers,
@@ -926,6 +987,7 @@ def compile_plan(
             "port": port,
             "credentialRef": credential,
             "account": account,
+            "tls": tls,
         }
         for address in answers:
             destinations.append(
@@ -1076,6 +1138,8 @@ def compile_plan(
                 step["dial"] = dict(dial)
             if case_type == "call" and targets[target_name]["account"] is not None:
                 step["account"] = dict(targets[target_name]["account"])
+            if targets[target_name]["tls"] is not None:
+                step["tls"] = dict(targets[target_name]["tls"])
             steps.append(step)
 
     for key, value in totals.items():
@@ -1186,6 +1250,22 @@ def verify_frozen_plan(plan: dict[str, Any], manifest_bytes: bytes) -> None:
             raise ManifestError(f"frozen plan has no DNS pin for {host!r}")
         return answers
 
+    # Like DNS, a trust anchor's digest is frozen at plan time; recompilation
+    # uses the frozen digest, and execution separately refuses a CA file whose
+    # bytes no longer match it.
+    frozen_digests: dict[str, str] = {}
+    for step in plan.get("steps") or []:
+        tls = step.get("tls") if isinstance(step, dict) else None
+        if isinstance(tls, dict) and isinstance(tls.get("caFile"), str):
+            if frozen_digests.setdefault(tls["caFile"], tls.get("caSha256")) != tls.get("caSha256"):
+                raise ManifestError(f"frozen plan has conflicting digests for {tls['caFile']}")
+
+    def trust_reader(reference: str) -> str:
+        frozen = frozen_digests.get(reference)
+        if not isinstance(frozen, str):
+            raise ManifestError(f"frozen plan has no trust-anchor digest for {reference!r}")
+        return frozen
+
     try:
         maxima = plan["authorization"]["hardMaxima"]
     except (KeyError, TypeError) as error:
@@ -1195,6 +1275,7 @@ def verify_frozen_plan(plan: dict[str, Any], manifest_bytes: bytes) -> None:
         digest,
         resolver=resolver,
         reductions={key: maxima.get(key) for key in CEILING_KEYS},
+        trust_reader=trust_reader,
     )
     if json.dumps(expected, sort_keys=True, separators=(",", ":")) != json.dumps(
         plan, sort_keys=True, separators=(",", ":")
