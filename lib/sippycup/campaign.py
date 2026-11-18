@@ -881,7 +881,10 @@ def compile_plan(
     _keys(
         stops,
         "authorization.stopConditions",
-        {"consecutiveFailures", "unexpectedResponse", "packetLossPercent"},
+        {
+            "consecutiveFailures", "unexpectedResponse", "packetLossPercent",
+            "preflightServerError",
+        },
     )
     stop_conditions = {
         "consecutiveFailures": _uint(
@@ -895,6 +898,12 @@ def compile_plan(
     loss = stop_conditions["packetLossPercent"]
     if isinstance(loss, bool) or not isinstance(loss, (int, float)) or not 0 <= loss <= 100:
         raise ManifestError("stopConditions.packetLossPercent must be between 0 and 100")
+    if "preflightServerError" in stops:
+        # Optional and frozen only when the manifest states it, so plans (and
+        # their digests) for manifests that omit it stay byte-identical.
+        if not isinstance(stops["preflightServerError"], bool):
+            raise ManifestError("stopConditions.preflightServerError must be a boolean")
+        stop_conditions["preflightServerError"] = stops["preflightServerError"]
 
     targets: dict[str, dict[str, Any]] = {}
     destinations: list[dict[str, Any]] = []

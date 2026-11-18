@@ -32,7 +32,13 @@ class _FinishExecution(Exception):
 
 
 class CaptureWatchdog:
-    """Continuously enforce traffic ceilings from an immediate-mode PCAP."""
+    """Continuously enforce traffic ceilings from an immediate-mode PCAP.
+
+    Calls are counted by cleartext ``INVITE``, so TLS calls are invisible here.
+    ``ceilings.calls`` holds for them through the plan-time bound in
+    ``runtime._validate_plan`` (one call per call step, summed against
+    ``hardMaxima.calls``); see docs/CAMPAIGN-MANIFEST.md.
+    """
 
     def __init__(self, capture: Path, maxima: Mapping[str, int]) -> None:
         self.capture = capture
@@ -812,6 +818,17 @@ def execute_campaign(
                     "reports an error",
                     file=os.sys.stderr,
                 )
+            if (
+                plan["authorization"]["stopConditions"].get("preflightServerError") is True
+                and ok
+                and status_class in {"5xx", "6xx"}
+            ):
+                # Strict preflight, opted into by the reviewed manifest: a
+                # server-error answer fails the campaign before any further
+                # preflight or step is sent.
+                _write_json(run_dir / "preflight.json", preflight_results)
+                result = RunResult(1, "preflight_failed", 0)
+                raise _FinishExecution
             if cancel_signal is not None:
                 _write_json(run_dir / "preflight.json", preflight_results)
                 code = 130 if cancel_signal == signal.SIGINT else 143

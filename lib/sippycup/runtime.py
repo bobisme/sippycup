@@ -823,8 +823,11 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     _exact_keys(
         stops,
         "authorization.stopConditions",
-        {"consecutiveFailures", "unexpectedResponse", "packetLossPercent"},
+        {"consecutiveFailures", "unexpectedResponse", "packetLossPercent"}
+        | ({"preflightServerError"} if "preflightServerError" in stops else set()),
     )
+    if "preflightServerError" in stops and not isinstance(stops["preflightServerError"], bool):
+        raise RuntimeError("stopConditions.preflightServerError must be boolean")
     if not _is_uint(stops["consecutiveFailures"], positive=True):
         raise RuntimeError("stopConditions.consecutiveFailures must be positive")
     if not isinstance(stops["unexpectedResponse"], bool):

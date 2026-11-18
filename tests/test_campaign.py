@@ -40,6 +40,32 @@ class CampaignPlanTests(unittest.TestCase):
             reductions=reductions,
         )
 
+    def test_preflight_server_error_is_optional_frozen_and_byte_stable(self):
+        from sippycup.runtime import RuntimeError as PlanError, validate_plan
+
+        manifest, _ = fixture()
+        omitted = self.compile(copy.deepcopy(manifest))
+        self.assertNotIn("preflightServerError", omitted["authorization"]["stopConditions"])
+        strict_manifest = copy.deepcopy(manifest)
+        strict_manifest["authorization"]["stopConditions"]["preflightServerError"] = True
+        strict = self.compile(strict_manifest)
+        self.assertIs(strict["authorization"]["stopConditions"]["preflightServerError"], True)
+        validate_plan(copy.deepcopy(strict))
+        validate_plan(copy.deepcopy(omitted))
+        # Everything but the new field is identical, so omitting it changes nothing.
+        stripped = copy.deepcopy(strict)
+        del stripped["authorization"]["stopConditions"]["preflightServerError"]
+        self.assertEqual(stripped, omitted)
+        for bad in ("yes", 1, None):
+            invalid = copy.deepcopy(manifest)
+            invalid["authorization"]["stopConditions"]["preflightServerError"] = bad
+            with self.assertRaises(ManifestError):
+                self.compile(invalid)
+            tampered = copy.deepcopy(strict)
+            tampered["authorization"]["stopConditions"]["preflightServerError"] = bad
+            with self.assertRaises(PlanError):
+                validate_plan(tampered)
+
     def test_valid_plan_is_complete_and_deterministic(self):
         manifest, _ = fixture()
         first = self.compile(copy.deepcopy(manifest))

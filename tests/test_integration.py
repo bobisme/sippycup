@@ -205,6 +205,34 @@ class IntegrationTests(unittest.TestCase):
                 stderr.seek(0)
                 self.assertEqual("preflight warning" in stderr.read(), warning is not None)
 
+    def test_strict_preflight_fails_the_campaign_on_5xx_and_6xx_only_when_opted_in(self):
+        def strict_plan():
+            manifest = yaml.safe_load((FIXTURES / "valid.yaml").read_bytes())
+            manifest["targets"][0]["address"] = "127.0.0.1"
+            manifest["authorization"]["networks"] = ["127.0.0.0/8"]
+            manifest["authorization"]["stopConditions"]["preflightServerError"] = True
+            manifest["targets"][0].pop("credentialRef")
+            manifest["authorization"]["credentialRefs"] = []
+            raw = yaml.safe_dump(manifest, sort_keys=True).encode()
+            return compile_plan(manifest, hashlib.sha256(raw).hexdigest()), raw
+
+        for detail in ("SIP/2.0 503 Service Unavailable", "SIP/2.0 603 Decline"):
+            with self.subTest(detail=detail):
+                result, run_dir, order = self.execute(
+                    strict_plan(), preflight=lambda _d, d=detail: (True, d)
+                )
+                self.assertEqual(result.state, "preflight_failed")
+                self.assertEqual(order.read_text().splitlines(), ["capture-start", "capture-stop"])
+                self.assertFalse((run_dir / "events.jsonl").exists())
+                (entry,) = json.loads((run_dir / "preflight.json").read_text())
+                self.assertEqual(entry["warning"], "server_error_response")
+        for detail in ("SIP/2.0 200 OK", "SIP/2.0 404 Not Found"):
+            with self.subTest(detail=detail):
+                result, _run_dir, _order = self.execute(
+                    strict_plan(), preflight=lambda _d, d=detail: (True, d)
+                )
+                self.assertEqual(result.state, "succeeded")
+
     def test_failed_preflight_sends_no_call_and_still_tears_down_capture(self):
         result, run_dir, order = self.execute(
             one_call_plan(),
