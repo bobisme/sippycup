@@ -241,6 +241,10 @@ class PendingScopeTests(PlatformCase):
             end = flat.index("Why we ask:", start)
             self.assertIn(f"({state})", flat[start:end], identifier)
         self.assertNotIn("(not-applicable)", part)
+        import re
+
+        whole = re.findall(r"\[(?:x| |\?|n/a)\] \((?:answered|unanswered|pending|unknown)\)$", part, re.M)
+        self.assertEqual(len(APP_QUESTIONS), len(whole), "a state tag is never split across two lines")
         report = inspect(self.root / "scope.yaml", now=NOW)
         self.assertTrue(report.ok, [item.as_dict() for item in report.errors])
 

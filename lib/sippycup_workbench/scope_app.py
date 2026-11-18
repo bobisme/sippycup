@@ -1158,7 +1158,7 @@ def status_summary(report: Any) -> tuple[dict[str, Any] | None, list[str]]:
 _TAGS = {ANSWERED: "[x]", UNANSWERED: "[ ]", PENDING: "[?]", UNKNOWN: "[?]", NOT_APPLICABLE: "[n/a]"}
 
 
-def _wrap(prefix: str, text: str, width: int = 100) -> list[str]:
+def _wrap(prefix: str, text: str, width: int = 100, tail: str = "") -> list[str]:
     lines: list[str] = []
     current = prefix
     indent = " " * len(prefix)
@@ -1168,6 +1168,12 @@ def _wrap(prefix: str, text: str, width: int = 100) -> list[str]:
             current = indent
         current += word + " "
     lines.append(current.rstrip())
+    if tail:
+        # the state tag is never split across lines
+        if len(lines[-1]) + 1 + len(tail) <= width:
+            lines[-1] += " " + tail
+        else:
+            lines.append(indent + tail)
     return lines
 
 
@@ -1201,8 +1207,8 @@ def render_part(report: Any = None) -> list[str]:
         tag = ""
         if document is not None:
             state = app_question_state(document, question, report)
-            tag = f" {_TAGS[state]} ({state})"
-        lines += _wrap(f"{question.identifier}. ", question.text + tag)
+            tag = f"{_TAGS[state]} ({state})"
+        lines += _wrap(f"{question.identifier}. ", question.text, tail=tag)
         lines += _wrap("   Why we ask: ", question.why)
         lines.append("")
     if document is not None:
