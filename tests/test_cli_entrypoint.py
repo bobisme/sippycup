@@ -531,7 +531,9 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 self.assertIn("--interactive", arguments)
                 self.assertNotIn("-it", arguments)
 
-    def test_fixed_hostname_resolves_only_where_the_runtime_omits_it(self) -> None:
+    def test_no_route_adds_name_entries_for_the_fixed_hostname(self) -> None:
+        # sipsak was the only tool that resolved its own hostname before it
+        # sent; with the in-tree OPTIONS client no route needs a hosts entry.
         with tempfile.TemporaryDirectory() as root_name:
             runtime = self.make_runtime(Path(root_name))
             env = {"SIPPYCUP_RUNTIME": str(runtime)}
@@ -541,11 +543,10 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         host_arguments = host_network.stdout.splitlines()
         self.assertIn("--network=host", host_arguments)
         self.assertIn("--hostname=sippycup", host_arguments)
-        self.assertIn("--add-host=sippycup:127.0.0.1", host_arguments)
-        for result in (isolated, offline):
-            self.assertNotIn(
-                "--add-host=sippycup:127.0.0.1", result.stdout.splitlines()
-            )
+        for result in (host_network, isolated, offline):
+            arguments = result.stdout.splitlines()
+            self.assertFalse([item for item in arguments if item.startswith("--add-host")])
+            self.assertFalse([item for item in arguments if item.endswith(":/etc/hosts:ro")])
 
     def make_practice_runtime(self, root: Path, inspect: str | None) -> tuple[Path, Path]:
         """A fake runtime that answers `container inspect` like a practice target."""
@@ -571,7 +572,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
     def test_practice_joins_the_running_target_namespace(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
             runtime, hosts = self.make_practice_runtime(
-                Path(root_name), "true|practice|none|HOSTS"
+                Path(root_name), "true|practice|none"
             )
             env = {
                 "SIPPYCUP_RUNTIME": str(runtime),
@@ -583,7 +584,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             arguments = result.stdout.splitlines()
             self.assertIn("--network=container:ws-test-practice", arguments)
-            self.assertIn(f"--volume={hosts}:/etc/hosts:ro", arguments)
+            self.assertFalse([item for item in arguments if "/etc/hosts" in item])
             self.assertIn("--cap-add=NET_RAW", arguments)
             self.assertIn("--interactive", arguments)
             self.assertNotIn("--network=host", arguments)
@@ -594,7 +595,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
     def test_practice_routes_packaged_commands_and_translates_work_paths(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
             runtime, _ = self.make_practice_runtime(
-                Path(root_name), "true|practice|none|HOSTS"
+                Path(root_name), "true|practice|none"
             )
             env = {
                 "SIPPYCUP_RUNTIME": str(runtime),
@@ -626,11 +627,10 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
     def test_practice_fails_closed_unless_a_loopback_only_target_is_up(self) -> None:
         cases = {
             "absent": None,
-            "stopped": "false|practice|none|HOSTS",
-            "unlabelled": "true||none|HOSTS",
-            "host-network": "true|practice|host|HOSTS",
-            "bridge-network": "true|practice|bridge|HOSTS",
-            "missing-hosts": "true|practice|none|/definitely/missing/hosts",
+            "stopped": "false|practice|none",
+            "unlabelled": "true||none",
+            "host-network": "true|practice|host",
+            "bridge-network": "true|practice|bridge",
         }
         for name, inspect in cases.items():
             with self.subTest(case=name):
@@ -651,7 +651,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
     def test_practice_rejects_conflicting_options_and_fixed_sandboxes(self) -> None:
         with tempfile.TemporaryDirectory() as root_name:
             runtime, _ = self.make_practice_runtime(
-                Path(root_name), "true|practice|none|HOSTS"
+                Path(root_name), "true|practice|none"
             )
             env = {"SIPPYCUP_RUNTIME": str(runtime)}
             root = Path(root_name)

@@ -84,7 +84,15 @@ class OptionsPreflightTests(unittest.TestCase):
                 reply_port = int(sent_by.rsplit(":", 1)[1])
             else:
                 reply_port = 5060
-            server.sendto(b"SIP/2.0 200 OK\r\n\r\n", (source[0], reply_port))
+            # A response must echo the transaction identifiers; the client
+            # ignores bytes that do not belong to its own transaction.
+            echoed = [
+                line
+                for line in text.split("\r\n")
+                if line.split(":", 1)[0] in {"Via", "From", "To", "Call-ID", "CSeq"}
+            ]
+            reply = "SIP/2.0 200 OK\r\n" + "\r\n".join(echoed) + "\r\nContent-Length: 0\r\n\r\n"
+            server.sendto(reply.encode(), (source[0], reply_port))
 
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()
@@ -163,6 +171,29 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn("capture parsed", (run_dir / "report.txt").read_text())
         self.assertEqual(run_dir.stat().st_uid, os.getuid())
         self.assertEqual(run_dir.stat().st_mode & 0o777, 0o700)
+
+    def test_preflight_records_status_class_and_surfaces_server_errors(self):
+        for detail, klass, warning in (
+            ("SIP/2.0 200 OK", "2xx", None),
+            ("SIP/2.0 404 Not Found", "4xx", None),
+            ("SIP/2.0 503 Service Unavailable", "5xx", "server_error_response"),
+            ("SIP/2.0 603 Decline", "6xx", "server_error_response"),
+        ):
+            with self.subTest(detail=detail):
+                stderr = tempfile.TemporaryFile(mode="w+")
+                self.addCleanup(stderr.close)
+                with mock.patch.object(sys, "stderr", stderr):
+                    result, run_dir, _order = self.execute(
+                        one_call_plan(), preflight=lambda _d, d=detail: (True, d)
+                    )
+                # Reachability is the contract: the run proceeds either way.
+                self.assertEqual(result.state, "succeeded")
+                (entry,) = json.loads((run_dir / "preflight.json").read_text())
+                self.assertEqual(entry["statusClass"], klass)
+                self.assertEqual(entry["statusCode"], int(detail.split()[1]))
+                self.assertEqual(entry["warning"], warning)
+                stderr.seek(0)
+                self.assertEqual("preflight warning" in stderr.read(), warning is not None)
 
     def test_failed_preflight_sends_no_call_and_still_tears_down_capture(self):
         result, run_dir, order = self.execute(

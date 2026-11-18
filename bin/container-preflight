@@ -3,31 +3,80 @@ set -uo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: sippycup-preflight HOST [PORT] [udp|tcp|tls]
+Usage: sippycup-preflight HOST [PORT] [udp|tcp|tls] [OPTIONS]
 
 Performs DNS resolution, a transport reachability check, and one SIP OPTIONS
-transaction. It does not enumerate users, attempt authentication, or generate
-load.
+transaction (the in-image sippycup-options client). It does not enumerate
+users, attempt authentication, or generate load. UDP sends at most two
+datagrams (one retransmission).
 
 Options:
-  --dry-run  Validate and print the bounded plan without resolution or traffic.
-  -h, --help Show this help without network activity.
+  --tls-server-name NAME  Verify the certificate for NAME and send it as SNI.
+                          Packets still go only to HOST.
+  --tls-ca PATH           Also trust this PEM CA file (a path under /work,
+                          e.g. /work/practice/ca.crt).
+  --tls-unverified        Do not verify the certificate. The result is
+                          reported as UNVERIFIED. Never the default.
+  --expect-status N       Require this final status (default: any 2xx).
+  --expect-class C        Require a class: 2xx, 3xx, 4xx, 5xx, 6xx, or any.
+  --dry-run               Validate and print the bounded plan without
+                          resolution or traffic.
+  -h, --help              Show this help without network activity.
+
+TLS verifies by default against --tls-server-name or else HOST. The first
+failing stage decides the exit code:
+  0 OPTIONS met the expectation      1 a response did not meet it
+  2 usage error                      3 no response or TCP connect timeout
+  4 resolution failed, refused, or unreachable
+  5 TLS handshake or certificate verification failed
+The openssl certificate summary is informational and never decides it.
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    usage
-    exit 0
-fi
+for argument in "$@"; do
+    if [[ "${argument}" == "-h" || "${argument}" == "--help" ]]; then
+        usage
+        exit 0
+    fi
+done
+
+usage_error() {
+    printf '%s\n' "$1" >&2
+    exit 2
+}
 
 dry_run=0
+tls_server_name=""
+tls_ca=""
+tls_unverified=0
+expect_status=""
+expect_class=""
 arguments=()
-for argument in "$@"; do
-    if [[ "${argument}" == "--dry-run" ]]; then
-        dry_run=1
-    else
-        arguments+=("${argument}")
-    fi
+while (( $# > 0 )); do
+    case "$1" in
+        --dry-run) dry_run=1 ;;
+        --tls-unverified) tls_unverified=1 ;;
+        --tls-server-name|--tls-ca|--expect-status|--expect-class)
+            (( $# >= 2 )) || usage_error "Missing value for $1"
+            case "$1" in
+                --tls-server-name) tls_server_name="$2" ;;
+                --tls-ca) tls_ca="$2" ;;
+                --expect-status) expect_status="$2" ;;
+                --expect-class) expect_class="$2" ;;
+            esac
+            shift
+            ;;
+        --tls-server-name=*) tls_server_name="${1#*=}" ;;
+        --tls-ca=*) tls_ca="${1#*=}" ;;
+        --expect-status=*) expect_status="${1#*=}" ;;
+        --expect-class=*) expect_class="${1#*=}" ;;
+        --tls-ignore-cert-failure)
+            usage_error "--tls-ignore-cert-failure was removed; TLS verifies by default. Use --tls-ca, --tls-server-name, or the explicit --tls-unverified."
+            ;;
+        --*) usage_error "Unknown option: $1" ;;
+        *) arguments+=("$1") ;;
+    esac
+    shift
 done
 set -- "${arguments[@]}"
 
@@ -52,10 +101,49 @@ if [[ "${transport}" != udp && "${transport}" != tcp && "${transport}" != tls ]]
     printf 'Transport must be udp, tcp, or tls.\n' >&2
     exit 2
 fi
+if [[ "${transport}" != tls ]] \
+    && [[ -n "${tls_server_name}" || -n "${tls_ca}" || ${tls_unverified} -ne 0 ]]
+then
+    usage_error "--tls-server-name, --tls-ca, and --tls-unverified need the tls transport."
+fi
+if [[ -n "${tls_server_name}" ]] \
+    && [[ ! "${tls_server_name}" =~ ^[A-Za-z0-9]([A-Za-z0-9.:-]*[A-Za-z0-9])?$ ]]
+then
+    usage_error "Invalid --tls-server-name: ${tls_server_name}"
+fi
+if [[ -n "${tls_ca}" ]]; then
+    if [[ "${tls_ca}" != /work/* || "${tls_ca}" == *..* ]]; then
+        usage_error "--tls-ca must be a path under /work (for example /work/practice/ca.crt)."
+    fi
+    if (( tls_unverified != 0 )); then
+        usage_error "--tls-ca and --tls-unverified are mutually exclusive."
+    fi
+fi
+if [[ -n "${expect_status}" && -n "${expect_class}" ]]; then
+    usage_error "--expect-status and --expect-class are mutually exclusive."
+fi
+if [[ -n "${expect_status}" ]] \
+    && { [[ ! "${expect_status}" =~ ^[0-9]{3}$ ]] || ((expect_status < 200 || expect_status > 699)); }
+then
+    usage_error "--expect-status must be a final status from 200 to 699."
+fi
+if [[ -n "${expect_class}" && ! "${expect_class}" =~ ^([2-6]xx|any)$ ]]; then
+    usage_error "--expect-class must be 2xx, 3xx, 4xx, 5xx, 6xx, or any."
+fi
 
+verify_name="${tls_server_name:-${host}}"
 printf 'Sippycup network preflight\n'
 printf 'Target:    %s:%s\n' "${host}" "${port}"
-printf 'Transport: %s\n\n' "${transport}"
+printf 'Transport: %s\n' "${transport}"
+if [[ "${transport}" == tls ]]; then
+    if (( tls_unverified != 0 )); then
+        printf 'TLS:       UNVERIFIED (--tls-unverified)\n'
+    else
+        printf 'TLS:       verify as %s%s\n' "${verify_name}" \
+            "${tls_ca:+ with extra CA ${tls_ca}}"
+    fi
+fi
+printf '\n'
 
 if (( dry_run != 0 )); then
     printf 'Plan: resolve the exact target;'
@@ -65,52 +153,84 @@ if (( dry_run != 0 )); then
     if [[ "${transport}" == tls ]]; then
         printf ' perform one bounded TLS handshake;'
     fi
-    printf ' send one SIP OPTIONS transaction.\n'
+    printf ' send one SIP OPTIONS transaction'
+    if [[ "${transport}" == udp ]]; then
+        printf ' (at most two datagrams)'
+    fi
+    printf '.\n'
     printf 'Network activity: none\n'
     exit 0
+fi
+
+if [[ -n "${tls_ca}" && ! -f "${tls_ca}" ]]; then
+    usage_error "--tls-ca file not found: ${tls_ca}"
 fi
 
 printf '== DNS/address resolution ==\n'
 if ! getent ahosts "${host}" | sort -u; then
     printf 'Resolution failed; stopping before network traffic is sent.\n' >&2
-    exit 1
+    exit 4
 fi
 
+nc_status=0
 if [[ "${transport}" == tcp || "${transport}" == tls ]]; then
     printf '\n== TCP reachability ==\n'
     timeout 8 nc -vz "${host}" "${port}"
-    nc_status=$?
-    printf 'TCP check exit status: %s\n' "${nc_status}"
+    nc_raw=$?
+    printf 'TCP check exit status: %s\n' "${nc_raw}"
+    if (( nc_raw == 124 )); then
+        nc_status=3
+    elif (( nc_raw != 0 )); then
+        nc_status=4
+    fi
 fi
 
 if [[ "${transport}" == tls ]]; then
-    printf '\n== TLS handshake and certificate summary ==\n'
-    timeout 12 openssl s_client \
-        -connect "${host}:${port}" \
-        -servername "${host}" \
-        -brief </dev/null
-    tls_status=$?
-    printf 'TLS check exit status: %s\n' "${tls_status}"
+    printf '\n== TLS handshake and certificate summary (informational) ==\n'
+    connect="${host}"
+    if [[ "${host}" == *:* ]]; then
+        connect="[${host}]"
+    fi
+    s_client=(-connect "${connect}:${port}" -brief)
+    if [[ -n "${tls_server_name}" || ! "${host}" =~ ^[0-9.]+$|: ]]; then
+        s_client+=(-servername "${verify_name}" -verify_hostname "${verify_name}")
+    else
+        s_client+=(-verify_ip "${host}")
+    fi
+    if [[ -n "${tls_ca}" ]]; then
+        s_client+=(-CAfile "${tls_ca}")
+    fi
+    timeout 12 openssl s_client "${s_client[@]}" </dev/null
+    printf 'openssl s_client exit status: %s (informational)\n' "$?"
 fi
 
 printf '\n== Single SIP OPTIONS transaction ==\n'
-sipsak_args=(
-    --sip-uri="sip:${host}:${port}"
-    --remote-port="${port}"
-    --transport="${transport}"
-    --verbose
-)
-if [[ "${transport}" == tls ]]; then
-    sipsak_args+=(--tls-ignore-cert-failure)
+options_args=("${host}" "${port}" "${transport}" --timeout 5)
+if [[ -n "${tls_server_name}" ]]; then
+    options_args+=(--tls-server-name "${tls_server_name}")
 fi
-
-timeout 15 sipsak "${sipsak_args[@]}"
+if [[ -n "${tls_ca}" ]]; then
+    options_args+=(--tls-ca-file "${tls_ca}")
+fi
+if (( tls_unverified != 0 )); then
+    options_args+=(--insecure)
+fi
+if [[ -n "${expect_status}" ]]; then
+    options_args+=(--expect-status "${expect_status}")
+fi
+if [[ -n "${expect_class}" ]]; then
+    options_args+=(--expect-class "${expect_class}")
+fi
+timeout 15 sippycup-options "${options_args[@]}"
 sip_status=$?
+if (( sip_status == 124 )); then
+    sip_status=3
+fi
 printf 'SIP OPTIONS exit status: %s\n' "${sip_status}"
 
 # Report the first failing stage so a reachable port with a dead or failing
 # SIP service is not mistaken for a successful preflight.
-for stage_status in "${nc_status:-0}" "${tls_status:-0}" "${sip_status}"; do
+for stage_status in "${nc_status}" "${sip_status}"; do
     if (( stage_status != 0 )); then
         exit "${stage_status}"
     fi

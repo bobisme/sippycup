@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from sippycup import options
 from sippycup.campaign import ManifestError, verify_frozen_plan
 from sippycup.runtime import RunResult, RuntimeError, run_plan, validate_plan
 
@@ -423,56 +424,31 @@ def _used_destinations(plan: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def sip_options_preflight(destination: dict[str, Any]) -> tuple[bool, str]:
-    address = destination["address"]
-    port = destination["port"]
-    transport = destination["transport"]
-    family = socket.AF_INET6 if ":" in address else socket.AF_INET
-    call_id = random.token_hex(12)
-    host = f"[{address}]" if family == socket.AF_INET6 else address
-    branch = random.token_hex(8)
+def sip_options_preflight(
+    destination: dict[str, Any],
+    *,
+    tls_server_name: str | None = None,
+    tls_ca_file: str | None = None,
+) -> tuple[bool, str]:
+    """Reachability preflight: ok when any final response arrived.
 
-    def build_request(local: tuple[Any, ...]) -> bytes:
-        # A compliant server answers a UDP request at the Via sent-by port
-        # (default 5060), not the datagram's source port, unless the client
-        # names its real port and asks for RFC 3581 symmetric routing. Without
-        # both, the reply never reaches this ephemeral socket.
-        local_address, local_port = local[0], local[1]
-        sent_by = f"[{local_address}]" if ":" in local_address else local_address
-        return (
-            f"OPTIONS sip:{host}:{port} SIP/2.0\r\n"
-            f"Via: SIP/2.0/{transport.upper()} {sent_by}:{local_port}"
-            f";rport;branch=z9hG4bK{branch}\r\n"
-            "From: <sip:sippycup@localhost>;tag=preflight\r\n"
-            f"To: <sip:{host}:{port}>\r\n"
-            f"Call-ID: {call_id}@localhost\r\n"
-            "CSeq: 1 OPTIONS\r\n"
-            "Max-Forwards: 1\r\n"
-            "Content-Length: 0\r\n\r\n"
-        ).encode()
-
+    The transaction lives in ``sippycup.options``. ``detail`` is the status
+    line for a response (so ``options.status_of_detail`` recovers the class)
+    and a categorized error otherwise. TLS always verifies; the keyword
+    arguments let a reviewed TLS server name and trust anchor be passed down.
+    """
     try:
-        if transport == "udp":
-            with socket.socket(family, socket.SOCK_DGRAM) as connection:
-                connection.settimeout(2)
-                # Connecting pins the reply source to the frozen destination
-                # and reveals the local address and port for the Via header.
-                connection.connect((address, port))
-                connection.send(build_request(connection.getsockname()))
-                response = connection.recv(4096)
-        else:
-            with socket.create_connection((address, port), timeout=2) as raw:
-                connection = raw
-                request = build_request(raw.getsockname())
-                if transport == "tls":
-                    context = ssl.create_default_context()
-                    connection = context.wrap_socket(raw, server_hostname=address)
-                connection.sendall(request)
-                response = connection.recv(4096)
-    except (OSError, ssl.SSLError) as error:
-        return False, f"{type(error).__name__}: {error}"
-    first_line = response.split(b"\r\n", 1)[0].decode(errors="replace")
-    return first_line.startswith("SIP/2.0 "), first_line
+        result = options.send_options(
+            destination["address"],
+            destination["port"],
+            destination["transport"],
+            timeout=options.DEFAULT_TIMEOUT_SECONDS,
+            tls_server_name=tls_server_name,
+            tls_ca_file=tls_ca_file,
+        )
+    except options.OptionsUsageError as error:
+        return False, f"usage: {error}"
+    return result.responded, result.detail()
 
 
 def _stop_group(process: subprocess.Popen[bytes], grace: float = 2.0) -> None:
@@ -671,6 +647,7 @@ def execute_campaign(
                 result = RunResult(code, "cancelled", 0)
                 raise _FinishExecution
             ok, detail = preflight(destination)
+            status_code, status_class = options.status_of_detail(detail)
             preflight_results.append(
                 {
                     "target": destination["target"],
@@ -679,8 +656,24 @@ def execute_campaign(
                     "transport": destination["transport"],
                     "ok": ok,
                     "detail": _redact([detail], redactions)[0],
+                    "statusCode": status_code,
+                    "statusClass": status_class,
+                    # Any final response proves reachability; a server error
+                    # is recorded and surfaced, not silently treated as fine.
+                    "warning": (
+                        "server_error_response"
+                        if ok and status_class in {"5xx", "6xx"}
+                        else None
+                    ),
                 }
             )
+            if preflight_results[-1]["warning"] is not None:
+                print(
+                    f"campaign: preflight warning: {destination['target']} answered "
+                    f"{status_code} ({status_class}); reachable, but the server "
+                    "reports an error",
+                    file=os.sys.stderr,
+                )
             if cancel_signal is not None:
                 _write_json(run_dir / "preflight.json", preflight_results)
                 code = 130 if cancel_signal == signal.SIGINT else 143

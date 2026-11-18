@@ -30,12 +30,12 @@ commands=(
     scapy
     setpriv
     sipp
-    sipsak
     sipvicious_svcrack
     sipvicious_svmap
     sipvicious_svreport
     sipvicious_svwar
     sippycup-preflight
+    sippycup-options
     sippycup-assert
     sippycup-call
     sippycup-chaos
@@ -102,12 +102,19 @@ import sippycup_workbench
 print("ok       Python modules: dependencies and all first-party packages")
 PY
 
+# sipsak was replaced by the in-tree OPTIONS client (sippycup-options).
+if command -v sipsak >/dev/null 2>&1; then
+    printf 'UNEXPECTED sipsak is installed\n' >&2
+    missing=1
+fi
+
 if (( missing != 0 )); then
     exit 1
 fi
 
 first_party_help=(
     campaign
+    sippycup-options
     call-integration-selftest
     sippycup-assert
     sippycup-call

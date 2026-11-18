@@ -132,7 +132,7 @@ Do not casually add `--privileged`.
 
 | Purpose | Tools |
 |---|---|
-| SIP calls and diagnostics | SIPp 3.7.7 with PCAP, TLS, and SCTP; checksum-pinned PJSUA 2.17; sipsak; baresip |
+| SIP calls and diagnostics | SIPp 3.7.7 with PCAP, TLS, and SCTP; checksum-pinned PJSUA 2.17; baresip; `sippycup-options` (the in-tree single-transaction SIP OPTIONS client) |
 | NAT traversal diagnostics | coturn STUN/TURN clients and RFC 5769 checker; PJSUA ICE/TURN |
 | SIP security checks | SIPVicious; Nmap SIP NSE scripts |
 | Capture and inspection | Wireshark CLI (`tshark`, `dumpcap`, `capinfos`, `editcap`, `mergecap`, `reordercap`, `text2pcap`); tcpdump; sngrep; ngrep |
@@ -237,8 +237,17 @@ Run the low-impact network preflight:
 ```
 
 Remove `--dry-run` only after reviewing the target. Live preflight resolves the
-address, checks the selected transport, and sends one SIP OPTIONS transaction.
-It does not enumerate users, try credentials, or generate load.
+address, checks the selected transport, and sends one SIP OPTIONS transaction
+with the in-image `sippycup-options` client (over UDP at most two datagrams:
+the request and one retransmission). It does not enumerate users, try
+credentials, or generate load. It passes only on a 2xx unless you pass
+`--expect-status N` or `--expect-class 4xx` (or `any`). TLS verifies the
+certificate by default; use `--tls-ca /work/PATH` to add a trust anchor,
+`--tls-server-name NAME` to verify a DNS name while still connecting to the
+literal address, and only as an explicit choice `--tls-unverified`, which is
+always reported as UNVERIFIED. Exit codes: 0 pass, 1 a response that missed
+the expectation, 2 usage, 3 no response, 4 refused/unreachable/unresolvable,
+5 TLS failure. See `docs/CLI.md`.
 
 Generate an offline report:
 
@@ -384,7 +393,8 @@ Execution captures packets itself, so it needs `NET_RAW`. Under rootless
 Podman only `--isolated` provides that; keep the manifest, plan, and run root
 under `work/`, which the launcher maps to the container's `/work`. Without
 `--isolated` the command runs directly on the host and requires host SIPp,
-sipsak, tcpdump, and capture privileges.
+tcpdump, and capture privileges. OPTIONS steps and the preflight use the
+in-tree Python client, so no separate OPTIONS tool is needed.
 
 Execution is preflight-gated, deadline-bound, signal-safe, and records
 structured events without placing credential values in argv. See
@@ -462,7 +472,7 @@ command.
 Check SIP responsiveness and advertised methods:
 
 ```sh
-./bin/sippycup -- sipsak -vv -s "sip:${TARGET}"
+./bin/sippycup preflight "${TARGET}" 5060 udp --expect-class any
 ./bin/sippycup -- nmap -sU -p 5060 --script sip-methods "${TARGET}"
 ./bin/sippycup -- sipvicious_svmap "${TARGET}"
 ```

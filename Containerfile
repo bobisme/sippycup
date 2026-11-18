@@ -148,7 +148,6 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
         python3 \
         python3-pip \
         python3-venv \
-        sipsak \
         sngrep \
         socat \
         sox \
@@ -186,6 +185,7 @@ COPY bin/campaign-integration-selftest /usr/local/bin/campaign-integration-selft
 COPY bin/call-integration-selftest /usr/local/bin/call-integration-selftest
 COPY bin/sippycup-call /usr/local/bin/sippycup-call
 COPY bin/container-preflight /usr/local/bin/sippycup-preflight
+COPY bin/container-options /usr/local/bin/sippycup-options
 COPY bin/container-report /usr/local/bin/sippycup-report
 COPY bin/selftest /usr/local/bin/sippycup-selftest
 COPY bin/sippycup-assert /usr/local/bin/sippycup-assert
@@ -239,6 +239,7 @@ RUN chmod 0755 \
         /usr/local/bin/sippycup-call \
         /usr/local/bin/sipp \
         /usr/local/bin/sippycup-preflight \
+        /usr/local/bin/sippycup-options \
         /usr/local/bin/sippycup-report \
         /usr/local/bin/sippycup-selftest \
         /usr/local/bin/sippycup-assert \

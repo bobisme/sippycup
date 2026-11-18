@@ -66,6 +66,53 @@ An activity label describes what a command *can* do; it is never target
 authorization. `offline` help or planning does not make a later execution
 authorized.
 
+## Preflight
+
+`preflight HOST [PORT] [udp|tcp|tls]` resolves HOST, checks TCP reachability
+for TCP and TLS, prints an informational `openssl s_client` certificate
+summary for TLS, and sends one SIP OPTIONS transaction with the in-image
+`sippycup-options` client. Over UDP it sends at most two datagrams.
+
+| Option | Meaning |
+| --- | --- |
+| `--expect-status N` | Require this final status (default: any 2xx) |
+| `--expect-class C` | Require `2xx`, `3xx`, `4xx`, `5xx`, `6xx`, or `any` |
+| `--tls-ca /work/PATH` | Also trust this PEM CA file; it must be under `/work` |
+| `--tls-server-name NAME` | Verify the certificate for NAME and send it as SNI; packets still go only to HOST |
+| `--tls-unverified` | Skip certificate verification; always reported as `UNVERIFIED`, never the default |
+| `--dry-run` | Print the bounded plan; no resolution or traffic |
+
+TLS verifies by default, against `--tls-server-name` or else HOST. The
+removed `--tls-ignore-cert-failure` is rejected with a usage error. The first
+failing stage decides the exit code:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | A final response met the expectation |
+| 1 | A final response arrived but did not meet the expectation |
+| 2 | Usage error; nothing was sent |
+| 3 | No valid final response before the deadline (UDP silence or ICMP port unreachable, TCP connect timeout, closed or malformed reply) |
+| 4 | Name resolution failed, connection refused, or host/network unreachable |
+| 5 | TLS handshake or certificate verification failed |
+
+```sh
+./bin/sippycup preflight staging.example.invalid 5060 udp --expect-class any
+./bin/sippycup --practice preflight 127.0.0.2 5061 tls \
+  --tls-ca /work/practice/ca.crt --tls-server-name sippycup-practice
+```
+
+The in-image client is also available as an advanced tool with the same exit
+codes and a machine-readable result:
+
+```sh
+./bin/sippycup -- sippycup-options 192.0.2.10 5060 udp --format json
+```
+
+`sippycup-options HOST PORT TRANSPORT [--timeout S] [--expect-status N |
+--expect-class C] [--tls-server-name NAME] [--tls-ca-file PATH] [--insecure]
+[--format text|json]` accepts an IP literal (IPv6 with or without brackets)
+or a name, which it resolves once. It is not a registry command.
+
 ## Third-party tools and the shell
 
 Use `shell` for an interactive toolbox or `--` for one arbitrary in-image
