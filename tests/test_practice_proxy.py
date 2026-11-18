@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
+
 import json
 import os
+from unittest import mock
 import re
 import subprocess
 import sys
@@ -76,6 +78,14 @@ class ProxyPrepareTests(unittest.TestCase):
             self.project, address="127.0.0.2", container="c", image="i", now=self.now
         )
         self.state = self.project / "work" / "practice"
+        # The TLS profiles name work/practice/ca.crt; resolve it inside this
+        # temporary project, not the checkout's git-ignored work/ tree.
+        (self.state / "ca.crt").write_bytes(
+            (ROOT / "tests" / "fixtures" / "tls" / "test-ca.crt").read_bytes()
+        )
+        patcher = mock.patch.dict(os.environ, {"SIPPYCUP_WORK_ROOT": str(self.project / "work")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()

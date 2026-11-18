@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from unittest import mock
+
 import sys
 import tempfile
 import unittest
@@ -35,6 +38,14 @@ class PracticeMatrixProfileTests(unittest.TestCase):
         self.now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
         self.facts = practice.prepare(self.project, address="127.0.0.2", container="c", image="i", now=self.now)
         self.state = self.project / "work" / "practice"
+        # The TLS profiles name work/practice/ca.crt; resolve it inside this
+        # temporary project, not the checkout's git-ignored work/ tree.
+        (self.state / "ca.crt").write_bytes(
+            (ROOT / "tests" / "fixtures" / "tls" / "test-ca.crt").read_bytes()
+        )
+        patcher = mock.patch.dict(os.environ, {"SIPPYCUP_WORK_ROOT": str(self.project / "work")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
