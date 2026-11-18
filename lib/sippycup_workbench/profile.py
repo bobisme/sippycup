@@ -181,6 +181,25 @@ def _parse_time(value: Any, field: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def host_is_approved_literal(document: dict[str, Any]) -> bool:
+    """True when target.host is itself one of the literal approved addresses.
+
+    Guided one-call workflows require this so a reviewed plan can never
+    follow a changed DNS answer.
+    """
+    target = document.get("target")
+    if not isinstance(target, dict):
+        return False
+    host = target.get("host")
+    approved = target.get("approved_addresses")
+    if not isinstance(host, str) or not isinstance(approved, list):
+        return False
+    try:
+        return str(ipaddress.ip_address(host)) == host and host in approved
+    except ValueError:
+        return False
+
+
 def rehearse(document: dict[str, Any], *, now: datetime | None = None) -> Rehearsal:
     errors: list[str] = []
     warnings: list[str] = []

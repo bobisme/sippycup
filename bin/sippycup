@@ -52,7 +52,7 @@ load_registry() {
             exit 2
         fi
         case "${mode}" in
-            builtin|doctor|workbench|direct|host|container|container-isolated|container-offline|container-live-mcp) ;;
+            builtin|doctor|workbench|direct|host|container|container-isolated|container-private|container-offline|container-live-mcp) ;;
             *)
                 printf 'Invalid mode for %s: %s\n' "${name}" "${mode}" >&2
                 exit 2
@@ -262,6 +262,13 @@ EOF
     if [[ -t 0 && -t 1 ]]; then
         terminal=(-it)
     fi
+    # Tell in-image tools which namespace they run in so they can say so.
+    local network_mode=private
+    if [[ "${network[*]}" == "--network=host" ]]; then
+        network_mode=host
+    elif [[ "${network[*]}" == "--network=none" ]]; then
+        network_mode=none
+    fi
     local -a command=()
     if [[ -n "${target}" ]]; then
         command=("${target}" "$@")
@@ -277,9 +284,40 @@ EOF
         "${confinement[@]}" \
         --hostname=sippycup \
         "${name_resolution[@]}" \
+        --env=SIPPYCUP_NETWORK_MODE="${network_mode}" \
+        "${secret_environment[@]}" \
         --volume="${mount}" \
         "${image}" \
         "${command[@]}"
+}
+
+# Forward only the variables a first-party command names with --secret-env
+# (NAME or REF=NAME). The name-only --env form makes the runtime copy the
+# value from this process, so the value never appears in any argv.
+declare -a secret_environment=()
+collect_secret_environment() {
+    local argument name
+    local expect_value=0
+    for argument in "$@"; do
+        name=""
+        if (( expect_value != 0 )); then
+            name="${argument}"
+            expect_value=0
+        elif [[ "${argument}" == --secret-env ]]; then
+            expect_value=1
+            continue
+        elif [[ "${argument}" == --secret-env=* ]]; then
+            name="${argument#--secret-env=}"
+        else
+            continue
+        fi
+        name="${name#*=}"
+        if [[ ! "${name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            printf 'Invalid --secret-env variable name.\n' >&2
+            exit 2
+        fi
+        secret_environment+=("--env=${name}")
+    done
 }
 
 # Packaged first-party commands see the host work directory as /work. Rewrite
@@ -422,6 +460,7 @@ fi
 mode="${command_mode[${command_name}]}"
 host_target="${command_host_target[${command_name}]}"
 container_target="${command_container_target[${command_name}]}"
+collect_secret_environment "$@"
 
 if [[ $# == 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
     case "${mode}" in
@@ -517,6 +556,23 @@ EOF
     container-isolated)
         isolated=1
         run_container "${container_target}" "$@"
+        ;;
+    container-private)
+        # Always in the image with a private network namespace, where
+        # rootless capture works without sudo. Help and --dry-run need no
+        # container or network, so they run from the repository.
+        if (( admin != 0 )); then
+            printf '%s rejects --admin; it never needs NET_ADMIN.\n' "${command_name}" >&2
+            exit 2
+        fi
+        for argument in "$@"; do
+            if [[ "${argument}" == --dry-run || "${argument}" == -h || "${argument}" == --help ]]; then
+                exec "${project_dir}/bin/${host_target}" "$@"
+            fi
+        done
+        isolated=1
+        translate_work_arguments "$@"
+        run_container "${container_target}" "${translated_arguments[@]}"
         ;;
     container-offline)
         if (( isolated != 0 || admin != 0 )); then

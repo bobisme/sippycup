@@ -69,6 +69,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "status",
                 "capture",
                 "preflight",
+                "call",
                 "campaign",
                 "media",
                 "media-echo",
@@ -91,7 +92,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             },
         )
         for name, mode, host_target, container_target, *_ in rows:
-            if mode in {"direct", "host"}:
+            if mode in {"direct", "host", "container-private"}:
                 self.assertTrue((ROOT / "bin" / host_target).is_file(), name)
             if mode == "workbench":
                 self.assertEqual(container_target, "sippycup-workbench")
@@ -150,6 +151,9 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         )
         self.assertEqual(schema["properties"]["apiVersion"]["const"], value["apiVersion"])
         self.assertFalse(schema["properties"]["networkActivity"]["const"])
+        execution = schema["properties"]["commands"]["items"]["properties"]["execution"]["enum"]
+        for item in value["commands"]:
+            self.assertIn(item["execution"], execution, item["name"])
 
     def test_version_flag_and_command_are_identical(self) -> None:
         flag = run_cli("--version")
@@ -392,6 +396,110 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "work/../README.md",
             ],
         )
+
+    def test_call_runs_privately_with_name_only_secret_and_work_paths(self) -> None:
+        canary = "launcher-secret-canary-91"
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            result = run_cli(
+                "call",
+                "work/engagement/profile.yaml",
+                "--dial",
+                "1001",
+                "--username",
+                "alice",
+                "--secret-env",
+                "SIPPYCUP_CALL_SECRET",
+                "--run-root",
+                "./work/engagement/calls",
+                "--play",
+                str(ROOT / "work" / "engagement" / "phrase.wav"),
+                env={"SIPPYCUP_RUNTIME": str(runtime), "SIPPYCUP_CALL_SECRET": canary},
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(canary, result.stdout)
+        arguments = result.stdout.splitlines()
+        self.assertNotIn("--network=host", arguments)
+        self.assertNotIn("--add-host=sippycup:127.0.0.1", arguments)
+        self.assertIn("--cap-add=NET_RAW", arguments)
+        self.assertNotIn("--cap-add=NET_ADMIN", arguments)
+        self.assertIn("--env=SIPPYCUP_NETWORK_MODE=private", arguments)
+        self.assertIn("--env=SIPPYCUP_CALL_SECRET", arguments)
+        self.assertEqual(
+            arguments[arguments.index("sippycup-call") + 1 :],
+            [
+                "/work/engagement/profile.yaml",
+                "--dial",
+                "1001",
+                "--username",
+                "alice",
+                "--secret-env",
+                "SIPPYCUP_CALL_SECRET",
+                "--run-root",
+                "/work/engagement/calls",
+                "--play",
+                "/work/engagement/phrase.wav",
+            ],
+        )
+
+    def test_call_rejects_admin_and_plans_without_a_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            for options in (("--admin",), ("--isolated", "--admin")):
+                with self.subTest(options=options):
+                    rejected = run_cli(
+                        *options, "call", "work/p.yaml", "--dial", "1",
+                        env={"SIPPYCUP_RUNTIME": str(runtime)},
+                    )
+                    self.assertEqual(rejected.returncode, 2)
+                    self.assertEqual(rejected.stdout, "")
+                    self.assertIn("rejects --admin", rejected.stderr)
+        planned = run_cli(
+            "call",
+            "examples/target-profile.pending.yaml",
+            "--dial",
+            "1001",
+            "--dry-run",
+            env={"SIPPYCUP_RUNTIME": "/definitely/missing/runtime"},
+        )
+        self.assertEqual(planned.returncode, 2, planned.stderr)
+        self.assertIn("Guided call plan: BLOCKED", planned.stdout)
+        self.assertIn("Softphone parameters:", planned.stdout)
+        self.assertTrue(planned.stdout.rstrip().endswith("Network activity: none"))
+        self.assertNotIn("container runtime", planned.stderr)
+
+    def test_isolated_campaign_forwards_named_secret_variables_only(self) -> None:
+        canaries = {"CAMPAIGN_SECRET": "campaign-canary-1", "OTHER_SECRET": "campaign-canary-2"}
+        with tempfile.TemporaryDirectory() as root_name:
+            runtime = self.make_runtime(Path(root_name))
+            result = run_cli(
+                "--isolated",
+                "campaign",
+                "execute",
+                "work/engagement/plan.json",
+                "--secret-env",
+                "staging-user=CAMPAIGN_SECRET",
+                "--secret-env=other=OTHER_SECRET",
+                env={"SIPPYCUP_RUNTIME": str(runtime), "UNNAMED_SECRET": "x", **canaries},
+            )
+            invalid = run_cli(
+                "--isolated",
+                "campaign",
+                "execute",
+                "work/engagement/plan.json",
+                "--secret-env",
+                "ref=BAD;NAME",
+                env={"SIPPYCUP_RUNTIME": str(runtime)},
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = result.stdout.splitlines()
+        self.assertIn("--env=CAMPAIGN_SECRET", arguments)
+        self.assertIn("--env=OTHER_SECRET", arguments)
+        self.assertFalse([item for item in arguments if "UNNAMED_SECRET" in item])
+        for value in canaries.values():
+            self.assertNotIn(value, result.stdout)
+        self.assertEqual(invalid.returncode, 2)
+        self.assertEqual(invalid.stdout, "")
 
     def test_piped_stdin_reaches_every_container_route(self) -> None:
         # run_cli pipes stdout, so the launcher sees no terminal. A stdio MCP

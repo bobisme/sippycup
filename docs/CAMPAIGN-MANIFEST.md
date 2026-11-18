@@ -408,6 +408,13 @@ SIP_TEST_PASSWORD='...' ./bin/sippycup campaign execute plan.json \
   --secret-provider /path/to/provider
 ```
 
+With `--isolated`, the launcher forwards each variable named by
+`--secret-env REF=NAME` into the container with the runtime's name-only
+`--env NAME` form, so the value never appears in the runtime's argv. Other
+variables, including default `SIPPYCUP_SECRET_*` names, are not forwarded;
+name them explicitly. `--secret-fd` descriptors and a host `--secret-provider`
+path do not cross into the container.
+
 The provider receives only the reference name and returns the value on stdout.
 Secrets travel to a custom runner in its one-shot stdin envelope, never in
 argv. Known values and SIP Authorization headers are redacted before event

@@ -95,9 +95,15 @@ It prints `BLOCKED` while rehearsal fails and always reports that it sent no
 packets. The current one-call planner also requires `target.host` itself to be
 one of the approved literal addresses; this prevents a reviewed plan from
 later following a changed DNS answer. Hostname/SNI pinning needs a separate
-reviewed transport feature rather than an implicit lookup. Automated
-execution remains a separate exit-gated task requiring Quad's live staging
-approval.
+reviewed transport feature rather than an implicit lookup.
+
+The plan now has an executor. `./bin/sippycup call PROFILE --dial
+DESTINATION` runs the same sequence in one terminal and one isolated
+container: scoped capture, one OPTIONS preflight, one PJSUA call, then the
+offline report, triage, and assertions, with a new evidence run directory. It
+applies the same readiness gate, re-checks it before the first packet, and
+`--dry-run` prints this plan plus the softphone parameters without sending
+anything. See `GUIDED-CALL.md`.
 
 ## Capture triage and explanations
 

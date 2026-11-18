@@ -26,6 +26,13 @@ The registry makes execution location explicit:
   wrappers and privilege boundaries.
 - Preflight and the closed-loop self-test run in the prepared image. Self-test
   always selects the isolated network.
+- `call` always runs in the prepared image with a private network namespace,
+  where rootless capture works, and rewrites `work/...` paths to `/work/...`.
+  It rejects `--admin`. `call --dry-run` and `call --help` run from the
+  checkout without a container.
+- Commands that take `--secret-env NAME` (or `REF=NAME`) receive only that
+  variable in the container, forwarded with the runtime's name-only
+  `--env NAME` form so the value never appears in a command line.
 - `doctor` inspects the prepared image by default. `doctor --host` is the
   explicit local inventory.
 - `mcp` runs in a fixed offline container: no network, no Linux capabilities,
@@ -41,6 +48,7 @@ Examples:
 ./bin/sippycup torture exit-gate
 ./bin/sippycup --isolated --admin chaos capabilities
 ./bin/sippycup selftest /work/selftest.pcap
+./bin/sippycup call work/engagement/profile.yaml --dial 1001 --dry-run
 ./bin/sippycup webrtc validate examples/webrtc/offline-scenario.json
 ./bin/sippycup webrtc signaling-self-test
 ```

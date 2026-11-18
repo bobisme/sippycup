@@ -46,7 +46,9 @@
               "host",
               "container",
               "container-isolated",
-              "container-offline"
+              "container-private",
+              "container-offline",
+              "container-live-mcp"
             ]
           },
           "summary": {

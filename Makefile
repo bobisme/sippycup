@@ -2,7 +2,7 @@ IMAGE ?= localhost/sippycup:latest
 WEBRTC_IMAGE ?= localhost/sippycup-webrtc:latest
 CAPTURE ?= work/selftest.pcap
 
-.PHONY: build campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate mcp-exit-gate mcp-test media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test web-security-test webrtc-build webrtc-selftest webrtc-test workbench-test
+.PHONY: build call-selftest campaign-gate campaign-selftest capacity-gate chaos-exit-gate chaos-lifecycle-test chaos-profile-test chaos-topology-test cli-test envelope-analysis-test envelope-exit-gate envelope-recovery-test envelope-test full-gate learn-test matrix-gate mcp-exit-gate mcp-test media-analyze-test media-canary media-canary-check media-gate media-packet-golden media-send-test oracle-test report resilience-test selftest shell smoke torture-exit-gate torture-test tui-test web-security-test webrtc-build webrtc-selftest webrtc-test workbench-test
 
 build:
 	"$$(./bin/container-runtime)" build --tag "$(IMAGE)" --file Containerfile .
@@ -23,6 +23,12 @@ selftest:
 campaign-selftest:
 	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated -- \
 		campaign-integration-selftest /work/campaign-selftest
+
+# The echo peer lives inside the same isolated container on 127.0.0.2, so the
+# in-image entrypoint is driven directly; only loopback traffic is sent.
+call-selftest:
+	SIPPYCUP_IMAGE="$(IMAGE)" ./bin/sippycup --isolated -- \
+		call-integration-selftest /work/call-selftest
 
 matrix-gate:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_campaign_matrix tests.test_covering tests.test_matrix_compile tests.test_matrix_exit_gate -v
@@ -65,6 +71,7 @@ campaign-gate:
 	$(MAKE) smoke
 	$(MAKE) selftest
 	$(MAKE) campaign-selftest
+	$(MAKE) call-selftest
 
 # Includes the real rootless Podman host-isolation matrix and therefore needs
 # /dev/net/tun plus the documented namespace capabilities.

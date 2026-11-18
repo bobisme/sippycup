@@ -156,6 +156,17 @@ service owner's approval identifier, validity window, literal approved
 addresses, and finite limits. `one-call` only prints the reviewed sequence; it
 never executes its network-active steps. See `docs/WORKBENCH.md`.
 
+Once the profile is ready, `call` executes that sequence in one terminal:
+scoped capture, one OPTIONS preflight, one PJSUA call, and the offline report,
+triage, and assertions, with a new private run directory:
+
+```sh
+./bin/sippycup call work/voice-assessment/profile.yaml --dial 1001 --dry-run
+./bin/sippycup call work/voice-assessment/profile.yaml --dial 1001
+```
+
+See `docs/GUIDED-CALL.md` for credentials, verdicts, and the emergency stop.
+
 Create a private, hash-chained engagement journal before testing:
 
 ```sh

@@ -10,6 +10,7 @@ commands=(
     campaign-sipp-runner
     campaign-loopback-uas
     campaign-integration-selftest
+    call-integration-selftest
     capinfos
     dumpcap
     editcap
@@ -36,6 +37,7 @@ commands=(
     sipvicious_svwar
     sippycup-preflight
     sippycup-assert
+    sippycup-call
     sippycup-chaos
     sippycup-diff
     sippycup-evidence
@@ -91,6 +93,8 @@ import sippycup_media
 import sippycup_mcp
 import sippycup_resilience
 import sippycup_oracle
+import sippycup_softphone
+import sippycup_workbench.call
 import sippycup_torture
 import sippycup_tui
 import sippycup_webrtc
@@ -104,7 +108,9 @@ fi
 
 first_party_help=(
     campaign
+    call-integration-selftest
     sippycup-assert
+    sippycup-call
     sippycup-chaos
     sippycup-diff
     sippycup-envelope
