@@ -1,0 +1,208 @@
+# ANNOTATED EXAMPLE ONLY. Every value below is a placeholder.
+#
+# A pending scope for a whole phone platform: the SIP service of
+# examples/scope/scope.yaml plus the two optional sections `platform` and
+# `application` (question sheet part 2). It is deliberately pending and uses
+# documentation-only addresses and names, so `./bin/sippycup scope check`
+# rejects it and `scope compile` cannot turn it into an approved profile.
+#
+# To use it: copy the `platform:` and `application:` sections into your own
+# private work/ENGAGEMENT/scope.yaml (or start with
+# `./bin/sippycup scope init ENGAGEMENT_DIR --platform`), then fill them only
+# from the owner's written answers.
+#
+# Three rules for these two sections:
+#   1. Any answer may be the word pending (asked, waiting for the owner) or
+#      unknown (the owner does not know yet). Both are OPEN. Never guess, and
+#      never write an answer the owner did not give.
+#   2. Names are identities, addresses are destinations. A public DNS name is
+#      never looked up; only the literal addresses the owner wrote down count.
+#   3. Never a password, token, or key: credential_ref is the NAME of a secret.
+#
+# Nothing recorded in these two sections is ever sent web or API requests by
+# Sippycup: no live application runner exists. They are a record.
+schema_version: sippycup.dev/scope/v1
+name: example-platform
+
+authorization:
+  status: pending
+  approval_id: null
+  approved_by: null
+  valid_from: null
+  valid_until: null
+
+signaling:
+  networks: [203.0.113.0/24]
+  ports: [5060]
+  transports: [udp]
+
+targets:
+  - name: edge
+    address: 203.0.113.10
+    transport: udp
+    port: 5060
+
+media:
+  networks: [203.0.113.0/28]
+  port_range: {start: 10000, end: 10100}
+  protection: [rtp]
+  codecs: [PCMU]
+  dtmf: rfc4733
+  symmetric_rtp: true
+
+client:
+  source_addresses: [198.51.100.9]
+
+account:
+  required: true
+  username: null
+  realm: null
+  credential_ref: null
+  credential_delivery: null
+
+destinations:
+  - name: echo
+    user: "9196"
+    expect: echo
+  - name: front-desk                  # a destination that rings out through a carrier (see platform.dialing)
+    user: "0201234567"
+    expect: agent
+
+limits:
+  calls: null
+  concurrent_calls: null
+  calls_per_second: null
+  packets_per_second: null
+  packets: null
+  bytes: null
+  call_duration_seconds: null
+  total_duration_seconds: null
+
+stop_conditions:
+  consecutive_failures: null
+  unexpected_response: null
+  packet_loss_percent: null
+
+test_scope:
+  allowed_classes: [options, call]
+  exclusions: [none]
+
+contact:
+  name: null
+  channel: null
+  can_stop_test: null
+
+evidence:
+  retention_days: null
+  disclosure: null
+
+# ---------------------------------------------------------------------------
+# Part 2 of the question sheet: the whole platform.
+platform:
+  name: Example Cloud Telephony       # P1: what the owner calls the product
+  components:                         # P1: in-scope | out-of-scope | pending | unknown
+    sip_edge: in-scope
+    media_servers: in-scope
+    admin_console: in-scope
+    customer_web_app: pending         # the owner has not decided yet: it stays open, and is NOT tested
+    api: unknown                      # the owner is not sure there is one: open as well
+    websocket_webrtc: out-of-scope
+    provisioning: out-of-scope
+    voicemail: in-scope
+    ivr: pending
+    conference: out-of-scope
+    recording: out-of-scope
+  out_of_scope: ["billing", "the public marketing site"]   # P2: plain words; [none] if nothing
+
+  environment:
+    kind: production                  # P3: production | staging | dedicated-test | pending | unknown
+    real_customers: true              # P4: true | false | pending | unknown
+    test_tenant: sippycup-test        # P5: the label of the tenant set up for us; write none if there is none
+    never_touch:                      # P6: data we must never open, play, download, change, or delete
+      - "real customers' voicemail"
+      - "call records"
+      - "customer accounts"
+
+  third_parties:                      # P7-P10. permission: out-of-path | permitted | pending | unknown
+    hosting:                          # out-of-path = confirmed NOT involved in what we test
+      provider: Example Hosting
+      permission: pending             # asked; the owner is checking the provider's testing policy
+      reference: null                 # where the permission is written (policy page, ticket, email id)
+    cdn_waf:
+      provider: unknown
+      permission: unknown             # the owner does not know whether a web firewall sits in front
+      reference: null
+    pstn_carrier:
+      provider: Example Carrier
+      permission: pending             # until this is permitted, a destination that reaches the public
+      reference: null                 # phone network is an ERROR and holds the profile and the campaign
+    sms: {provider: null, permission: out-of-path, reference: null}
+    email: {provider: null, permission: null, reference: null}   # not asked yet
+
+  dialing:
+    reach:                            # P11: per destination name: on-net | pstn | pending | unknown
+      echo: on-net                    # stays inside the platform
+      front-desk: pstn                # leaves through the carrier: needs the carrier's permission AND a toll answer
+    never_dial: ["112", "911"]        # P12: exact numbers, ALWAYS in quotes; [none] if none
+    never_dial_prefixes: ["00", "0900"]   # optional: any destination starting with one of these
+    toll: pending                     # P13: no-cost | accepted | refused | pending | unknown
+
+  operations:
+    allowed_hours: "weekdays 22:00 to 06:00, Europe/Amsterdam"   # P14
+    max_concurrent_calls: 2           # P15: limits.concurrent_calls may not be higher
+    max_requests_per_second: pending  # P15: web and API requests
+    blocking: "five failed logins ban the source address for one hour; the duty engineer can lift the ban"   # P16
+    emergency_contact:                # P17: answered during the test hours
+      name: pending
+      channel: pending
+    stop_signal: pending              # P17: the owner's word or message that means stop now
+
+  addressing:                         # P18: one entry per public name
+    - name: sip.example.invalid       # the name phones register to: an identity, never looked up
+      addresses: ["203.0.113.10"]     # the literal addresses the owner wrote down
+      shared: false                   # shared with other customers of the provider?
+      changing: false                 # behind a load balancer or delivery network whose addresses change?
+    - name: admin.example.invalid
+      addresses: pending              # the owner gave only the name so far: the address stays open
+      shared: unknown
+      changing: unknown
+
+# Part 2, last group: web, API, and browser-calling surfaces.
+application:
+  surfaces:                           # A1-A3
+    - name: admin-console             # short lowercase name of our own choosing
+      kind: browser                   # browser | api | websocket
+      status: in-scope                # in-scope | out-of-scope | pending | unknown
+      base_url: https://admin.example.invalid   # which site this is; nothing is sent to a name
+      connect_address: pending        # literal IP only; a hostname here is an error
+      connect_port: 443
+      tls_server_name: admin.example.invalid    # the name on the certificate
+      tls_ca: public                  # public | private (then add tls_ca_file: work/ENGAGEMENT/owner-ca.crt)
+    - name: customer-api
+      kind: api
+      status: unknown                 # not approved, not excluded: shown as undecided
+      base_url: unknown
+      connect_address: unknown
+      connect_port: unknown
+      tls_server_name: unknown
+      tls_ca: unknown
+    - name: browser-calling
+      kind: websocket
+      status: out-of-scope            # the owner excluded it; kept so the record says so
+
+  identities:                         # A4: test accounts. credential_ref is a NAME, never a value.
+    - id: admin-test
+      role: admin
+      tenant: sippycup-test
+      credential_ref: pending         # not delivered yet
+    - id: user-test
+      role: customer-user
+      tenant: sippycup-test
+      credential_ref: user-test       # the name of the secret in your secret source
+
+  object_classes: [voicemail, greeting]   # A5: kinds of stored files, never their contents
+
+  route_inventory:                    # A6: the owner's list of pages and API calls
+    kind: pending                     # openapi | har | route-list | none | pending | unknown
+    file: null                        # once received: work/ENGAGEMENT/routes.json (a HAR file can hold session
+                                      # cookies: ask the owner to remove them, and keep it under work/)

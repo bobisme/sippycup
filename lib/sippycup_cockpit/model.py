@@ -218,6 +218,9 @@ def _scope_facts(root: Path, repo: Path, now: datetime) -> dict[str, Any]:
         facts["state"] = "invalid"
         return facts
     facts["document"] = report.document
+    from .platform_scope import platform_facts
+
+    facts["platform"] = platform_facts(report, root)
     for number, question in enumerate(QUESTIONS, 1):
         if question_state(report, question) == "unanswered":
             facts["unanswered"].append({"number": number, "id": question.identifier,
@@ -440,6 +443,16 @@ def _go_label(facts: dict[str, Any]) -> str:
     return f"go/no-go check says GO for this profile (ready; last {facts.get('verdict')} at {when})"
 
 
+def _platform_steps(scope: dict[str, Any]) -> list[dict[str, Any]]:
+    """One extra scope step when the scope records platform answers (never a blocker)."""
+    from .platform_scope import open_count
+
+    count = open_count(scope)
+    if count is None:
+        return []
+    return [_step(f"platform and web answers recorded ({count} open; they do not hold the SIP tests)", count == 0)]
+
+
 def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
     """Return the guided stages with completion derived from the model."""
     engagement = model["engagement"]
@@ -489,6 +502,7 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
                   scope["present"] and not scope["unanswered"] and scope["state"] != "invalid"),
             _step("scope check clean", scope["state"] in {"complete", "complete-not-compiled", "stale"}),
             _step("derivatives compiled and current (scope compile)", scope["derivatives"] in {"current", "partial"}),
+            *_platform_steps(scope),
         ],
         "rehearse": [
             _step("target profile present", profile["present"]),

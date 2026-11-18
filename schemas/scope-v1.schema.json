@@ -178,6 +178,165 @@
         },
         "max_requests": {"type": ["integer", "null"], "minimum": 1, "maximum": 200}
       }
+    },
+    "platform": {
+      "description": "Optional (question sheet part 2): the whole platform, production safety, third parties, dialing reach, and names versus addresses. Any answer may be the word pending or unknown; both are open and nothing is inferred from them. See docs/SCOPE-INTAKE.md, 'Platform and application answers'.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "#/$defs/text"},
+        "components": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "sip_edge": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "media_servers": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "admin_console": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "customer_web_app": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "api": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "websocket_webrtc": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "provisioning": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "voicemail": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "ivr": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "conference": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+            "recording": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]}
+          }
+        },
+        "out_of_scope": {"$ref": "#/$defs/words"},
+        "environment": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"enum": ["production", "staging", "dedicated-test", "pending", "unknown", null]},
+            "real_customers": {"$ref": "#/$defs/flag"},
+            "test_tenant": {"$ref": "#/$defs/text"},
+            "never_touch": {"$ref": "#/$defs/words"}
+          }
+        },
+        "third_parties": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "hosting": {"type": ["object", "null"], "additionalProperties": false, "properties": {"provider": {"$ref": "#/$defs/text"}, "permission": {"enum": ["out-of-path", "permitted", "pending", "unknown", null]}, "reference": {"$ref": "#/$defs/text"}}},
+            "cdn_waf": {"type": ["object", "null"], "additionalProperties": false, "properties": {"provider": {"$ref": "#/$defs/text"}, "permission": {"enum": ["out-of-path", "permitted", "pending", "unknown", null]}, "reference": {"$ref": "#/$defs/text"}}},
+            "pstn_carrier": {"type": ["object", "null"], "additionalProperties": false, "properties": {"provider": {"$ref": "#/$defs/text"}, "permission": {"enum": ["out-of-path", "permitted", "pending", "unknown", null]}, "reference": {"$ref": "#/$defs/text"}}},
+            "sms": {"type": ["object", "null"], "additionalProperties": false, "properties": {"provider": {"$ref": "#/$defs/text"}, "permission": {"enum": ["out-of-path", "permitted", "pending", "unknown", null]}, "reference": {"$ref": "#/$defs/text"}}},
+            "email": {"type": ["object", "null"], "additionalProperties": false, "properties": {"provider": {"$ref": "#/$defs/text"}, "permission": {"enum": ["out-of-path", "permitted", "pending", "unknown", null]}, "reference": {"$ref": "#/$defs/text"}}}
+          }
+        },
+        "dialing": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "reach": {"type": ["object", "null"], "additionalProperties": {"enum": ["on-net", "pstn", "pending", "unknown"]}},
+            "never_dial": {"$ref": "#/$defs/words"},
+            "never_dial_prefixes": {"$ref": "#/$defs/words"},
+            "toll": {"enum": ["no-cost", "accepted", "refused", "pending", "unknown", null]}
+          }
+        },
+        "operations": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "allowed_hours": {"$ref": "#/$defs/text"},
+            "max_concurrent_calls": {"$ref": "#/$defs/number"},
+            "max_requests_per_second": {"$ref": "#/$defs/number"},
+            "blocking": {"$ref": "#/$defs/text"},
+            "emergency_contact": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "properties": {"name": {"$ref": "#/$defs/text"}, "channel": {"$ref": "#/$defs/text"}}
+            },
+            "stop_signal": {"$ref": "#/$defs/text"}
+          }
+        },
+        "addressing": {
+          "description": "Public DNS names are identities only; addresses are the literal IPs the owner gave.",
+          "oneOf": [
+            {"enum": ["pending", "unknown", null]},
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": {"type": "string"},
+                  "addresses": {"oneOf": [{"enum": ["pending", "unknown", null]}, {"type": "array", "items": {"type": "string"}}]},
+                  "shared": {"$ref": "#/$defs/flag"},
+                  "changing": {"$ref": "#/$defs/flag"}
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "application": {
+      "description": "Optional (question sheet part 2): web, API, and WebSocket surfaces, test identities, stored object classes, and the owner's route inventory. A record only: no Sippycup command sends HTTP or WebSocket traffic to these surfaces. Credential references are names, never values.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "surfaces": {
+          "oneOf": [
+            {"enum": ["pending", "unknown", null]},
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+                  "kind": {"enum": ["browser", "api", "websocket", null]},
+                  "status": {"enum": ["in-scope", "out-of-scope", "pending", "unknown", null]},
+                  "base_url": {"type": ["string", "null"], "maxLength": 512},
+                  "connect_address": {"type": ["string", "null"], "description": "Literal IP address, pending, or unknown. Never a hostname."},
+                  "connect_port": {"$ref": "#/$defs/number"},
+                  "tls_server_name": {"type": ["string", "null"]},
+                  "tls_ca": {"enum": ["public", "private", "pending", "unknown", null]},
+                  "tls_ca_file": {"type": ["string", "null"], "pattern": "^work/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"},
+                  "allowed_origins": {"$ref": "#/$defs/words"}
+                }
+              }
+            }
+          ]
+        },
+        "identities": {
+          "oneOf": [
+            {"enum": ["pending", "unknown", null]},
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+                  "role": {"type": ["string", "null"]},
+                  "tenant": {"type": ["string", "null"]},
+                  "credential_ref": {"type": ["string", "null"], "description": "NAME of the secret (or pending / unknown), never its value."}
+                }
+              }
+            }
+          ]
+        },
+        "object_classes": {"$ref": "#/$defs/words"},
+        "route_inventory": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"enum": ["openapi", "har", "route-list", "none", "pending", "unknown", null]},
+            "file": {"type": ["string", "null"], "pattern": "^work/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"}
+          }
+        }
+      }
     }
+  },
+  "$defs": {
+    "text": {"type": ["string", "null"], "description": "Plain text, or the word pending or unknown."},
+    "flag": {"description": "true, false, pending, or unknown.", "enum": [true, false, "pending", "unknown", null]},
+    "number": {"description": "A whole number, pending, or unknown.", "oneOf": [{"type": "integer", "minimum": 1}, {"enum": ["pending", "unknown", null]}]},
+    "words": {"description": "A list of short texts ([none] for none), pending, or unknown.", "oneOf": [{"enum": ["pending", "unknown", null]}, {"type": "array", "uniqueItems": true, "items": {"type": "string"}}]}
   }
 }

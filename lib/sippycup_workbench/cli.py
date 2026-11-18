@@ -303,6 +303,9 @@ def _render_scope_compile(value: dict[str, Any]) -> None:
         print("Nothing was written.")
     for item in value["generated"]:
         print(f"Wrote {item['artifact']}: {item['path']} (sha256 {item['sha256']})")
+    if value.get("applicationSurfaces"):
+        item = value["applicationSurfaces"]
+        print(f"Wrote {item['artifact']}: {item['path']} (sha256 {item['sha256']}) [record only; nothing is sent]")
     for name, items in value["skipped"].items():
         print(f"Skipped {name}:")
         for item in items:
@@ -448,6 +451,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scope_init.add_argument("engagement")
     scope_init.add_argument("--name", help="engagement name, [a-z][a-z0-9-]{0,62}")
+    scope_init.add_argument(
+        "--platform",
+        action="store_true",
+        help="also write the empty platform and application sections (question sheet part 2)",
+    )
     scope_questions = scope_commands.add_parser(
         "questions", help="render the question sheet for the service owner"
     )
@@ -607,7 +615,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
         if args.command == "scope":
             if args.scope_command == "init":
-                path = create_scope(args.engagement, name=args.name)
+                path = create_scope(args.engagement, name=args.name, platform=args.platform)
                 print(f"Created pending scope file: {path}")
                 print("No addresses, approval, limits, or credentials were invented.")
                 print(

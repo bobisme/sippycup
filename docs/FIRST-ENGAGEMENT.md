@@ -37,6 +37,36 @@ make build
 On the practice target, `./bin/sippycup practice-target info` prints the same
 facts that an owner would give you. Fill `scope.yaml` by hand from them.
 
+### When the owner wants the whole platform tested
+
+The question sheet has two parts. Part 1 is the SIP service. Part 2 is the
+product around it: the web site, the admin console, the API, real customers,
+the hosting provider, carriers, and the limits on a live system (questions
+P1 to P18 and A1 to A6, each with the reason it is asked). Take both parts to
+the scoping conversation. If the test covers more than one SIP server, create
+the scope file with the two extra sections:
+
+```sh
+./bin/sippycup scope init work/acme --platform
+```
+
+For a scope file that exists already, copy the `platform:` and `application:`
+sections from `examples/scope/platform-scope.yaml`.
+
+- Write each answer as the owner gave it. If the owner does not know, write
+  `unknown`. If you are waiting for an answer, write `pending`. Never guess.
+- A name is not an address. Ask for the literal IP address behind every
+  public name, and whether it is shared with other customers or changes.
+- The owner cannot give permission for another company. Record the hosting
+  provider, the CDN or web firewall, the carrier, and the SMS and email
+  providers as `out-of-path`, `permitted` (with where that is written), or
+  `pending`.
+- Ask which destinations stay on the platform and which reach the public
+  phone network, and get the never-dial list.
+- **Sippycup has no tool that sends web or API requests.** These answers are
+  a record. `scope compile` writes them to `application-surfaces.yaml` for
+  review. They do not start any test.
+
 ## 1. Scope (offline)
 
 Write the owner's answers into `work/acme/scope.yaml`, then:
@@ -52,6 +82,15 @@ Write the owner's answers into `work/acme/scope.yaml`, then:
   - after compile, the derived `target-profile.yaml`, `campaign.yaml`, and
     `expectations.yaml`;
   - `Ready: yes` from `rehearse`.
+- With platform sections: open answers there are `WARN` lines and do not
+  block the SIP steps. `scope check` still prints
+  `Scope: COMPLETE and CONSISTENT`, and compile also prints
+  `Wrote application-surfaces: ... [record only; nothing is sent]`.
+  The exception is an `ERROR` such as `scope.pstn_destination_unconfirmed`
+  (a destination reaches the public phone network without the carrier's
+  permission and a toll answer) or `scope.destination_never_dial`. Stop and
+  ask the owner, or remove the destination. See `SCOPE-INTAKE.md`,
+  "The severity rule".
 - Proxy shape: rehearse also prints
   `Media only: 127.0.0.2/31 (2 addresses) (owner-approved media networks; never a signaling target)`
   and `Media ports: 20000-20019`.
@@ -113,6 +152,11 @@ capture, the password file, and the route, and it prints your source address
 ```sh
 ./bin/sippycup ready work/acme --secret-file work/acme/account.password
 ```
+
+When the scope has platform answers, `ready` adds the line
+`Production safety answers`. It is `[WARN]` while an answer is open on a
+production system, and lists the open questions. Read it and decide with the
+owner; it does not turn a GO into a NO-GO.
 
 Continue only on `VERDICT: GO`. On `NO-GO`, each blocking line has a `fix:`
 line; do it and run `ready` again. Run the `Journal:` line it prints. The

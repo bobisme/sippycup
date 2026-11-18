@@ -197,6 +197,9 @@ def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, ques
     scope_lines = _scope_lines(model["scope"], limit=question_limit)
     lines.append(f"Scope          {scope_lines[0]}")
     lines.extend(scope_lines[1:])
+    from .platform_scope import platform_lines
+
+    lines.extend(platform_lines(model["scope"], limit=question_limit))
     lines.append(f"Target         {_target_line(model['target'])}")
     for line in _profile_lines(model.get("profiles") or []):
         lines.append(f"Profile        {line}")

@@ -306,6 +306,13 @@ scope file holds credential reference names only. Scripts still require targets
 on their command lines so traffic cannot be sent from stale configuration. See
 `docs/SCOPE-INTAKE.md`.
 
+When the owner wants a whole platform tested (web site, admin console, API,
+real customers, carriers, outside hosting), part 2 of the question sheet and
+the optional `platform` and `application` sections record those answers
+(`./bin/sippycup scope init DIR --platform`). They are a record only: `scope
+compile` writes `application-surfaces.yaml` for review, and no Sippycup command
+sends web or API requests to those surfaces.
+
 Preview a narrowly scoped host capture:
 
 ```sh

@@ -97,6 +97,7 @@ class CompileResult:
     expected: int = len(ARTIFACTS)
     # Profiles of targets that left the scope, removed by this compile.
     removed: list[str] = field(default_factory=list)
+    application: dict[str, str] | None = None
 
     @property
     def exit_code(self) -> int:
@@ -121,6 +122,7 @@ class CompileResult:
             "invalidScope": [item.as_dict() for item in self.report.findings] if self.report.fatal else [],
             "removed": self.removed,
             "notes": self.notes,
+            "applicationSurfaces": self.application,
             "networkActivity": False,
         }
 
@@ -733,6 +735,12 @@ def compile_scope(
             Finding(code, "error", "inconsistent", filenames[artifact], f"{filenames[artifact]} {why}; "
                     "re-run with --force to overwrite it")
         )
+    from . import scope_app_derive
+
+    app_data, app_skips, app_refusals = scope_app_derive.precheck(root, report, force)
+    if app_skips:
+        result.skipped[scope_app_derive.ARTIFACT] = app_skips
+    result.refused.extend(app_refusals)
     if sidecar_problem:
         result.notes.append(sidecar_problem)
     if result.refused:
@@ -807,6 +815,8 @@ def compile_scope(
         replace=sidecar_path.exists(),
     )
     result.generated_at = generated_at
+    result.application, app_notes = scope_app_derive.finish(root, report, app_data, _write_atomic)
+    result.notes.extend(app_notes)
     by_name = {item["name"]: item for item in doc["targets"]}
     written_profiles = [
         f"{Path(item['path']).name} ({item['target']}, {by_name[item['target']]['transport']} "
