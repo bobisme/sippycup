@@ -1,0 +1,78 @@
+# TLS campaign for the local practice target. `practice-target up` renders it
+# into work/practice/campaign-tls.yaml with the practice address.
+#
+# The target is pinned to the literal loopback address; the reviewed TLS
+# server name sippycup-practice is used only for SNI, certificate
+# verification, and the SIP domain, and is never resolved. `campaign plan`
+# freezes the SHA-256 of work/practice/ca.crt; execution refuses, sending
+# nothing, if that file changes afterwards (every `up` generates a new CA, so
+# plan again after each `up`).
+#
+# The call case registers with the practice account and dials the echo
+# destination through the PJSUA softphone runner, which verifies the server
+# certificate. The password is supplied at run time, never here:
+#   --secret-env practice-password=VARIABLE_HOLDING_THE_PASSWORD
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata:
+  name: local-practice-tls
+authorization:
+  networks: ['127.0.0.2/32']
+  signalingPorts: [5061]
+  mediaPorts: {start: 20000, end: 20019}
+  transports: [tls]
+  credentialRefs: [practice-password]
+  ceilings:
+    calls: 1
+    packets: 2500
+    bytes: 800000
+    durationSeconds: 60
+    concurrentCalls: 1
+    packetsPerSecond: 400
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: practice-tls
+    address: '127.0.0.2'
+    signaling:
+      transport: tls
+      port: 5061
+      tlsServerName: 'sippycup-practice'
+      tlsCaFile: work/practice/ca.crt
+    credentialRef: practice-password
+    account: {username: practice, register: true}
+cases:
+  - id: options-tls
+    type: options
+    target: practice-tls
+    count: 1
+    budget:
+      packetsPerRun: 20
+      bytesPerRun: 20000
+      durationSecondsPerRun: 5
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+  - id: call-echo-tls
+    type: call
+    target: practice-tls
+    count: 1
+    dial: {user: echo}
+    budget:
+      packetsPerRun: 2000
+      bytesPerRun: 700000
+      durationSecondsPerRun: 15
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+      requireBidirectionalRtp: true
+expectations:
+  allowedSipStatuses: [100, 180, 200]
+  requireBidirectionalRtp: true
+evidence:
+  capture: true
+  retainPayload: false
+  directory: evidence/local-practice-tls

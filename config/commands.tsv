@@ -27,6 +27,7 @@ explain|workbench|explain|sippycup-workbench|Analysis|offline|Explain a stable w
 journal|workbench|journal|sippycup-workbench|Evidence|offline|Maintain a private hash-chained assessment journal
 evidence|direct|sippycup-evidence|sippycup-evidence|Evidence|offline|Create or privacy-lint an evidence manifest
 pack|direct|sippycup-pack|sippycup-pack|Evidence|offline|Create verify sign or export portable evidence packs
+summary|workbench|summary|sippycup-workbench|Evidence|offline|Write the owner-facing engagement report from recorded runs
 torture|direct|sippycup-torture|sippycup-torture|Robustness|offline|Inspect and exit-gate the bounded protocol corpus
 envelope|direct|sippycup-envelope|sippycup-envelope|Robustness|offline|Plan or simulate an immutable capacity envelope
 resilience|direct|sippycup-resilience|sippycup-resilience|Robustness|offline|Run bounded voice-edge resilience oracles

@@ -1,0 +1,141 @@
+{
+  "apiVersion": "sippycup.dev/call-result/v1",
+  "captureFilter": "(host 127.0.0.2) and (udp port 5060 or udp)",
+  "destinationUri": "sip:busy@127.0.0.2:5060",
+  "durationSeconds": {
+    "effective": 10,
+    "limit": 60,
+    "requested": 10
+  },
+  "evidenceManifest": "evidence-manifest.json",
+  "exitCode": 1,
+  "journalCommand": [
+    "./bin/sippycup",
+    "journal",
+    "add",
+    "work/eng-report",
+    "--kind",
+    "action",
+    "--summary",
+    "Guided baseline call (sippycup-local-practice): call-not-answered",
+    "--evidence",
+    "calls/20261118T025443.708506Z-sippycup-local-practice-02c17f09/result.json",
+    "--evidence",
+    "calls/20261118T025443.708506Z-sippycup-local-practice-02c17f09/evidence-manifest.json",
+    "--evidence",
+    "calls/20261118T025443.708506Z-sippycup-local-practice-02c17f09/capture.pcap"
+  ],
+  "localAddress": "127.0.0.1",
+  "networkActivity": "1 SIP OPTIONS preflight, 1 REGISTER exchange (plus unregistration on exit), 1 INVITE dialog to 127.0.0.2:5060/udp inside the container's private network namespace (loopback, no NAT)",
+  "networkMode": "private",
+  "notes": [
+    "The target is a loopback address inside the container's own network namespace; no NAT applies.",
+    "The call was not answered; final SIP status 486."
+  ],
+  "oracle": {
+    "dialogs": 1,
+    "exit_code": 1,
+    "failed": [
+      "dialog[0].media.directionality"
+    ],
+    "stream_directions": [],
+    "summary": {
+      "fail": 1,
+      "pass": 2,
+      "unknown": 9
+    },
+    "unknown": [
+      "dialog[0].media.sdp_direction",
+      "dialog[0].media.endpoints",
+      "dialog[0].media.payloads",
+      "dialog[0].media.codecs",
+      "dialog[0].media.dtmf",
+      "dialog[0].media.timing",
+      "dialog[0].media.sequence",
+      "dialog[0].media.jitter",
+      "dialog[0].media.transitions"
+    ],
+    "verdict": "fail"
+  },
+  "preflight": {
+    "detail": "SIP/2.0 200 OK",
+    "ok": true
+  },
+  "profile": "sippycup-local-practice",
+  "recording": {
+    "note": "recording is empty or not 16-bit PCM; silence is unknown",
+    "path": "heard.wav",
+    "present": true,
+    "readable": true,
+    "seconds": 0.0,
+    "silent": null
+  },
+  "runDirectory": "work/eng-report/calls/20261118T025443.708506Z-sippycup-local-practice-02c17f09",
+  "softphone": {
+    "answered": false,
+    "cancelled": false,
+    "codec": null,
+    "connected_seconds": null,
+    "dialed": true,
+    "disconnect_reason": "Busy Here",
+    "disconnect_status": 486,
+    "error": null,
+    "final_status": 486,
+    "hangup": null,
+    "media_direction": null,
+    "media_peer": null,
+    "registered": true,
+    "registration_attempted": true,
+    "registration_status": 200,
+    "rtp_rx_packets": null,
+    "rtp_tx_packets": null,
+    "tls_server_name": null,
+    "tls_verified": null
+  },
+  "state": "failed",
+  "target": {
+    "host": "127.0.0.2",
+    "port": 5060,
+    "transport": "udp"
+  },
+  "timestamps": {
+    "call_ended": "2026-11-18T02:54:45.903369Z",
+    "call_started": "2026-11-18T02:54:44.836509Z",
+    "capture_ready": "2026-11-18T02:54:44.835302Z",
+    "capture_stopped": "2026-11-18T02:54:46.443954Z",
+    "finished": "2026-11-18T02:54:47.537352Z",
+    "preflight_sent": "2026-11-18T02:54:44.835452Z",
+    "started": "2026-11-18T02:54:43.708574Z"
+  },
+  "triage": {
+    "exit_code": 0,
+    "findings": [
+      {
+        "code": "capture.nonempty",
+        "verdict": "pass"
+      },
+      {
+        "code": "capture.sip_present",
+        "verdict": "pass"
+      },
+      {
+        "code": "capture.media_present",
+        "verdict": "unknown"
+      },
+      {
+        "code": "privacy.authorization_present",
+        "verdict": "warn"
+      }
+    ],
+    "packets": 17,
+    "protocol_frames": {
+      "rtcp": 0,
+      "rtp": 0,
+      "sdp": 2,
+      "sip": 17,
+      "stun": 0,
+      "tls": 0
+    }
+  },
+  "verdict": "call-not-answered"
+}

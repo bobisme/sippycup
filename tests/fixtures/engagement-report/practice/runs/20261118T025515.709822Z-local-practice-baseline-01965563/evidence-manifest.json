@@ -1,0 +1,133 @@
+{
+  "apiVersion": "sippycup.dev/evidence-manifest/v1",
+  "artifacts": [
+    {
+      "mediaType": "application/octet-stream",
+      "path": "capture.log",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "f8c8104832e63b7558febf5f9b1403f5a6f7652dc65c24fc6a81d5b510a20843",
+      "size": 162
+    },
+    {
+      "mediaType": "application/vnd.tcpdump.pcap",
+      "path": "capture.pcap",
+      "provenance": "network-capture",
+      "sensitivity": "confidential",
+      "sha256": "ae627b0a5a81ff4a374e5f29b04958e7949fc3e2eb3554937b37b1c3d18ffe74",
+      "size": 5352
+    },
+    {
+      "mediaType": "application/json",
+      "path": "commands.json",
+      "provenance": "runtime-inventory",
+      "sensitivity": "internal",
+      "sha256": "fb4819280641b50be22140f2c9a682cf78b73e839995a205f7879b06b270e3d4",
+      "size": 647
+    },
+    {
+      "mediaType": "application/x-ndjson",
+      "path": "events.jsonl",
+      "provenance": "campaign-runtime",
+      "sensitivity": "internal",
+      "sha256": "8795e917803f83d49c947c85f95c4241519974dd76a3aada6473cb9fc672ec64",
+      "size": 2547
+    },
+    {
+      "mediaType": "application/json",
+      "path": "plan.json",
+      "provenance": "reviewed-authorization",
+      "sensitivity": "internal",
+      "sha256": "e9f8a4eaace6c63bd11c244eb254b678b1a7c2c57dcd17bbdd9a7b2ecc1208c8",
+      "size": 2662
+    },
+    {
+      "mediaType": "application/json",
+      "path": "preflight.json",
+      "provenance": "campaign-runtime",
+      "sensitivity": "confidential",
+      "sha256": "6645b5d872c3451e9b1ba0fde6adf2cea4aaa6c85b980ebdcc0e1442d98bf6e8",
+      "size": 455
+    },
+    {
+      "mediaType": "application/octet-stream",
+      "path": "report.stderr",
+      "provenance": "offline-analysis",
+      "sensitivity": "confidential",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "mediaType": "text/plain",
+      "path": "report.txt",
+      "provenance": "offline-analysis",
+      "sensitivity": "confidential",
+      "sha256": "ba7f07a7b7dc43f6da45a846561511433757f7e2c4f3fac08b1fc3e45cc0152c",
+      "size": 5829
+    },
+    {
+      "mediaType": "application/json",
+      "path": "result.json",
+      "provenance": "campaign-runtime",
+      "sensitivity": "internal",
+      "sha256": "734f419c38301c0b824385043b6f8a26c995385504d7084249fdad38ca27cef5",
+      "size": 67
+    },
+    {
+      "mediaType": "application/yaml",
+      "path": "reviewed-manifest.yaml",
+      "provenance": "reviewed-authorization",
+      "sensitivity": "internal",
+      "sha256": "dd3a29948cde1f33a8aa0ef9e8dabee53a99b8b2a3352835004ec81719c6dabb",
+      "size": 1845
+    },
+    {
+      "mediaType": "application/json",
+      "path": "timestamps.json",
+      "provenance": "campaign-runtime",
+      "sensitivity": "internal",
+      "sha256": "f1988f1fdcc256a6b78906251a2c6ebe86b85f86d3fcd2ae92e08ad6fae27670",
+      "size": 92
+    },
+    {
+      "mediaType": "application/json",
+      "path": "versions.json",
+      "provenance": "runtime-inventory",
+      "sensitivity": "internal",
+      "sha256": "8d548ab78edd867dc28188367c9621b956fded6ea20526fe833ba8a794199067",
+      "size": 1023
+    }
+  ],
+  "contentIdentity": "sha256:1cb65535fdb089e620e296f7611e4398697ee0c9dd77e4d44aaacd3c8fe8e0f4",
+  "creation": {
+    "contentIdentityIncludesCreation": false,
+    "createdAt": "2026-11-18T02:55:16.604642Z"
+  },
+  "kind": "EvidenceManifest",
+  "missingExpected": [],
+  "privacy": {
+    "findings": [
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "capture.pcap",
+        "severity": "high"
+      },
+      {
+        "code": "unexpected-network",
+        "detail": "addresses outside expected networks: 127.0.0.1",
+        "path": "capture.pcap",
+        "severity": "high"
+      },
+      {
+        "code": "unexpected-network",
+        "detail": "addresses outside expected networks: 127.0.0.1",
+        "path": "report.txt",
+        "severity": "high"
+      }
+    ],
+    "maxCaptureBytes": 536870912,
+    "status": "blocked"
+  },
+  "runState": "succeeded"
+}

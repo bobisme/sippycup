@@ -443,6 +443,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["summary"]:
+        # Owner-facing engagement report (docs/ENGAGEMENT-REPORT.md).
+        from .summary_cli import main as summary_main
+
+        return summary_main(arguments[1:])
     args = build_parser().parse_args(argv)
     try:
         if args.command == "doctor":

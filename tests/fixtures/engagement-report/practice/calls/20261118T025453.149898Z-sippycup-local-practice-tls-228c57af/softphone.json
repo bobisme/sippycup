@@ -1,0 +1,61 @@
+{
+  "answered": true,
+  "cancelled": false,
+  "codec": "PCMU",
+  "commands_sent": [
+    "m",
+    "<destination>",
+    "dq",
+    "q"
+  ],
+  "connected_seconds": 10.003,
+  "destination_uri": "sip:echo@sippycup-practice:5061;transport=tls",
+  "dialed": true,
+  "disconnect_reason": "OK",
+  "disconnect_status": 200,
+  "error": null,
+  "exit_code": 0,
+  "final_status": 200,
+  "hangup": "duration",
+  "media_direction": "sendrecv",
+  "media_peer": "127.0.0.2:20002",
+  "ok": true,
+  "registered": true,
+  "registration_attempted": true,
+  "registration_status": 200,
+  "rtp_counts_source": "pjsua-call-dump",
+  "rtp_rx_packets": 500,
+  "rtp_tx_packets": 500,
+  "schema_version": "sippycup.dev/softphone-result/v1",
+  "started": true,
+  "timeline": [
+    {
+      "at": 0.005,
+      "state": "STARTED"
+    },
+    {
+      "at": 0.025,
+      "state": "DIALED"
+    },
+    {
+      "at": 0.045,
+      "state": "CALLING"
+    },
+    {
+      "at": 0.085,
+      "state": "CONNECTING"
+    },
+    {
+      "at": 0.085,
+      "state": "CONFIRMED"
+    },
+    {
+      "at": 10.088,
+      "state": "DISCONNECTED"
+    }
+  ],
+  "tls_detail": "sippycup-practice:5061: OK",
+  "tls_server_name": "sippycup-practice",
+  "tls_trust": "file",
+  "tls_verified": true
+}

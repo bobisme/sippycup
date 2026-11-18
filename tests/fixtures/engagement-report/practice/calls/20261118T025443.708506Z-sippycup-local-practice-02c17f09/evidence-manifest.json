@@ -1,0 +1,268 @@
+{
+  "apiVersion": "sippycup.dev/evidence-manifest/v1",
+  "artifacts": [
+    {
+      "mediaType": "application/json",
+      "path": "assert.json",
+      "provenance": "offline-analysis",
+      "sensitivity": "confidential",
+      "sha256": "42546201a826ad374fa51b5ae09727cdc02188d8946326acd9d9271fc5a9164a",
+      "size": 4248
+    },
+    {
+      "mediaType": "application/octet-stream",
+      "path": "assert.stderr",
+      "provenance": "offline-analysis",
+      "sensitivity": "confidential",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "mediaType": "application/octet-stream",
+      "path": "capture.log",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "081c4e91397e6724f4001bdac48346aac37347579732de5f925233b4f52708ed",
+      "size": 162
+    },
+    {
+      "mediaType": "application/vnd.tcpdump.pcap",
+      "path": "capture.pcap",
+      "provenance": "network-capture",
+      "sensitivity": "restricted",
+      "sha256": "1fc4b5912cce3fb9d37d22a948d4c2bdc9437f82fed8aff51bec216ae8896997",
+      "size": 12134
+    },
+    {
+      "mediaType": "application/json",
+      "path": "commands.json",
+      "provenance": "runtime-inventory",
+      "sensitivity": "internal",
+      "sha256": "033e8becf7c6fba3fe267fcd3fd7a35285c761647a9ab54e856a3c4242093f80",
+      "size": 1950
+    },
+    {
+      "mediaType": "application/yaml",
+      "path": "expectations.yaml",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "747275ed60d63bf020e12d7f529c46aa17ebefd68a10f7ad9ca78c22d63e244d",
+      "size": 438
+    },
+    {
+      "mediaType": "audio/x-wav",
+      "path": "heard.wav",
+      "provenance": "run-artifact",
+      "sensitivity": "restricted",
+      "sha256": "ba584a378b11d9e9c98736fd8c256fe1453a84ee4139416d24b07acff424f0fb",
+      "size": 44
+    },
+    {
+      "mediaType": "application/json",
+      "path": "plan.json",
+      "provenance": "reviewed-authorization",
+      "sensitivity": "internal",
+      "sha256": "d18b243c1905234f6ee0a641083fd5e299b77f3cf13504f20e94a4115f1458e4",
+      "size": 1709
+    },
+    {
+      "mediaType": "audio/x-wav",
+      "path": "played.wav",
+      "provenance": "run-artifact",
+      "sensitivity": "restricted",
+      "sha256": "fc088e5613534e2ef9636fc1cd4bacda832f3057cc0e6621305ccbff31eaa948",
+      "size": 48044
+    },
+    {
+      "mediaType": "application/json",
+      "path": "preflight.json",
+      "provenance": "campaign-runtime",
+      "sensitivity": "confidential",
+      "sha256": "3dcee12628d8c17ea524c9554da193510e8737959f8d1e51eb061480c78db330",
+      "size": 154
+    },
+    {
+      "mediaType": "application/json",
+      "path": "profile.json",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "ad7f8f87c36101d786068e421e1f86aeb7b5c17408a5e95d4c4d35226d0f49bf",
+      "size": 821
+    },
+    {
+      "mediaType": "application/octet-stream",
+      "path": "report.stderr",
+      "provenance": "offline-analysis",
+      "sensitivity": "confidential",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "mediaType": "text/plain",
+      "path": "report.txt",
+      "provenance": "offline-analysis",
+      "sensitivity": "confidential",
+      "sha256": "079d0aa30d5512187129e897bbe8b9a7123f6956e69af958c93e67e50dce5b82",
+      "size": 6776
+    },
+    {
+      "mediaType": "application/json",
+      "path": "result.json",
+      "provenance": "campaign-runtime",
+      "sensitivity": "internal",
+      "sha256": "4f02b71b223d517a579025b270255ca2718f67f73e94a0edfd5af13e8baf9144",
+      "size": 3857
+    },
+    {
+      "mediaType": "text/plain",
+      "path": "softphone-console.txt",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "5ec94187df2209e4beb17411bdce4ef47fc20d789822f9f7d175cc0d8da2b339",
+      "size": 3571
+    },
+    {
+      "mediaType": "application/json",
+      "path": "softphone.json",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "58f4b008b72a16dd374462fe5ce1c35cf0429b9a9f3406997a3ed1d562b8b063",
+      "size": 1025
+    },
+    {
+      "mediaType": "application/octet-stream",
+      "path": "softphone.log",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "1e4c5a4f17bbf3c3fa3fa4a217acd09042fdcea64ae7885ba357ec5ca9c1d9e5",
+      "size": 36072
+    },
+    {
+      "mediaType": "application/json",
+      "path": "timestamps.json",
+      "provenance": "campaign-runtime",
+      "sensitivity": "internal",
+      "sha256": "d36e05f1b99906c3b8de353c1ca3010106318805ea4ce4188fc7fc104aebc74c",
+      "size": 341
+    },
+    {
+      "mediaType": "application/json",
+      "path": "triage.json",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "fd5e88df96ac5d8f103da6ac774ea52c10329fcb14020999e2563810315d3e3e",
+      "size": 1180
+    },
+    {
+      "mediaType": "application/octet-stream",
+      "path": "triage.stderr",
+      "provenance": "run-artifact",
+      "sensitivity": "confidential",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "mediaType": "application/json",
+      "path": "versions.json",
+      "provenance": "runtime-inventory",
+      "sensitivity": "internal",
+      "sha256": "6ec5c7bc7dbb13ceb251e8589db6db43c3e419acbf40b705b7a058433704a6de",
+      "size": 643
+    }
+  ],
+  "contentIdentity": "sha256:1945b8b2249374adb912d63a601541b5c2521fe268b3a070dc13b9b896a19338",
+  "creation": {
+    "contentIdentityIncludesCreation": false,
+    "createdAt": "2026-11-18T02:54:47.551452Z"
+  },
+  "kind": "EvidenceManifest",
+  "missingExpected": [
+    "events.jsonl",
+    "reviewed-manifest.yaml"
+  ],
+  "privacy": {
+    "findings": [
+      {
+        "code": "authorization-material",
+        "detail": "SIP Authorization or Proxy-Authorization material is present",
+        "path": "capture.pcap",
+        "severity": "high"
+      },
+      {
+        "code": "authorization-material",
+        "detail": "SIP Authorization or Proxy-Authorization material is present",
+        "path": "softphone.log",
+        "severity": "high"
+      },
+      {
+        "code": "decoded-audio",
+        "detail": "decoded audio artifact is present",
+        "path": "heard.wav",
+        "severity": "high"
+      },
+      {
+        "code": "decoded-audio",
+        "detail": "decoded audio signature is present",
+        "path": "heard.wav",
+        "severity": "high"
+      },
+      {
+        "code": "decoded-audio",
+        "detail": "decoded audio artifact is present",
+        "path": "played.wav",
+        "severity": "high"
+      },
+      {
+        "code": "decoded-audio",
+        "detail": "decoded audio signature is present",
+        "path": "played.wav",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "capture.pcap",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "commands.json",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "plan.json",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "result.json",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "softphone-console.txt",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "softphone.json",
+        "severity": "high"
+      },
+      {
+        "code": "subscriber-identifier",
+        "detail": "SIP call, user, or phone identifier is present",
+        "path": "softphone.log",
+        "severity": "high"
+      }
+    ],
+    "maxCaptureBytes": 536870912,
+    "status": "blocked"
+  },
+  "runState": "failed"
+}

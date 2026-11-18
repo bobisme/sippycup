@@ -139,6 +139,15 @@ Campaign runners, loopback fixtures, container preflight/report helpers,
 runtime selection, and smoke programs are internal. They do not appear in
 global help and may change independently of the public command registry.
 
+## Engagement report
+
+`./bin/sippycup summary DIR` is a workbench command: it runs from the checkout
+on the host (and in the image under `--isolated` or `--practice`), reads only
+recorded artifacts, and writes the owner report to `DIR/report/`. Exit status
+is 0 when written, 1 when written with integrity exceptions, 2 for usage
+errors, and 3 when the privacy lint refused to write anything. See
+`ENGAGEMENT-REPORT.md`.
+
 ## Bash completion
 
 Source the completion from a checkout:

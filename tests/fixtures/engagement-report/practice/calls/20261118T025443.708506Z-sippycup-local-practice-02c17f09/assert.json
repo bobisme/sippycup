@@ -1,0 +1,30 @@
+{
+  "dialogs": [
+    {
+      "call_id": "30e4825c-8c22-4006-b37b-6ec355d80264",
+      "complete": {
+        "state": "known",
+        "value": true
+      },
+      "evidence": {
+        "frame_number": {
+          "state": "known",
+          "value": 7
+        },
+        "timestamp_epoch": {
+          "state": "known",
+          "value": "1794970484.857823000"
+        }
+      },
+      "id": "dialog[0]",
+      "state": "rejected"
+    }
+  ],
+  "schema_version": "sippycup.results/v1",
+  "summary": {
+    "fail": 1,
+    "pass": 2,
+    "unknown": 9
+  },
+  "verdict": "fail"
+}

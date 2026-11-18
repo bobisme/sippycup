@@ -200,6 +200,12 @@ text. `status` verifies these records and recommends only network-free next
 steps; it never executes target traffic. See `docs/ASSESSMENT-WORKFLOW.md` for
 the end-to-end execution and recordkeeping framework.
 
+After the runs, `./bin/sippycup summary work/voice-assessment` writes the
+owner-facing engagement report (Markdown, a self-contained HTML page, and the
+JSON model): approval, activity ledger, results, findings, evidence hashes,
+limitations, and recommendations, with a fail-closed privacy lint. See
+`docs/ENGAGEMENT-REPORT.md`.
+
 Record the service owner's written scope once, in a private scope file, instead
 of copying it by hand into the profile, campaign manifest, and oracle
 expectations:

@@ -163,6 +163,11 @@ test "${status_code}" -eq 1
 printf '%s' "${status_json}" \
     | jq -e '.networkActivity == false and .overall == "blocked"' >/dev/null
 printf 'ok       offline engagement advisor\n'
+sippycup-workbench summary "${journal_parent}/assessment" \
+    --generated-at 2026-01-01T00:00:00Z --format json >/dev/null
+jq -e '.apiVersion == "sippycup.dev/engagement-report/v1" and .networkActivity == false' \
+    "${journal_parent}/assessment/report/report.json" >/dev/null
+printf 'ok       workbench owner engagement report\n'
 
 printf '\nSIPp build:\n'
 set +e

@@ -113,6 +113,11 @@ An artifact is copied only when its exact declared path is explicitly named:
   --include-artifact report.txt
 ```
 
+The owner engagement report (`./bin/sippycup summary`, see
+[`ENGAGEMENT-REPORT.md`](ENGAGEMENT-REPORT.md)) lists packs found in the
+engagement directory or its `packs/` directory with their SHA-256 and content
+identity, next to each run's evidence index.
+
 The export manifest records the selected artifact's sensitivity and
 `explicitlySelected: true`. Selecting `confidential` or `restricted` content
 is an affirmative disclosure decision; CI retention and access policy remain

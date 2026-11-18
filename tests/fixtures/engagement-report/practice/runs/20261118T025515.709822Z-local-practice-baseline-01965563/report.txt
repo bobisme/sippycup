@@ -1,0 +1,14 @@
+Sippycup PCAP report
+Capture: /work/eng-report/runs/20261118T025515.709822Z-local-practice-baseline-01965563/capture.pcap
+Generated (UTC): 2026-11-18T02:55:15Z
+
+================================================================
+Capture metadata and hashes
+================================================================
+File name:           /work/eng-report/runs/20261118T025515.709822Z-local-practice-baseline-01965563/capture.pcap
+Number of packets:   24
+File size:           5352 bytes
+Capture duration:    0.068231 seconds
+Earliest packet time: 2026-11-18 02:55:15.732389
+Latest packet time:   2026-11-18 02:55:15.800620
+SHA256:              ae627b0a5a81ff4a374e5f29b04958e7949fc3e2eb3554937b37b1c3d18ffe74

@@ -67,6 +67,13 @@ _sippycup() {
                     -- "${current}")
             )
             ;;
+        summary)
+            COMPREPLY=(
+                $(compgen -W \
+                    "--output --format md html json text --audience owner internal --runs --since --title --generated-at --run-root --profile --manifest --include-journal-notes --forbid-file --force --allow-exceptions --journal --help" \
+                    -- "${current}")
+            )
+            ;;
         practice-target)
             COMPREPLY=(
                 $(compgen -W \

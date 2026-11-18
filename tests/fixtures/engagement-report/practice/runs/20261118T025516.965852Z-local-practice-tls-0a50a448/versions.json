@@ -1,0 +1,45 @@
+{
+  "campaign": "sippycup.dev/campaign-run/v1",
+  "capture": {
+    "name": "tcpdump",
+    "path": "/usr/bin/tcpdump",
+    "sha256": "0d426e2571a22de0d30996fd01bb44c1f267f33065023abea092c88bad16d2d2"
+  },
+  "python": "3.13.5",
+  "report": {
+    "name": "sippycup-report",
+    "path": "/usr/local/bin/sippycup-report",
+    "sha256": "a19c12944744aac0764676be97f23de68421338cd41d941a85728d57c07b160c"
+  },
+  "runner": {
+    "name": "campaign-sipp-runner",
+    "path": "/usr/local/bin/campaign-sipp-runner",
+    "sha256": "505056e07cc1ef935d07e526562a638d2a113e0852b51aab80cdf51a1ccda313"
+  },
+  "runners": {
+    "campaign-sipp-runner": {
+      "name": "campaign-sipp-runner",
+      "path": "/usr/local/bin/campaign-sipp-runner",
+      "sha256": "505056e07cc1ef935d07e526562a638d2a113e0852b51aab80cdf51a1ccda313"
+    },
+    "campaign-softphone-runner": {
+      "name": "campaign-softphone-runner",
+      "path": "/usr/local/bin/campaign-softphone-runner",
+      "sha256": "93674385f2f808e5e4814d295a221f00ec8f3657608a90d2c46179d2335a93fa"
+    }
+  },
+  "stepRunners": [
+    {
+      "firstStep": 1,
+      "lastStep": 1,
+      "runner": "campaign-sipp-runner",
+      "sha256": "505056e07cc1ef935d07e526562a638d2a113e0852b51aab80cdf51a1ccda313"
+    },
+    {
+      "firstStep": 2,
+      "lastStep": 2,
+      "runner": "campaign-softphone-runner",
+      "sha256": "93674385f2f808e5e4814d295a221f00ec8f3657608a90d2c46179d2335a93fa"
+    }
+  ]
+}
