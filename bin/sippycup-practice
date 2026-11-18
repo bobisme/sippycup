@@ -36,10 +36,14 @@ Commands:
                      destinations that misbehave on purpose (no answer, late
                      answer, one-way media, hang-up, 403/429/503, ...) and
                      compare each verdict with the correct one (about 3 minutes)
-  rehearsal [--list] Dress rehearsal: walk the whole owner-facing chain (scope,
+  rehearsal [--list] [--proxy]
+                     Dress rehearsal: walk the whole owner-facing chain (scope,
                      rehearse, preflight, call, campaign, checks, evidence,
                      owner report) with the real commands and check that the
-                     cockpit agrees at every stage (about 3 minutes)
+                     cockpit agrees at every stage, then show the media-scope
+                     safety stop once (about 90 s); --proxy writes the scope
+                     answers for the practice proxy (signaling 127.0.0.3, 407,
+                     media on the practice address)
   help               Show this help
 
 `up` refuses any address outside 127.0.0.0/8 and 127.0.0.1 itself (the

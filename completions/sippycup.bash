@@ -91,7 +91,7 @@ _sippycup() {
         practice-target)
             COMPREPLY=(
                 $(compgen -W \
-                    "build up down status info drill rehearsal help --address --proxy-address --format --list" \
+                    "build up down status info drill rehearsal help --address --proxy-address --format --list --proxy" \
                     -- "${current}")
             )
             ;;

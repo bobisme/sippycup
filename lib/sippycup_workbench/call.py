@@ -1579,18 +1579,30 @@ def _network_activity(
     target: str,
     network_mode: str,
     loopback: bool = False,
+    host: str | None = None,
 ) -> str:
     if not preflight_sent:
         return "none"
     parts = ["1 SIP OPTIONS preflight"]
     placed = False
+    media_elsewhere = ""
     if softphone is not None and softphone.get("started"):
         if softphone.get("registration_attempted"):
             parts.append("1 REGISTER exchange (plus unregistration on exit)")
         if softphone.get("dialed"):
             placed = True
-            media = " with RTP" if (softphone.get("rtp_tx_packets") or softphone.get("rtp_rx_packets")) else ""
-            parts.append(f"1 INVITE dialog{media}")
+            rtp = bool(softphone.get("rtp_tx_packets") or softphone.get("rtp_rx_packets"))
+            # Behind a proxy or SBC the media peer is another address than the
+            # signaling target; say where the RTP really went.
+            peer = str(softphone.get("media_peer") or "")
+            peer_host = peer.rsplit(":", 1)[0].strip("[]") if peer else ""
+            if rtp and softphone.get("error") == "media_peer_outside_scope":
+                # Never name an unapproved address in the activity statement;
+                # the result's softphone facts record it for review.
+                media_elsewhere = ", RTP with a media peer outside the approved addresses until the media-scope stop,"
+            elif rtp and peer_host and host and peer_host != host:
+                media_elsewhere = f", RTP with the media peer {peer} (not the signaling address),"
+            parts.append(f"1 INVITE dialog{' with RTP' if rtp and not media_elsewhere else ''}")
     if network_mode == "private":
         where = (
             "inside the container's private network namespace (loopback, no NAT)"
@@ -1601,7 +1613,7 @@ def _network_activity(
         where = "from the host network namespace"
     else:
         where = "from an unknown network namespace"
-    summary = f"{', '.join(parts)} to {target} {where}"
+    summary = f"{', '.join(parts)} to {target}{media_elsewhere} {where}"
     return summary if placed else f"{summary}; no call placed"
 
 
@@ -2188,6 +2200,7 @@ def _execute(
         target=target_text,
         network_mode=network_mode,
         loopback=ipaddress.ip_address(host).is_loopback,
+        host=host,
     )
     journal = _journal_command(engagement, run_dir, work_root, verdict, profile_name)
     value = {

@@ -146,7 +146,8 @@ media, a hang-up from the server, 403/429/503) and explains each verdict.
 Before a real engagement, `./bin/sippycup practice-target rehearsal` (or
 `make dress-rehearsal`) walks the whole owner-facing chain against the practice
 target, from `scope compile` to the owner report, and prints every command it
-ran with PASS or FAIL per stage.
+ran with PASS or FAIL per stage; `--proxy` (`make dress-rehearsal-proxy`) does
+the same with signaling to the practice proxy and media on another address.
 The same target also runs a Kamailio proxy on `127.0.0.3` in front of
 Asterisk (407 challenges, Record-Route, media on `127.0.0.2`), the shape of a
 typical SBC edge; `work/practice/target-profile-proxy.yaml` approves both

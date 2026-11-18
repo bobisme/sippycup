@@ -13,6 +13,15 @@ will use them on the real engagement, the real public commands:
   checks plan, checks run       the scope's approved posture checks
   journal add, evidence ...     what the cockpit offers for the evidence stage
   summary                       the owner report, with --forbid-file
+  safety stop                   a throwaway engagement (DIR-stop) whose answers
+                                omit the media address: the guided call must
+                                end media-outside-scope and be presented as a
+                                safety stop by the cockpit and owner report
+
+``--proxy`` writes the answers in the proxy shape: signaling to the practice
+proxy (407 challenges, realm and certificate name sippycup-proxy), media from
+the practice address, so signaling and media addresses differ like on most
+real platforms. The approved checks include srtp-policy.
 
 After every stage it asks the cockpit (``go --format json`` and ``go
 --plain``) where the engagement stands and requires both to agree with each
@@ -63,8 +72,14 @@ UDP_CHECKS = (
     "banner-disclosure", "options-methods", "unauthenticated-register", "digest-quality",
     "unauthenticated-invite", "user-enumeration", "nonce-replay",
 )
+# srtp-policy places two 1-second calls on a UDP first target (plain RTP, then
+# a mandatory SDES offer); its findings must reach the owner report.
+CHECKS = (*UDP_CHECKS, "srtp-policy")
 MIN_WINDOW = timedelta(minutes=20)
 COCKPIT_COMPLETE = "Next: every stage is complete"
+# The stop leg: RTP packets the softphone may send to the unapproved media
+# address before the media-scope stop hangs up (the proxy gate's bound).
+STOP_MAX_PACKETS = 10
 
 
 class RehearsalError(RuntimeError):
@@ -75,13 +90,72 @@ class CannotStart(RuntimeError):
     """The rehearsal cannot start; nothing was sent."""
 
 
-def scope_answers(facts: dict[str, Any], *, now: datetime, name: str, ca_file: str) -> str:
+@dataclass(frozen=True)
+class Shape:
+    """What the owner's answers describe: where signaling and media live.
+
+    ``direct`` is Asterisk itself (signaling and media on one address, 401
+    challenges). ``proxy`` is the practice proxy, the shape of most real
+    platforms: signaling to the proxy (407 challenges, Record-Route, its own
+    realm and certificate name), media from a different address.
+    """
+
+    kind: str
+    signaling: str
+    media: tuple[str, ...]
+    server_name: str
+    realm: str
+    prefix: str
+
+
+def shape_for(facts: dict[str, Any], *, proxy: bool, media_approved: bool = True) -> Shape:
+    """The answer shape from the generated connection facts, loopback only.
+
+    ``media_approved=False`` is the deliberate mistake of the stop leg: the
+    owner answers that media comes from the signaling address, so only the
+    signaling address is approved and the real media address is not.
+    """
+    address = practice.validate_address(str(facts["address"]))
+    if not proxy:
+        if not media_approved:
+            raise ValueError("the direct shape has one address; only the proxy shape can omit media")
+        return Shape("direct", address, (address,), practice.DNS_NAME, practice.DNS_NAME, "practice")
+    details = facts.get("proxy")
+    if not isinstance(details, dict) or not details.get("address"):
+        raise CannotStart("the practice facts describe no proxy; rebuild the practice image "
+                          "(practice-target build) and restart the target")
+    signaling = practice.validate_address(str(details["address"]))
+    if signaling == address:
+        raise CannotStart("the practice proxy shares the practice address; restart the target")
+    if details.get("dns_name") != practice.PROXY_DNS_NAME:
+        raise CannotStart(f"unexpected proxy server name {details.get('dns_name')!r}")
+    media = (address,) if media_approved else (signaling,)
+    return Shape("proxy", signaling, media, practice.PROXY_DNS_NAME, practice.PROXY_REALM, "proxy")
+
+
+def checks_section(checks: tuple[str, ...] = CHECKS) -> dict[str, Any]:
+    """``security_checks`` for a UDP first target with an account and a destination.
+
+    ``max_requests`` is exactly the sum of the declared bounds, the same sum
+    ``scope check`` compares it with, so nothing beyond what the approved
+    checks may send is approved.
+    """
+    from sippycup_checks import catalog
+
+    section = {"account": practice.ACCOUNT, "destination": "echo", "cleartext_endpoints": []}
+    total = sum(catalog.declared_bound(catalog.get(item), section, "udp") for item in checks)
+    return {"approved": list(checks), "max_requests": total}
+
+
+def scope_answers(facts: dict[str, Any], *, now: datetime, name: str, ca_file: str,
+                  shape: Shape | None = None, checks: tuple[str, ...] = CHECKS) -> str:
     """The owner's answers for the practice target, as scope.yaml text.
 
     Every value comes from the generated connection facts; the window starts a
     minute ago and ends when the practice approval itself ends.
     """
-    address = practice.validate_address(str(facts["address"]))
+    shape = shape or shape_for(facts, proxy=False)
+    practice.validate_address(str(facts["address"]))
     until = datetime.fromisoformat(str(facts["profile_valid_until_utc"]).replace("Z", "+00:00"))
     start = (now - timedelta(minutes=1)).astimezone(timezone.utc).replace(microsecond=0)
     if until - now < MIN_WINDOW:
@@ -90,13 +164,29 @@ def scope_answers(facts: dict[str, Any], *, now: datetime, name: str, ca_file: s
             "restart the target (practice-target down, then up)"
         )
     stamp = lambda value: value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
-    checks = ", ".join(UDP_CHECKS)
+    if checks:
+        section = checks_section(checks)
+        classes = "[options, call, security-checks]"
+        checks_text = (f"security_checks:\n  approved: [{', '.join(section['approved'])}]\n"
+                       f"  max_requests: {section['max_requests']}\n")
+    else:
+        classes, checks_text = "[options, call]", ""
+    address = shape.signaling
+    if shape.kind == "proxy":
+        where = ("# Proxy shape: signaling goes to the practice proxy, which challenges with\n"
+                 "# 407 in its own realm and Record-Routes; the media address differs from the\n"
+                 "# signaling address, exactly as an owner of such a platform answers.\n")
+        if shape.media == (shape.signaling,):
+            where += ("# DELIBERATE MISTAKE (the stop leg): media is answered as the signaling\n"
+                      "# address, so the real media address is not approved.\n")
+    else:
+        where = ""
     return f"""# Owner answers for the LOCAL PRACTICE TARGET, written by
 # `./bin/sippycup practice-target rehearsal`. Every value comes from the
 # generated practice connection facts (work/practice/connection.json); the
 # address exists only inside the loopback-only practice namespace. On a real
 # engagement this file is filled from the service owner's written answers.
-schema_version: sippycup.dev/scope/v1
+{where}schema_version: sippycup.dev/scope/v1
 name: {name}
 authorization:
   status: approved
@@ -109,18 +199,18 @@ signaling:
   ports: [{practice.SIGNALING_PORTS['udp']}, {practice.SIGNALING_PORTS['tls']}]
   transports: [udp, tls]
 targets:
-  - name: practice-udp
+  - name: {shape.prefix}-udp
     address: {address}
     transport: udp
     port: {practice.SIGNALING_PORTS['udp']}
-  - name: practice-tls
+  - name: {shape.prefix}-tls
     address: {address}
     transport: tls
     port: {practice.SIGNALING_PORTS['tls']}
-    tls_server_name: {practice.DNS_NAME}
+    tls_server_name: {shape.server_name}
     tls_ca_file: {ca_file}
 media:
-  networks: [{address}]
+  networks: [{', '.join(shape.media)}]
   port_range: {{start: {practice.RTP_PORTS['start']}, end: {practice.RTP_PORTS['end']}}}
   protection: [rtp, sdes-srtp]
   codecs: [PCMU, PCMA]
@@ -131,20 +221,20 @@ client:
 account:
   required: true
   username: {practice.ACCOUNT}
-  realm: {practice.DNS_NAME}
+  realm: {shape.realm}
   credential_ref: {CREDENTIAL_REF}
   credential_delivery: other
 destinations:
   - name: echo
-    target: practice-udp
+    target: {shape.prefix}-udp
     user: echo
     expect: echo
   - name: echo-tls
-    target: practice-tls
+    target: {shape.prefix}-tls
     user: echo
     expect: echo
   - name: dtmf
-    target: practice-udp
+    target: {shape.prefix}-udp
     user: dtmf
     expect: agent
 limits:
@@ -161,7 +251,7 @@ stop_conditions:
   unexpected_response: true
   packet_loss_percent: 5
 test_scope:
-  allowed_classes: [options, call, security-checks]
+  allowed_classes: {classes}
   exclusions: [none]
 contact:
   name: practice operator
@@ -170,10 +260,7 @@ contact:
 evidence:
   retention_days: 30
   disclosure: private
-security_checks:
-  approved: [{checks}]
-  max_requests: 40
-"""
+{checks_text}"""
 
 
 def cockpit_view(model: dict[str, Any], plain: str) -> dict[str, Any]:
@@ -284,8 +371,13 @@ Runner = Callable[[list[str], dict[str, str] | None, float], Completed]
 
 
 class Rehearsal:
-    def __init__(self, project: Path, *, runner: Runner | None = None, out=None, now=None) -> None:
+    def __init__(self, project: Path, *, runner: Runner | None = None, out=None, now=None,
+                 proxy: bool = False) -> None:
         self.project = project
+        self.proxy = proxy
+        self.shape: Shape | None = None
+        self.check_findings: list[str] = []
+        self.stop_engagement: Path | None = None
         self.runner = runner or self._run
         self.out = out or sys.stdout
         self.now = now or (lambda: datetime.now(timezone.utc))
@@ -435,6 +527,7 @@ class Rehearsal:
                 "restart the target (practice-target down, then up)"
             )
         self.facts = facts
+        self.shape = shape_for(facts, proxy=self.proxy)
         self.secret = self.password().encode("utf-8")
         # A target started before approvals were archived has no record of its
         # approval yet; record the current one (idempotent) so the owner report
@@ -445,12 +538,16 @@ class Rehearsal:
         )
         self.fact(f"practice target {facts['address']} (UDP/TCP {practice.SIGNALING_PORTS['udp']}, "
                   f"TLS {practice.SIGNALING_PORTS['tls']}), approval until {facts['profile_valid_until_utc']}")
+        if self.shape.kind == "proxy":
+            self.fact(f"proxy shape: signaling to the proxy {self.shape.signaling} ({self.shape.server_name}, "
+                      f"407 in realm {self.shape.realm}), media from {', '.join(self.shape.media)}")
 
     def create_engagement(self) -> None:
         stamp = self.now().strftime("%Y%m%dt%H%M%Sz")
         parent = practice.state_dir(self.project) / "rehearsals"
         parent.mkdir(mode=0o700, exist_ok=True)
-        self.engagement = parent / f"dress-{stamp}-{os.getpid()}"
+        kind = "dress-proxy" if self.proxy else "dress"
+        self.engagement = parent / f"{kind}-{stamp}-{os.getpid()}"
         self.log = None
         self.command([LAUNCHER, "journal", "init", self.eng, "--title", "Dress rehearsal (local practice target)",
                       "--owner", "Practice target"])
@@ -470,22 +567,32 @@ class Rehearsal:
         self.cockpit("scope")
 
     def scope(self) -> None:
+        self.write_answers(self.shape)
+        self.compile_scope()
+        self.cockpit("first-call")
+
+    def write_answers(self, shape: Shape | None, *, checks: tuple[str, ...] = CHECKS) -> None:
         assert self.engagement is not None
         ca = self.engagement / "practice-ca.crt"
         # On a real engagement this is the owner's private CA certificate.
         ca.write_bytes((practice.state_dir(self.project) / "ca.crt").read_bytes())
         ca.chmod(0o600)
-        answers = scope_answers(self.facts, now=self.now(), name=SCOPE_NAME, ca_file=f"{self.eng}/practice-ca.crt")
+        answers = scope_answers(self.facts, now=self.now(), name=SCOPE_NAME, ca_file=f"{self.eng}/practice-ca.crt",
+                                shape=shape, checks=checks)
         practice.write_private(self.engagement / "scope.yaml", answers)
-        self.say(f"    (answers written to {self.eng}/scope.yaml from the practice connection facts; "
-                 "on a real engagement you fill it from the owner's written reply)")
+        assert shape is not None
+        media = ", ".join(shape.media)
+        self.say(f"    (answers written to {self.eng}/scope.yaml from the practice connection facts: signaling "
+                 f"{shape.signaling}, media {media}; on a real engagement you fill it from the owner's written reply)")
+
+    def compile_scope(self) -> None:
+        assert self.engagement is not None
         self.command([LAUNCHER, "scope", "check", self.eng])
         compiled = self.command([LAUNCHER, "scope", "compile", self.eng])
         for name in ("target-profile.yaml", "campaign.yaml", "expectations.yaml"):
             self.require((self.engagement / name).is_file(), f"scope compile did not write {name}")
         self.require("authorization status: approved" in compiled.stdout, "the compiled profile is not approved")
         self.fact("compiled target-profile.yaml (approved), campaign.yaml, expectations.yaml")
-        self.cockpit("first-call")
 
     def rehearse(self) -> None:
         result = self.command([LAUNCHER, "rehearse", f"{self.eng}/target-profile.yaml"])
@@ -493,16 +600,17 @@ class Rehearsal:
         self.command([LAUNCHER, "checks", "plan", f"{self.eng}/target-profile.yaml"])
 
     def preflight(self) -> None:
-        address = self.facts["address"]
+        assert self.shape is not None
+        address, name = self.shape.signaling, self.shape.server_name
         udp = self.command([LAUNCHER, "--practice", "preflight", address, str(practice.SIGNALING_PORTS["udp"]), "udp"])
         self.require("Result: PASS" in udp.stdout, "UDP preflight did not PASS")
         tls = self.command([
             LAUNCHER, "--practice", "preflight", address, str(practice.SIGNALING_PORTS["tls"]), "tls",
-            "--tls-ca", f"{self.eng}/practice-ca.crt", "--tls-server-name", practice.DNS_NAME,
+            "--tls-ca", f"{self.eng}/practice-ca.crt", "--tls-server-name", name,
         ])
-        self.require("Result: PASS" in tls.stdout and f"TLS: verified for name '{practice.DNS_NAME}'" in tls.stdout,
+        self.require("Result: PASS" in tls.stdout and f"TLS: verified for name '{name}'" in tls.stdout,
                      "TLS preflight did not PASS with a verified server name")
-        self.fact(f"UDP 200 OK; TLS 200 OK verified as {practice.DNS_NAME} against the engagement's CA copy")
+        self.fact(f"UDP 200 OK from {address}; TLS 200 OK verified as {name} against the engagement's CA copy")
 
     def calls(self) -> None:
         model = self.cockpit("first-call")
@@ -511,7 +619,7 @@ class Rehearsal:
         argv = [*action["argv"], "--secret-file", PASSWORD_FILE, "--format", "json"]
         result = self.run_result(self.command(argv, timeout=180))
         self.require(result.get("verdict") == "pass", f"guided call verdict {result.get('verdict')!r}")
-        self.fact(f"guided call to echo: pass; run {result.get('runDirectory')}")
+        self.fact(f"guided call to echo: pass; {self.shape_seen(result)}; run {result.get('runDirectory')}")
         self.journal_call(result)
         route = argv[:argv.index("call")]
         dtmf = self.run_result(self.command([
@@ -523,11 +631,22 @@ class Rehearsal:
         outbound = (wire.get("outbound") or {}).get("digits")
         inbound = (wire.get("inbound") or {}).get("digits")
         self.require(dtmf.get("verdict") == "pass", f"DTMF call verdict {dtmf.get('verdict')!r}")
+        self.shape_seen(dtmf)
         self.require(outbound == DTMF_DIGITS and inbound == DTMF_DIGITS,
                      f"the digits and their echo were not both seen on the wire: {json.dumps(wire)[:200]}")
         self.fact(f"DTMF call: pass; {outbound} sent and {inbound} echoed, both decoded from the capture")
         self.journal_call(dtmf)
         self.cockpit("campaign")
+
+    def shape_seen(self, result: dict[str, Any]) -> str:
+        """Signaling went to the answered signaling address, media to an answered media address."""
+        assert self.shape is not None
+        host = (result.get("target") or {}).get("host")
+        peer = str((result.get("softphone") or {}).get("media_peer") or "")
+        self.require(host == self.shape.signaling, f"the call signalled to {host!r}, not {self.shape.signaling}")
+        self.require(peer.rsplit(":", 1)[0] in self.shape.media,
+                     f"the media peer {peer!r} is not the answered media address {', '.join(self.shape.media)}")
+        return f"signaling {host}, media peer {peer}"
 
     def campaign(self) -> None:
         assert self.engagement is not None
@@ -559,10 +678,18 @@ class Rehearsal:
             [*action["argv"], "--secret-file", PASSWORD_FILE, "--format", "json"], timeout=300, expect=(0, 1)))
         statuses = {row["id"]: row["status"] for row in (result.get("findings") or {}).get("checks", [])}
         self.require(result.get("state") == "completed", f"checks state {result.get('state')!r}")
-        self.require(all(statuses.get(item) in {"passed", "finding"} for item in UDP_CHECKS),
+        self.require(all(statuses.get(item) in {"passed", "finding"} for item in CHECKS),
                      f"an approved check did not run to an outcome: {statuses}")
         found = sorted(item["id"] for item in (result.get("findings") or {}).get("findings", []))
-        self.fact(f"{result.get('requestsSent')} requests; findings: {', '.join(found) or 'none'}")
+        self.check_findings = found
+        if self.proxy:
+            rows = {row["id"]: row for row in (result.get("findings") or {}).get("checks", [])}
+            text = json.dumps(rows.get("unauthenticated-invite") or {})
+            self.require("407" in text, f"unauthenticated-invite did not see the proxy's 407: {text[:300]}")
+        bound = checks_section()["max_requests"]
+        sent = result.get("requestsSent")
+        self.require(isinstance(sent, int) and sent <= bound, f"checks sent {sent!r} requests, bound {bound}")
+        self.fact(f"{sent} requests (bound {bound}); findings: {', '.join(found) or 'none'}")
         self.cockpit("evidence")
 
     def evidence(self) -> None:
@@ -596,12 +723,125 @@ class Rehearsal:
                      f"report run counts {kinds}")
         practice_runs = [run["id"] for run in report.get("runs", []) if run.get("practiceApproval")]
         self.require(len(practice_runs) == 1, f"expected the practice call labelled as practice, got {practice_runs}")
+        reported = sorted(item["id"] for item in report.get("findings", []) if item.get("checkId"))
+        self.require(sorted(self.check_findings) == reported,
+                     f"the owner report's check findings {reported} differ from the checks run's {self.check_findings}")
+        srtp = [item for item in reported if item.startswith("srtp-policy.")]
+        self.require(srtp == [item for item in self.check_findings if item.startswith("srtp-policy.")],
+                     "the srtp-policy findings are not in the owner report")
+        self.fact(f"srtp-policy findings in the owner report: {', '.join(srtp) or 'none (the check passed)'}")
         leaked = files_containing(self.engagement, self.secret)
         self.require(not leaked, f"the practice password appears in {leaked}")
         self.fact(f"report/engagement-report.html: {sum(kinds.values())} runs, "
                   f"{sum((report.get('findingCounts') or {}).values())} findings, 0 integrity exceptions; "
                   "the password appears in no file of the engagement")
         self.cockpit(None)
+
+    def safety_stop(self) -> None:
+        """The stop leg: the owner forgot the media address; the call must stop itself.
+
+        It runs in a throwaway sibling engagement (``DIR-stop``) so the main
+        engagement's owner report stays clean, through the same public
+        commands: scope answers that approve only the proxy (media answered as
+        the signaling address), scope check and compile, rehearse, the
+        cockpit's guided call, its journal entry and manifest, and the owner
+        report of that engagement.
+        """
+        assert self.engagement is not None and self.secret is not None
+        main = self.engagement
+        stop_shape = shape_for(self.facts, proxy=True, media_approved=False)
+        self.engagement = main.parent / f"{main.name}-stop"
+        try:
+            self.command([LAUNCHER, "journal", "init", self.eng, "--title",
+                          "Dress rehearsal stop leg (media address not approved)", "--owner", "Practice target"])
+            self.command([LAUNCHER, "scope", "init", self.eng, "--name", SCOPE_NAME])
+            self.write_answers(stop_shape, checks=())
+            self.compile_scope()
+            self.rehearse_only()
+            model = self.cockpit("practice")
+            action = find_action(model, "call")
+            argv = [*action["argv"], "--secret-file", PASSWORD_FILE, "--format", "json"]
+            result = self.run_result(self.command(argv, timeout=180, expect=(1,)))
+            softphone = result.get("softphone") if isinstance(result.get("softphone"), dict) else {}
+            peer = str(softphone.get("media_peer") or "")
+            media = self.facts["address"]
+            self.require(result.get("verdict") == "media-outside-scope",
+                         f"expected verdict media-outside-scope, got {result.get('verdict')!r}")
+            self.require(peer.split(":")[0] == media, f"the stopped media peer is {peer!r}, not {media}")
+            self.journal_call(result)
+            model = self.cockpit("first-call")
+            self.require_stop_presented(model)
+            for _ in range(4):
+                model = self._model()
+                pending = [item for item in model.get("actions", [])
+                           if item.get("available") and str(item.get("id", "")).startswith("manifest-")]
+                if not pending:
+                    break
+                self.command(list(pending[0]["argv"]))
+            model = self._model()
+            # summary exits 1 when the report has integrity exceptions; here
+            # exactly one is required (the packets sent before the stop).
+            self.command([*find_action(model, "summary")["argv"], "--forbid-file", PASSWORD_FILE], expect=(1,))
+            report = json.loads((self.engagement / "report" / "report.json").read_text(encoding="utf-8"))
+            sent = self.stop_report(report)
+            leaked = files_containing(self.engagement, self.secret)
+            self.require(not leaked, f"the practice password appears in {leaked}")
+            self.fact(f"verdict media-outside-scope (exit 1): media peer {peer} not approved; "
+                      f"{sent} RTP packets sent there (at most {STOP_MAX_PACKETS})")
+            self.cockpit("first-call")
+            self.fact("cockpit: [stop] safety stop, not a target failure; owner report: one informational "
+                      "safety-stop observation and the packets disclosed as the one integrity exception")
+            self.fact(f"evidence: {self.eng} (the main engagement's report is untouched)")
+        finally:
+            self.stop_engagement = self.engagement
+            self.engagement = main
+
+    def rehearse_only(self) -> None:
+        result = self.command([LAUNCHER, "rehearse", f"{self.eng}/target-profile.yaml"])
+        self.require("Ready: yes" in result.stdout, "rehearse did not report Ready: yes")
+
+    def require_stop_presented(self, model: dict[str, Any]) -> None:
+        """The cockpit must call the stopped call a safety stop, not a target failure."""
+        runs = [run for run in model.get("runs", []) if run.get("kind") == "call"]
+        self.require(len(runs) == 1, f"the cockpit lists {len(runs)} guided calls, expected 1")
+        run = runs[0]
+        self.require(run.get("verdict") == "media-outside-scope" and run.get("safetyStop") is True,
+                     f"the cockpit does not mark the call as a safety stop: {json.dumps(run)[:300]}")
+        self.require(str(run.get("reason") or "").startswith("safety stop, not a target failure"),
+                     f"the cockpit's reason for the stop is {run.get('reason')!r}")
+
+    def stop_report(self, report: dict[str, Any]) -> int:
+        """Check how the owner report presents the stop; return the RTP packets sent.
+
+        The few RTP packets sent before the stop did reach an address the
+        scope does not approve, so the report must disclose them as an
+        integrity exception (exactly that one); the stop itself is an
+        informational observation, never a target finding, and the oracle
+        failures it causes are not reported as a target observation.
+        """
+        calls = [run for run in report.get("runs", []) if run.get("kind") == "call"]
+        self.require(len(calls) == 1, f"the stop report lists {len(calls)} calls, expected 1")
+        run = calls[0]
+        media = ((run.get("details") or {}).get("media") or {})
+        sent = media.get("toPeerPackets")
+        self.require(isinstance(sent, int) and sent <= STOP_MAX_PACKETS,
+                     f"{sent!r} RTP packets were sent to the unapproved media address (at most {STOP_MAX_PACKETS})")
+        self.require(media.get("peerApproved") is False, f"the report does not mark the media peer unapproved: {media}")
+        exceptions = report.get("integrityExceptions") or []
+        self.require([item.get("code") for item in exceptions] == ["media-peer-not-approved"],
+                     f"expected exactly the media-peer-not-approved integrity exception, got {exceptions}")
+        self.require(f"after {sent} RTP packet" in str(exceptions[0].get("detail")),
+                     f"the integrity exception does not say how many packets reached the peer: {exceptions[0]}")
+        findings = {item["id"]: item for item in report.get("findings", [])}
+        stop = findings.get("obs-media-outside-scope") or {}
+        self.require(stop.get("severity") == "info" and "safety stop" in str(stop.get("title", "")).lower(),
+                     f"the report does not present the stop as an informational safety stop: {stop}")
+        self.require(set(findings) == {"obs-media-outside-scope"},
+                     f"the stop produced other observations or findings: {sorted(findings)}")
+        rows = " ".join(str(row.get("title")) for row in (report.get("executiveSummary") or {}).get("rows", []))
+        self.require("safety stop" in rows and "did not pass" not in rows,
+                     f"the executive summary does not call the run a safety stop: {rows}")
+        return sent
 
     # -- driver -----------------------------------------------------------
     def teardown(self) -> None:
@@ -613,14 +853,17 @@ class Rehearsal:
 
     def execute(self) -> int:
         started = time.monotonic()
-        self.say("Dress rehearsal: the owner-facing chain against the local practice target "
+        shape = ("the proxy shape (signaling to the practice proxy, media from the practice address)"
+                 if self.proxy else "the practice target directly")
+        self.say(f"Dress rehearsal: the owner-facing chain against {shape} "
                  "(loopback inside the practice namespace only).")
         bodies = (
             self.target_up, self.create_engagement, self.practice_call, self.scope, self.rehearse,
             self.preflight, self.calls, self.campaign, self.checks, self.evidence, self.summary,
+            self.safety_stop,
         )
         try:
-            for title, body in zip(STAGE_TITLES, bodies, strict=True):
+            for title, body in zip(stage_titles(self.proxy), bodies, strict=True):
                 self.stage(title, body)
         except CannotStart as error:
             self.say(f"practice-target rehearsal: {error}")
@@ -635,6 +878,9 @@ class Rehearsal:
             "ok": ok,
             "elapsedSeconds": elapsed,
             "engagement": self.eng if self.engagement else None,
+            "shape": "proxy" if self.proxy else "direct",
+            "stopEngagement": (self.stop_engagement.relative_to(self.project).as_posix()
+                               if self.stop_engagement else None),
             "stages": [stage.__dict__ for stage in self.stages],
             "practiceTargetStartedHere": self.started_target,
             "network_activity": "loopback inside the practice namespace only",
@@ -646,12 +892,16 @@ class Rehearsal:
         for stage in self.stages:
             self.say(f"  {stage.status:<4} {stage.number:>2}. {stage.title} ({stage.seconds} s)")
         verdict = "PASS" if ok else "FAIL"
-        self.say(f"Dress rehearsal: {verdict} in {elapsed} s "
+        label = "Dress rehearsal (proxy shape)" if self.proxy else "Dress rehearsal"
+        self.say(f"{label}: {verdict} in {elapsed} s "
                  f"({sum(1 for s in self.stages if s.status == 'PASS')}/{len(self.stages)} stages)")
         if self.engagement is not None:
             self.say(f"Evidence: {self.eng} (commands.log and summary.json in rehearsal/; "
                      f"owner report in report/)")
             self.say(f"Cockpit:  {LAUNCHER} go {self.eng}")
+        if self.stop_engagement is not None and self.stop_engagement.is_dir():
+            self.say(f"Stop leg: {self.stop_engagement.relative_to(self.project).as_posix()} "
+                     "(throwaway engagement; its own owner report shows the safety stop)")
         self.say("Network activity: loopback inside the practice namespace only")
         return 0 if ok else 1
 
@@ -666,15 +916,20 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--list", action="store_true", help="print the stages; send nothing")
+    parser.add_argument(
+        "--proxy", action="store_true",
+        help="describe the proxy shape in the scope answers: signaling to the practice proxy (407 challenges, "
+             "Record-Route, realm and certificate name sippycup-proxy), media from the practice address",
+    )
     parser.add_argument("--project-dir", required=True, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
     project = Path(arguments.project_dir).resolve()
     if arguments.list:
-        for number, title in enumerate(STAGE_TITLES, 1):
+        for number, title in enumerate(stage_titles(arguments.proxy), 1):
             print(f"{number:>2}. {title}")
         print("Network activity: none")
         return 0
-    return Rehearsal(project).execute()
+    return Rehearsal(project, proxy=arguments.proxy).execute()
 
 
 STAGE_TITLES = (
@@ -689,7 +944,17 @@ STAGE_TITLES = (
     "security checks plan and run",
     "evidence: manifests and journal entries",
     "owner report: summary --forbid-file",
+    "safety stop: media address not approved (throwaway engagement)",
 )
+
+
+def stage_titles(proxy: bool) -> tuple[str, ...]:
+    if not proxy:
+        return STAGE_TITLES
+    titles = list(STAGE_TITLES)
+    titles[3] = "scope answers (proxy shape): scope check, scope compile"
+    titles[5] = "preflight to the proxy: UDP and verified TLS"
+    return tuple(titles)
 
 
 if __name__ == "__main__":

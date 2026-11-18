@@ -74,7 +74,9 @@ def practice_route(model: dict[str, Any]) -> bool:
     """
     practice = model["readiness"]["practice"]
     host = model["target"].get("host")
-    return bool(practice.get("up") and practice.get("address") and host == practice["address"])
+    # The practice proxy is a second address in the same namespace (bn-2g0).
+    addresses = practice.get("addresses") or ([practice["address"]] if practice.get("address") else [])
+    return bool(practice.get("up") and host and host in addresses)
 
 
 def _route(model: dict[str, Any]) -> list[str]:

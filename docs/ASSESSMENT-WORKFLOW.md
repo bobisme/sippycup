@@ -247,7 +247,13 @@ practice target:
 
 ```sh
 ./bin/sippycup practice-target rehearsal
+./bin/sippycup practice-target rehearsal --proxy   # signaling and media on different addresses, 407
 ```
+
+Use `--proxy` when the platform is a proxy or SBC: the scope answers then
+name the signaling address and the media address separately, exactly as the
+owner's reply will. Both variants end by showing the media-scope safety stop
+once, in a throwaway engagement, with the media address left out of the scope.
 
 It creates a fresh engagement under `work/practice/rehearsals/`, writes a
 scope answers file for the practice target, and then runs `scope compile`,

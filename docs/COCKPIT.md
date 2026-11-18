@@ -69,6 +69,7 @@ Status always uses text markers; colour is only a supplement and is off when
 | `[ok]` | done or healthy |
 | `[!!]` | needs attention, or blocked |
 | `[??]` | unknown or unreadable |
+| `[stop]` | a run Sippycup stopped itself to stay inside the scope (for example `media-outside-scope`): a safety stop, not a target failure |
 | `[  ]` | not done yet |
 | `[>>]` | the current stage |
 | `[--]` | recommended but skipped |
@@ -93,7 +94,8 @@ press `?` or type `sN` to read it in the cockpit.
 5. **First call**: one guided baseline call with a PASS verdict.
 6. **Campaign**: freeze the campaign plan, then run it.
 7. **Security checks**: `checks plan`, then `checks run` (through `--practice`
-   when the target is the practice address; the password comes from the same
+   when the target is the practice address or the practice proxy's address,
+   like every live action; the password comes from the same
    `file`/`env` prompt as the call). Done when a checks run completed: its
    `result.json` state is `completed` and no check ended in `error`. Findings
    are the output of a completed run, not a failure. Shown as `[--]` not

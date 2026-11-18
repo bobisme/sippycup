@@ -119,6 +119,8 @@ def run_line(index: int, run: dict[str, Any]) -> str:
     marker = "[ok]" if run["passed"] else "[??]" if not run["readable"] else "[!!]"
     if run.get("verdict") == "incomplete":
         marker = "[??]"
+    if run.get("safetyStop"):
+        marker = "[stop]"
     reason = f" - {run['reason']}" if run.get("reason") else ""
     return (f"{index:>2}. {marker} {run.get('time') or '-':20} {run['kind']:13} {str(run.get('verdict')):12} "
             f"{run['relative']}{reason}")

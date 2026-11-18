@@ -191,7 +191,12 @@ stage just finished. It prints PASS or FAIL per stage with the exact commands,
 exits 0 only when every stage passed (1 on a failure, 2 when it could not
 start), keeps the evidence in `work/practice/rehearsals/dress-STAMP/`, and
 starts and stops the practice target only when it was down. `--list` prints
-the stages and sends nothing. `make dress-rehearsal` runs it. See
+the stages and sends nothing. `make dress-rehearsal` runs it. The approved
+checks include `srtp-policy`, and a last stage shows the media-scope safety
+stop once in a throwaway engagement (`DIR-stop`). `--proxy` (`make
+dress-rehearsal-proxy`) writes the scope answers in the proxy shape:
+signaling to the practice proxy `127.0.0.3` (407 challenges, realm and
+certificate name `sippycup-proxy`), media from `127.0.0.2`. See
 `PRACTICE-TARGET.md`.
 
 ## Bash completion
