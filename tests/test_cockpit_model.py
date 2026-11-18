@@ -191,7 +191,7 @@ class CockpitModelTests(unittest.TestCase):
                          call["argv"])
 
     def test_commands_not_in_registry_are_hidden(self) -> None:
-        root = compiled_engagement(self.repo, now=NOW)
+        root = compiled_engagement(self.repo, now=NOW, checks=True)
         without = self.model(root, commands={"call", "campaign", "scope", "practice-target"})
         self.assertNotIn("checks-run", action_ids(without))
         self.assertNotIn("summary", action_ids(without))
@@ -199,7 +199,89 @@ class CockpitModelTests(unittest.TestCase):
         self.assertIn("checks-plan", action_ids(with_new))
         checks = next(item for item in with_new["actions"] if item["id"] == "checks-run")
         self.assertEqual("live", checks["network"])
+        self.assertEqual("checks", checks["stage"])
         self.assertEqual(["./bin/sippycup", "checks", "run", "work/eng/target-profile.yaml"], checks["argv"])
+
+    def test_checks_on_the_practice_address_route_through_practice_and_ask_for_the_password(self) -> None:
+        practice_state(self.repo, now=NOW)
+        root = compiled_engagement(self.repo, now=NOW, checks=True, account=True)
+        model = self.model(root)
+        checks = next(item for item in model["actions"] if item["id"] == "checks-run")
+        self.assertEqual(["./bin/sippycup", "--practice", "checks", "run", "work/eng/target-profile.yaml"],
+                         checks["argv"])
+        self.assertEqual("call", checks["secret"])
+
+    def test_checks_stage_is_not_applicable_without_approved_checks(self) -> None:
+        root = compiled_engagement(self.repo, now=NOW)
+        model = self.model(root)
+        self.assertEqual("not-applicable", stage(model, "checks")["state"])
+        self.assertIn("not applicable", "\n".join(render_dashboard(model)))
+        self.assertNotIn("checks-run", [a["id"] for a in model["actions"] if a["available"]])
+
+    def test_checks_stage_follows_a_completed_checks_run(self) -> None:
+        root = compiled_engagement(self.repo, now=NOW, checks=True)
+        write_run(root, "calls", "20261117T100000.000000Z-call", {"result.json": call_result("pass")})
+        write_run(root, "runs", "20261117T101000.000000Z-camp", {"result.json": {"state": "succeeded"}})
+        model = self.model(root)
+        self.assertEqual("checks", model["currentStage"])
+        self.assertIn("checks plan", model["nextCommand"])
+        findings = {"apiVersion": "sippycup.dev/findings/v1", "checks": [{"id": "banner-disclosure", "status": "finding"}],
+                    "findings": [{"severity": "info", "title": "Edge announces its product name"}]}
+        write_run(root, "checks", "20261117T102000.000000Z-stopped", {
+            "findings.json": {**findings, "checks": [{"id": "banner-disclosure", "status": "error"}]},
+            "result.json": {"apiVersion": "sippycup.dev/checks-result/v1", "state": "stopped", "exitCode": 3}})
+        model = self.model(root)
+        run = next(item for item in model["runs"] if item["name"].endswith("stopped"))
+        self.assertFalse(run["completed"])
+        self.assertEqual("checks", model["currentStage"])
+        write_run(root, "checks", "20261117T103000.000000Z-done", {
+            "findings.json": findings,
+            "result.json": {"apiVersion": "sippycup.dev/checks-result/v1", "state": "completed", "exitCode": 0}})
+        model = self.model(root)
+        run = next(item for item in model["runs"] if item["name"].endswith("done"))
+        self.assertTrue(run["completed"])
+        self.assertEqual("1 finding(s)", run["verdict"])
+        self.assertEqual("done", stage(model, "checks")["state"])
+        self.assertEqual("evidence", model["currentStage"])
+
+    def test_report_stage_needs_a_clean_owner_report_that_covers_every_run(self) -> None:
+        from sippycup_workbench.journal import append
+
+        root = compiled_engagement(self.repo, now=NOW)
+        write_run(root, "calls", "20261117T100000.000000Z-call", {
+            "result.json": call_result("pass"), "evidence-manifest.json": {"privacy": {"status": "pass"}}})
+        write_run(root, "runs", "20261117T101000.000000Z-camp", {
+            "result.json": {"state": "succeeded"}, "evidence-manifest.json": {"privacy": {"status": "pass"}}})
+        append(root, kind="action", summary="call", evidence=["calls/20261117T100000.000000Z-call/result.json"])
+        append(root, kind="action", summary="camp", evidence=["runs/20261117T101000.000000Z-camp/result.json"])
+        model = self.model(root)
+        self.assertEqual("report", model["currentStage"])
+        self.assertEqual("./bin/sippycup summary work/eng --journal", model["nextCommand"])
+
+        def report(directory, exceptions, runs, generated):
+            path = root / directory
+            path.mkdir()
+            (path / "report.json").write_text(json.dumps({
+                "apiVersion": "sippycup.dev/engagement-report/v1", "engagement": {"generatedAt": generated},
+                "integrityExceptions": [{"code": "x"}] * exceptions, "runs": [{"id": run} for run in runs]}))
+
+        report("report", 1, ["20261117T100000.000000Z-call", "20261117T101000.000000Z-camp"], "2026-11-17T11:00:00Z")
+        model = self.model(root)
+        self.assertEqual("report", model["currentStage"])
+        self.assertEqual(1, model["files"]["ownerReport"]["integrityExceptions"])
+        report("report-20261117T113000Z", 0, ["20261117T100000.000000Z-call"], "2026-11-17T11:30:00Z")
+        self.assertEqual("report", self.model(root)["currentStage"])  # misses the campaign run
+        report("report-20261117T114000Z", 0, ["20261117T100000.000000Z-call", "20261117T101000.000000Z-camp"],
+               "2026-11-17T11:40:00Z")
+        model = self.model(root)
+        self.assertEqual("done", stage(model, "report")["state"])
+        self.assertEqual("practice", model["currentStage"])  # the skipped recommendation comes back last
+        self.assertEqual("report-20261117T114000Z/report.json", model["files"]["ownerReport"]["path"])
+
+    def test_init_profile_is_not_offered_because_it_blocks_scope_compile(self) -> None:
+        root = make_engagement(self.repo)
+        model = self.model(root)
+        self.assertNotIn("create-target-profile", action_ids(model))
 
     def test_advisor_paths_are_shown_relative_to_the_repository(self) -> None:
         root = make_engagement(self.repo)
@@ -231,14 +313,19 @@ class CockpitModelTests(unittest.TestCase):
         (root / "plan.json").write_text("{}", encoding="utf-8")
         append(root, kind="action", summary="call", evidence=["calls/20261117T100000.000000Z-call/result.json"])
         append(root, kind="action", summary="camp", evidence=["runs/20261117T101000.000000Z-camp/result.json"])
-        (root / "internal-report-01.md").write_text("draft", encoding="utf-8")
+        (root / "report").mkdir()
+        (root / "report" / "report.json").write_text(json.dumps({
+            "apiVersion": "sippycup.dev/engagement-report/v1", "engagement": {"generatedAt": "2026-11-17T11:00:00Z"},
+            "integrityExceptions": [], "runs": [{"id": "20261117T100000.000000Z-call"},
+                                                {"id": "20261117T101000.000000Z-camp"}]}), encoding="utf-8")
         model = self.model(root)
-        self.assertEqual([s["state"] for s in model["stages"]], ["done"] * 8, model["stages"])
+        states = [s["state"] for s in model["stages"]]
+        self.assertEqual(states, ["done"] * 6 + ["not-applicable"] + ["done"] * 2, model["stages"])
         self.assertIsNone(model["nextCommand"])
         self.assertIn("every stage is complete", render_dashboard(model)[-1])
 
     def test_stage_help_text_lives_in_one_module(self) -> None:
-        self.assertEqual([stage.number for stage in help_text.STAGES], list(range(1, 9)))
+        self.assertEqual([stage.number for stage in help_text.STAGES], list(range(1, 10)))
         for stage_text in help_text.STAGES:
             self.assertGreater(len(stage_text.what_and_why), 120, stage_text.identifier)
             for source in stage_text.source.split(","):

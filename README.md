@@ -21,7 +21,7 @@ make build
 
 `./bin/sippycup go` is the operator cockpit. It shows where the engagement
 stands (scope, authorization countdown, target, image, practice target,
-journal, runs), walks the eight stages from an empty engagement to a report,
+journal, runs), walks the nine stages from an empty engagement to the owner report,
 and starts the next public command after a confirmation panel. LIVE actions
 need the last four characters of the approval id; the cockpit never bypasses a
 gate. `--plain` prints the dashboard once; `--format json` gives the model.
@@ -143,6 +143,10 @@ See `docs/PRACTICE-TARGET.md` for the step-by-step rehearsal and its limits.
 To learn what failures look like, `./bin/sippycup practice-target drill` places the
 guided call against destinations that misbehave on purpose (no answer, one-way
 media, a hang-up from the server, 403/429/503) and explains each verdict.
+Before a real engagement, `./bin/sippycup practice-target rehearsal` (or
+`make dress-rehearsal`) walks the whole owner-facing chain against the practice
+target, from `scope compile` to the owner report, and prints every command it
+ran with PASS or FAIL per stage.
 
 Do not casually add `--privileged`.
 

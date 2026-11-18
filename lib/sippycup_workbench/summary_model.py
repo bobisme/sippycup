@@ -1324,6 +1324,51 @@ def _exception(code: str, run: str | None, detail: str) -> dict[str, Any]:
     return {"code": code, "run": run, "detail": detail}
 
 
+def _practice_scopes(root: Path, raws: list[RawRun], scope: _Scope) -> dict[str, _Scope]:
+    """Per-run scopes for runs whose recorded profile is an archived practice approval.
+
+    The run's own ``profile.json`` is only compared with the archive written by
+    ``practice-target up``; it never authorizes anything by itself.
+    """
+    from . import summary_practice
+
+    archive = summary_practice.load_archive(root, read_yaml)
+    if not archive:
+        return {}
+    scopes: dict[str, _Scope] = {}
+    by_ref: dict[str, Source] = {}
+    for raw in raws:
+        if raw.kind not in {"call", "check"}:
+            continue
+        path = raw.path / "profile.json"
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            recorded = read_json(path, MAX_YAML_BYTES)
+        except Unreadable:
+            continue
+        found = summary_practice.match(recorded, archive)
+        if found is None:
+            continue
+        ref, document = found
+        source = by_ref.get(ref)
+        if source is None:
+            source = _profile_source(document, ref)
+            source.kind = "practice-target-profile"
+            by_ref[ref] = source
+            for network in source.networks:
+                scope.addresses.add_network(network)
+            scope.server_names.reviewed.update(source.server_names)
+        scopes[raw.name] = _Scope(
+            sources=[source],
+            destinations=scope.destinations,
+            accounts=scope.accounts,
+            server_names=scope.server_names,
+            addresses=scope.addresses,
+        )
+    return scopes
+
+
 def _window_check(scope: _Scope, model: dict[str, Any], raw_targets: list[str]) -> list[dict[str, Any]]:
     exceptions = []
     started = parse_time(model.get("started"))
@@ -1750,6 +1795,10 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         local = _canonical_ip(result.get("localAddress"))
         if local and not addresses.approved(local):
             addresses.assessor.add(local)
+    # Runs placed against the local practice target are checked against the
+    # archived practice approval they used (see summary_practice), never
+    # against a run's own copy of a profile.
+    practice_scopes = _practice_scopes(root, raws, scope)
     filtered: list[RawRun] = []
     for raw in raws:
         if options.run_globs and not any(
@@ -1789,24 +1838,31 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         if start and end and end >= start:
             model["durationSeconds"] = round((end - start).total_seconds(), 3)
         model["evidence"] = _evidence(raw, ctx, f"{prefix}.evidence")
+        run_scope = practice_scopes.get(raw.name, scope)
+        if run_scope is not scope:
+            model["practiceApproval"] = run_scope.sources[0].ref
+            model["reasons"].append(
+                "practice target run (loopback-only practice namespace; checked against "
+                f"{run_scope.sources[0].ref}, not owner traffic)"
+            )
         if model["readable"] != "unreadable":
             raw_targets = []
             for target in [model.get("target")] + list(model.get("targets") or []) + [c.get("target") for c in model["details"].get("cases", [])]:
                 if target and target.get("_raw"):
                     raw_targets.append(target["_raw"])
-            model["integrity"].extend(_target_check(scope, model, model.get("target"), "target"))
+            model["integrity"].extend(_target_check(run_scope, model, model.get("target"), "target"))
             for case in model["details"].get("cases", []):
                 if case["outcome"] != "not-run":
-                    model["integrity"].extend(_target_check(scope, model, case.get("target"), f"step {case['step']} target"))
+                    model["integrity"].extend(_target_check(run_scope, model, case.get("target"), f"step {case['step']} target"))
             for entry in model["details"].get("preflight", []) if isinstance(model["details"].get("preflight"), list) else []:
-                model["integrity"].extend(_target_check(scope, model, entry.get("target"), "preflight target"))
+                model["integrity"].extend(_target_check(run_scope, model, entry.get("target"), "preflight target"))
             peer = model.pop("_mediaPeerRaw", None)
             if peer and not addresses.approved(peer):
                 model["integrity"].append(
                     _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address")
                 )
-            model["integrity"].extend(_window_check(scope, model, raw_targets))
-            model["integrity"].extend(_ceiling_check(model, scope))
+            model["integrity"].extend(_window_check(run_scope, model, raw_targets))
+            model["integrity"].extend(_ceiling_check(model, run_scope))
             if model["started"] is None:
                 model["problems"].append("no recorded start time; approval window not checked")
         model.pop("_mediaPeerRaw", None)
@@ -1844,13 +1900,26 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             "from": iso(min(s.valid_from for s in windows)),
             "until": iso(max(s.valid_until for s in windows)),
         }
+    # Practice-target runs reached only the loopback practice namespace, so
+    # they are listed and checked but not counted as traffic to the target.
+    owner_runs = [r for r in runs if not r.get("practiceApproval")]
+    practice_sources = list({s.ref: s for s in (sc.sources[0] for sc in practice_scopes.values())}.values())
     totals = {
-        metric: _sum(runs, metric)
+        metric: _sum(owner_runs, metric)
         for metric in ("optionsRequests", "registerAttempts", "calls", "rtpPacketsSent", "capturePackets", "captureBytes", "checkRequests")
     }
-    totals["optionsRequests"]["lowerBound"] = any(r["sent"].get("optionsLowerBound") for r in runs)
+    totals["optionsRequests"]["lowerBound"] = any(r["sent"].get("optionsLowerBound") for r in owner_runs)
     ceilings = _engagement_ceilings(sources)
-    limitations = _limitations(runs, sources, source_warnings + discovery_warnings, journal)
+    limitations = _limitations(owner_runs, sources, source_warnings + discovery_warnings, journal)
+    practice_runs = [r for r in runs if r.get("practiceApproval")]
+    if practice_runs:
+        limitations.insert(0, {
+            "code": "practice-runs",
+            "text": f"{len(practice_runs)} run(s) ({', '.join(r['label'] for r in practice_runs)}) used the generated "
+                    "practice profile against the local practice target (a loopback address inside a network namespace "
+                    "with no other interface). They are rehearsal runs, not assessment traffic: they are not counted in "
+                    "the totals and were re-checked against the archived practice approval each one used.",
+        })
     recommendations = []
     for finding in findings:
         if finding.get("remediation"):
@@ -1884,7 +1953,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         },
         "toolbox": _toolbox([raw for raw in filtered], options.cli_version),
         "authorization": {
-            "sources": [source.as_dict() for source in sources],
+            "sources": [source.as_dict() for source in sources + practice_sources],
             "window": window,
             "approvedAddresses": sorted({str(n) for n in addresses.networks}),
             "present": bool(sources),

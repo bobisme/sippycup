@@ -176,7 +176,11 @@ from the recorded artifacts, and lists any exception at the top:
 
 Windows come from the scope file and target profiles (campaign manifests have
 none); a campaign is checked against the windows of the records that approve
-its addresses. A run whose target no windowed record covers, or that recorded
+its addresses. A call or checks run whose recorded `profile.json` equals one
+of the practice approvals that `practice-target up` archived in
+`work/practice/approvals/` (loopback-only, `LOCAL-PRACTICE-ONLY`) is checked
+against that approval instead, labelled as a practice target run, and left out
+of the totals; see `PRACTICE-TARGET.md`. A run whose target no windowed record covers, or that recorded
 no start time, is listed under Limitations as not re-checked against a
 window; it is not silently treated as inside one.
 

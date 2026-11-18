@@ -1524,6 +1524,19 @@ def _write_outputs_atomic(outputs: tuple[tuple[Path, bytes], ...]) -> None:
             temporary.unlink(missing_ok=True)
 
 
+
+def operator_path(path: Path | str) -> str:
+    """Spell a run directory the way the operator sees it on the host.
+
+    Inside the image the repository's work/ tree is mounted at /work, so a
+    containerized run (``--isolated``, ``--practice``) would otherwise print
+    ``/work/ENGAGEMENT/runs/RUN``, a path that does not exist on the host.
+    """
+    text = str(path)
+    if text == "/work" or text.startswith("/work/"):
+        return "work" + text[len("/work"):]
+    return text
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -1607,7 +1620,7 @@ def main(argv: list[str] | None = None) -> int:
         except (ManifestError, CampaignRuntimeError, OSError) as error:
             _emit_error(args, "invalid_plan_or_runtime", str(error))
             return 2
-        print(run_directory)
+        print(operator_path(run_directory))
         if result.exit_code:
             _emit_error(
                 args,
@@ -1657,7 +1670,7 @@ def main(argv: list[str] | None = None) -> int:
         except (ManifestError, CampaignRuntimeError, OSError) as error:
             _emit_error(args, "invalid_plan_or_runtime", str(error))
             return 2
-        print(run_directory)
+        print(operator_path(run_directory))
         if result.exit_code:
             _emit_error(
                 args,

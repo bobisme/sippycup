@@ -153,6 +153,7 @@ All files are under the ignored `work/practice/` directory (mode 0700):
 | `uac.cfg`, `uac-tls.cfg`, `uac-srtp.cfg` | PJSUA configurations (UDP, TLS with server verification, SDES-SRTP), mode 0600 |
 | `phrase.wav` | The caller-to-callee canary, decoded, for PJSUA to play |
 | `connection.json` | Public connection facts |
+| `approvals/STAMP-target-profile.yaml`, `approvals/STAMP-target-profile-tls.yaml` | An immutable copy of each practice approval that `up` issued (STAMP is the `up` time). `down` keeps them; they hold no secret |
 
 The templates are in `examples/practice/`. The checked-in profile template
 uses placeholders that cannot pass `rehearse`, so there is no standing
@@ -322,6 +323,84 @@ raises a codec's priority), and the image has only the G.711 codecs, so
 `hold` (a server-initiated re-INVITE with `sendonly`) is not possible with the
 dialplan applications in the minimal module set: `StartMusicOnHold` does not
 send a re-INVITE.
+
+## Dress rehearsal
+
+The drill rehearses failures of one command. The dress rehearsal rehearses
+the whole owner-facing chain, in the order you will use it on the real
+engagement, with the real public commands:
+
+```sh
+./bin/sippycup practice-target rehearsal          # about 2 minutes
+./bin/sippycup practice-target rehearsal --list   # the stages; sends nothing
+make dress-rehearsal                              # the same, with the make image variables
+```
+
+| # | Stage | Commands |
+| --- | --- | --- |
+| 1 | Practice target up and verified | `practice-target status` (and `up` when it is down) |
+| 2 | New engagement | `journal init DIR`, `scope init DIR --name dress-rehearsal` |
+| 3 | Practice call from the cockpit (stage 2) | the cockpit's `--practice call work/practice/target-profile.yaml --dial echo ...`, then the `journal add` the call prints |
+| 4 | Scope | writes the answers file `DIR/scope.yaml` from the connection facts, copies the CA to `DIR/practice-ca.crt`, then `scope check DIR`, `scope compile DIR` |
+| 5 | Rehearse | `rehearse DIR/target-profile.yaml`, `checks plan DIR/target-profile.yaml` |
+| 6 | Preflight | `--practice preflight 127.0.0.2 5060 udp`; `--practice preflight 127.0.0.2 5061 tls --tls-ca DIR/practice-ca.crt --tls-server-name sippycup-practice` |
+| 7 | Guided call | the cockpit's `--practice call DIR/target-profile.yaml --dial echo --username practice` plus `--secret-file`, then `--dial dtmf --dtmf '159#'`; each with its `journal add` |
+| 8 | Campaign | the cockpit's `campaign plan` and `--practice campaign run ... --secret-env practice-password=SIPPYCUP_COCKPIT_SECRET` (UDP and TLS OPTIONS, UDP and TLS authenticated calls) |
+| 9 | Security checks | `checks plan`, then the cockpit's `--practice checks run DIR/target-profile.yaml` plus `--secret-file` (the seven UDP checks) |
+| 10 | Evidence | each `journal add` and `evidence manifest` that the cockpit offers |
+| 11 | Owner report | the cockpit's `summary DIR --journal` plus `--forbid-file work/practice/account.password` |
+
+DIR is `work/practice/rehearsals/dress-STAMP-PID`. Where a stage says "the
+cockpit's", the rehearsal takes the exact argv from `./bin/sippycup go DIR
+--format json` and adds only what the cockpit's confirmation panel would add
+(the password source). After each stage it runs `go DIR --plain` and `go DIR
+--format json` and requires that both name the same current stage and next
+command, and that this is the stage that should follow. A stage passes only
+when its own assertions hold, for example: verdict `pass`; the DTMF digits
+decoded from the capture in both directions; TLS verified as
+`sippycup-practice`; campaign `succeeded` with four steps and its run directory
+printed as a host path; every approved check ran to `passed` or `finding`;
+an owner report with zero integrity exceptions that labels the practice call
+as practice; and the practice password in no file of the engagement.
+
+Output is one `[PASS]` or `[FAIL]` line per stage with the commands it ran
+(the password is never printed; the campaign's variable is shown as
+`<from work/practice/account.password>`), then a table and the total time.
+The first failure stops the chain; later stages are `SKIP`. Exit status: 0
+when every stage passed, 1 on a failure, 2 when it could not start (no
+practice image, or the practice approval ends in under 20 minutes). The
+evidence stays in DIR: every run, the owner report in `report/`, the full
+output of every command in `rehearsal/commands.log`, and
+`rehearsal/summary.json`. When the target was down, the rehearsal starts it
+and takes it down again; when it was up, it stays up with the same password
+and CA. The answers file uses approval id `LOCAL-PRACTICE-REHEARSAL` and the
+window from now until the practice approval ends.
+
+Like the drill, it has no address, profile, or host option, and it reaches
+the target only through `--practice`. `make dress-rehearsal-gate` runs it
+through `tests/test_dress_rehearsal_gate.py` (opt-in with
+`SIPPYCUP_DRESS_REHEARSAL_GATE=1`) and also requires that the target is left
+as it was found.
+
+### Practice runs in the owner report
+
+Every `up` issues a new four-hour approval and overwrites
+`target-profile.yaml`, so a run placed before a restart used to fall outside
+the window of the current profile, and `summary` reported
+`outside-approval-window`. A practice call in a real engagement (the cockpit's
+stage 2 writes it to `DIR/practice-calls/`, and the call prints a `journal add`
+for it) was reported as `target-not-approved`. Now `up` keeps each approval in
+`work/practice/approvals/`, and `summary` checks a call or checks run whose
+recorded `profile.json` is equal, field for field, to one of those archived
+approvals against that approval only. An archived file counts only when it is
+a target profile with approval id `LOCAL-PRACTICE-ONLY` whose host and every
+approved address are IPv4 loopback addresses other than `127.0.0.1`. Such runs
+are listed with the reason "practice target run", appear with the archived
+approval (kind `practice-target-profile`) under Authorization, are not counted
+in the totals, and are named in a `practice-runs` limitation. Every other run
+is checked exactly as before; a practice approval never covers a run that did
+not use it. Runs made before this archive existed have no record and are
+still reported.
 
 ## Regression gate
 

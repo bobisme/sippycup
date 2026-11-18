@@ -62,13 +62,17 @@ def write_approved_profile(
 
 
 def scope_text(*, valid_from: datetime, valid_until: datetime, address: str = "127.0.0.2",
-               account: bool = False, approval_id: str = "QUAD-APPROVAL-7Q2X") -> str:
+               account: bool = False, approval_id: str = "QUAD-APPROVAL-7Q2X", checks: bool = False) -> str:
     account_block = (
         "account:\n  required: true\n  username: practice\n  realm: sippycup-practice\n"
         "  credential_ref: practice-password\n  credential_delivery: other\n"
         if account else
         "account:\n  required: false\n  username: null\n  realm: null\n  credential_ref: null\n"
         "  credential_delivery: null\n"
+    )
+    classes = "[options, call, security-checks]" if checks else "[options, call]"
+    checks_block = (
+        "security_checks:\n  approved: [banner-disclosure, options-methods]\n  max_requests: 10\n" if checks else ""
     )
     return f"""schema_version: sippycup.dev/scope/v1
 name: fixture
@@ -114,7 +118,7 @@ stop_conditions:
   unexpected_response: true
   packet_loss_percent: 5
 test_scope:
-  allowed_classes: [options, call]
+  allowed_classes: {classes}
   exclusions: [none]
 contact:
   name: Fixture operator
@@ -123,7 +127,7 @@ contact:
 evidence:
   retention_days: 30
   disclosure: private
-"""
+{checks_block}"""
 
 
 def write_scope(root: Path, text: str) -> Path:
@@ -133,12 +137,13 @@ def write_scope(root: Path, text: str) -> Path:
     return path
 
 
-def compiled_engagement(repo: Path, *, now: datetime, account: bool = False, name: str = "eng") -> Path:
+def compiled_engagement(repo: Path, *, now: datetime, account: bool = False, name: str = "eng",
+                        checks: bool = False) -> Path:
     from sippycup_workbench.scope_derive import compile_scope
 
     root = make_engagement(repo, name)
     write_scope(root, scope_text(valid_from=now - timedelta(hours=1), valid_until=now + timedelta(hours=3),
-                                 account=account))
+                                 account=account, checks=checks))
     outcome = compile_scope(root, now=now)
     if outcome.exit_code != 0:
         raise AssertionError(outcome.as_dict())

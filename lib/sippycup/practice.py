@@ -365,6 +365,7 @@ def prepare(
         state / "target-profile-tls.yaml",
         render(_template(project, "target-profile-tls.template.yaml"), values),
     )
+    archive_approvals(state, started)
     write_private(state / "campaign.yaml", render(_template(project, "campaign.yaml"), values))
     write_private(
         state / "campaign-tls.yaml", render(_template(project, "campaign-tls.yaml"), values)
@@ -401,6 +402,48 @@ def prepare(
     )
     write_private(state / "connection.json", json.dumps(facts, indent=2, sort_keys=True) + "\n")
     return facts
+
+
+APPROVALS_DIR = "approvals"
+APPROVED_PROFILES = ("target-profile.yaml", "target-profile-tls.yaml")
+
+
+def archive_approvals(state: Path, started: datetime) -> list[Path]:
+    """Keep an immutable dated copy of each practice approval that `up` issued.
+
+    Every `up` issues a new LOCAL-PRACTICE-ONLY window and overwrites the
+    current profiles. Runs placed under an earlier window still need the record
+    that authorized them, so `summary` can check them against it after a
+    restart. The copies live in ``work/practice/approvals/``; they are created
+    exclusively, never rewritten, and ``down`` keeps them (they hold no secret).
+    """
+    archive = state / APPROVALS_DIR
+    if archive.is_symlink():
+        raise PracticeError(f"refusing a symlinked practice approvals directory: {archive}")
+    archive.mkdir(mode=0o700, exist_ok=True)
+    stamp = started.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    written = []
+    existing = {
+        item.read_bytes()
+        for item in archive.iterdir()
+        if item.suffix == ".yaml" and item.is_file() and not item.is_symlink()
+    }
+    for name in APPROVED_PROFILES:
+        data = (state / name).read_bytes()
+        if data in existing:
+            continue  # this approval is already on record (an idempotent re-archive)
+        for attempt in range(1, 100):
+            suffix = "" if attempt == 1 else f"-{attempt}"
+            path = archive / f"{stamp}{suffix}-{name}"
+            try:
+                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            except FileExistsError:
+                continue
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(data)
+            written.append(path)
+            break
+    return written
 
 
 def record_build(project_dir: str | Path, *, image: str, image_id: str) -> None:

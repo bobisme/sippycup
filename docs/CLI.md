@@ -158,6 +158,23 @@ is 0 when written, 1 when written with integrity exceptions, 2 for usage
 errors, and 3 when the privacy lint refused to write anything. See
 `ENGAGEMENT-REPORT.md`.
 
+## Dress rehearsal
+
+`./bin/sippycup practice-target rehearsal` walks the whole owner-facing chain
+against the local practice target with the public commands, in the order of a
+real engagement: `journal init`, `scope init`, the cockpit's practice call,
+`scope check` and `scope compile`, `rehearse`, `--practice preflight` over UDP
+and verified TLS, the guided `call` (and one with `--dtmf`), `campaign plan`
+and `campaign run`, `checks plan` and `checks run`, the cockpit's evidence
+actions, and `summary --forbid-file`. After each stage it requires
+`go --plain` and `go --format json` to agree with each other and with the
+stage just finished. It prints PASS or FAIL per stage with the exact commands,
+exits 0 only when every stage passed (1 on a failure, 2 when it could not
+start), keeps the evidence in `work/practice/rehearsals/dress-STAMP/`, and
+starts and stops the practice target only when it was down. `--list` prints
+the stages and sends nothing. `make dress-rehearsal` runs it. See
+`PRACTICE-TARGET.md`.
+
 ## Bash completion
 
 Source the completion from a checkout:

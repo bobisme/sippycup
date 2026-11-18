@@ -14,7 +14,7 @@ from .help_text import STAGE_BY_ID
 from .model import authorization_window
 from .runs import human_size
 
-STAGE_MARKER = {"done": "[ok]", "current": "[>>]", "todo": "[  ]", "recommended": "[--]"}
+STAGE_MARKER = {"done": "[ok]", "current": "[>>]", "todo": "[  ]", "recommended": "[--]", "not-applicable": "[--]"}
 
 
 def step_marker(done: bool | None) -> str:
@@ -166,7 +166,8 @@ def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, ques
     lines.append("Stages")
     for stage in model["stages"]:
         suffix = "   <- you are here" if stage["state"] == "current" else (
-            "   (recommended before the first live call)" if stage["state"] == "recommended" else "")
+            "   (recommended before the first live call)" if stage["state"] == "recommended" else
+            "   (not applicable: the profile approves no checks)" if stage["state"] == "not-applicable" else "")
         lines.append(f"  {STAGE_MARKER[stage['state']]} {stage['number']} {stage['title']}{suffix}")
         if all_steps or stage["state"] in {"current"}:
             for step in stage["steps"]:

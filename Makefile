@@ -178,6 +178,20 @@ practice-drill-gate:
 		SIPPYCUP_PRACTICE_GATE_ONLY=faults PYTHONDONTWRITEBYTECODE=1 \
 		python3 -m unittest tests.test_practice_gate -v
 
+# Dress rehearsal: the whole owner-facing chain (scope, rehearse, preflight,
+# call, campaign, checks, evidence, owner report) against the practice target,
+# with the cockpit checked at every stage (about 2 minutes; needs both images).
+# `dress-rehearsal-gate` runs the same through its opt-in unittest wrapper.
+.PHONY: dress-rehearsal dress-rehearsal-gate
+dress-rehearsal:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		./bin/sippycup practice-target rehearsal
+
+dress-rehearsal-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		SIPPYCUP_DRESS_REHEARSAL_GATE=1 SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
+		PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_dress_rehearsal_gate -v
+
 # Live, loopback-only softphone checks (DTMF, SRTP, registration status,
 # media scope) against the practice target plus one isolated PJSUA peer.
 # Opt-in like practice-gate; needs both images. See docs/PRACTICE-TARGET.md.

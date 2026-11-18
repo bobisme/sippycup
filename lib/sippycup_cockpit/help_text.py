@@ -90,8 +90,22 @@ STAGES: tuple[StageText, ...] = (
         "docs/CAMPAIGN-MANIFEST.md",
     ),
     StageText(
-        "evidence",
+        "checks",
         7,
+        "Security checks",
+        "The owner-approved posture checks: banners, TLS, cleartext "
+        "signaling, unauthenticated REGISTER and INVITE, Digest quality, the "
+        "account-existence differential, and nonce replay. Each check has a "
+        "declared request bound and runs only when the profile's "
+        "security_checks.approved list names it; `checks plan` shows exactly "
+        "what would be sent. A completed run writes findings.json; a finding "
+        "is a candidate to confirm, not a failed run. The stage is shown as "
+        "not applicable when the scope approves no checks.",
+        "docs/SECURITY-CHECKS.md",
+    ),
+    StageText(
+        "evidence",
+        8,
         "Evidence",
         "Every run needs an evidence manifest (hashes, sensitivity, privacy "
         "findings) and a journal entry that links it; the guided call writes "
@@ -102,13 +116,16 @@ STAGES: tuple[StageText, ...] = (
     ),
     StageText(
         "report",
-        8,
-        "Report",
-        "Render the internal report draft from the verified journal; it is "
-        "confidential and never overwrites an earlier draft. A tool result is "
-        "a candidate until it is independently reproduced or explained. The "
-        "public outline copies no private content.",
-        "docs/ASSESSMENT-WORKFLOW.md (Verification and report drafts)",
+        9,
+        "Owner report",
+        "Write the owner report with `summary`: what was approved, what ran, "
+        "what happened, what was found, and what to fix. It re-checks every "
+        "run against the approved targets, window, and ceilings and lists any "
+        "integrity exception first; pass --forbid-file with the account "
+        "password file so the report fails closed if the password appears. "
+        "The stage is done when a report covers every run and has no "
+        "integrity exception. An internal draft from the journal is optional.",
+        "docs/ENGAGEMENT-REPORT.md, docs/ASSESSMENT-WORKFLOW.md",
     ),
 )
 
@@ -118,7 +135,7 @@ KEYS: tuple[tuple[str, str], ...] = (
     ("Up/Down, j/k", "move the selection"),
     ("Tab", "switch between Actions and Runs"),
     ("Enter", "open the selected action (confirmation first) or run"),
-    ("1-8", "show what and why for that stage"),
+    ("1-9", "show what and why for that stage"),
     ("r", "refresh the dashboard from disk"),
     ("S", "skip (or un-skip) the recommended practice stage"),
     ("?", "show or hide this help"),
@@ -139,7 +156,7 @@ MARKERS: tuple[tuple[str, str], ...] = (
     ("[ok]", "done or healthy"),
     ("[>>]", "current stage"),
     ("[  ]", "not done yet"),
-    ("[--]", "recommended, not required"),
+    ("[--]", "recommended, not required; or not applicable"),
     ("[!!]", "blocked, expired, stale, or failed"),
     ("[??]", "unknown or unreadable"),
     ("[LIVE]", "sends traffic to a target; typed confirmation required"),

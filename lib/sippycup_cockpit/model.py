@@ -9,6 +9,7 @@ cannot drift from what actually exists.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 from datetime import datetime, timezone
@@ -174,10 +175,17 @@ def _profile_facts(path: Path, repo: Path, now: datetime) -> dict[str, Any]:
         ),
         limits=document.get("limits") if isinstance(document.get("limits"), dict) else {},
         target=document.get("target") if isinstance(document.get("target"), dict) else {},
+        securityChecks=_approved_checks(document),
     )
     if not facts["literalHost"] and "target.host must be one of the literal approved_addresses" not in facts["errors"]:
         facts["errors"].append("target.host must itself be one of the literal approved_addresses")
     return facts
+
+
+def _approved_checks(document: dict[str, Any]) -> list[str]:
+    section = document.get("security_checks")
+    approved = section.get("approved") if isinstance(section, dict) else None
+    return [str(item) for item in approved if isinstance(item, str)] if isinstance(approved, list) else []
 
 
 def _scope_facts(root: Path, repo: Path, now: datetime) -> dict[str, Any]:
@@ -372,6 +380,14 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
     call_pass = any(run["kind"] == "call" and run["passed"] for run in runs)
     call_any = any(run["kind"] == "call" for run in runs)
     campaign_pass = any(run["kind"] == "campaign" and run["passed"] for run in runs)
+    checks_approved = bool(profile.get("securityChecks"))
+    checks_runs = [run for run in runs if run["kind"] == "checks"]
+    checks_done = any(run.get("completed") for run in checks_runs)
+    owner = files.get("ownerReport")
+    reportable = sorted(run["name"] for run in live_runs if run["readable"])
+    owner_written = bool(owner)
+    owner_clean = bool(owner) and owner.get("integrityExceptions") == 0
+    owner_current = bool(owner) and set(reportable) <= set(owner.get("runs") or [])
     scope_ok = scope["state"] == "complete" or (not scope["present"] and profile["present"] and profile["ready"])
     manifests = bool(live_runs) and all(run["evidenceManifest"] for run in live_runs)
     journal_linked = bool(live_runs) and all(
@@ -410,13 +426,23 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
             _step("frozen plan present (campaign plan)", files["plan"]),
             _step("campaign run succeeded", campaign_pass),
         ],
+        "checks": [
+            _step(f"checks approved in the profile ({len(profile.get('securityChecks') or [])})"
+                  if checks_approved else "checks approved in the profile (security_checks.approved)",
+                  checks_approved if profile["present"] else None),
+            _step("checks run completed (findings.json)", checks_done),
+        ],
         "evidence": [
             _step("every run has an evidence manifest", manifests),
             _step("journal links every run", journal_linked),
             _step("evidence pack created (optional)", files["packs"]),
         ],
         "report": [
-            _step("internal report draft rendered", files["internalReport"]),
+            _step("owner report written (summary)", owner_written),
+            _step(f"owner report has no integrity exceptions ({owner.get('integrityExceptions')})"
+                  if owner else "owner report has no integrity exceptions", owner_clean if owner else False),
+            _step("owner report covers every run (summary after the last run)", owner_current),
+            _step("internal report draft rendered (optional)", files["internalReport"]),
         ],
     }
     done = {
@@ -426,9 +452,12 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
         "rehearse": bool(profile["ready"]),
         "first-call": call_pass,
         "campaign": campaign_pass,
+        "checks": checks_done,
         "evidence": manifests and journal_linked,
-        "report": files["internalReport"],
+        "report": owner_written and owner_clean and owner_current,
     }
+    # The checks stage does not apply when the reviewed profile approves none.
+    not_applicable = {"checks"} if profile["present"] and profile["ready"] and not checks_approved and not checks_done else set()
     # Practice stays the current stage until it passes, a live run exists, or
     # the operator chose to skip it (a UI preference, not a completion record).
     started_after_practice = bool(live_runs) or bool((model.get("preferences") or {}).get("skipPractice"))
@@ -438,6 +467,8 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
         identifier = text.identifier
         if done[identifier]:
             state = "done"
+        elif identifier in not_applicable:
+            state = "not-applicable"
         elif identifier == "practice" and started_after_practice:
             state = "recommended"
         elif not current_found:
@@ -478,6 +509,7 @@ def _files(root: Path, repo: Path) -> dict[str, Any]:
     except OSError:
         pass
     return {
+        "ownerReport": _owner_report(root),
         "profile": exists("target-profile.yaml"),
         "campaign": exists("campaign.yaml"),
         "plan": exists("plan.json"),
@@ -486,6 +518,43 @@ def _files(root: Path, repo: Path) -> dict[str, Any]:
         "internalReport": internal,
         "planFacts": _plan_facts(root / "plan.json") if exists("plan.json") else None,
     }
+
+
+OWNER_REPORT_VERSION = "sippycup.dev/engagement-report/v1"
+MAX_REPORT_BYTES = 8 * 1024 * 1024
+MAX_REPORT_DIRS = 64
+
+
+def _owner_report(root: Path) -> dict[str, Any] | None:
+    """The newest owner report written by `summary` (report/ or report-STAMP/), or None."""
+    candidates: list[Path] = []
+    try:
+        for item in itertools.islice(root.iterdir(), 4096):
+            if (item.name == "report" or item.name.startswith("report-")) and item.is_dir() and not item.is_symlink():
+                candidates.append(item)
+    except OSError:
+        return None
+    newest: dict[str, Any] | None = None
+    for directory in sorted(candidates)[:MAX_REPORT_DIRS]:
+        try:
+            document = read_json(directory / "report.json", limit=MAX_REPORT_BYTES)
+        except Unreadable:
+            continue
+        if not isinstance(document, dict) or document.get("apiVersion") != OWNER_REPORT_VERSION:
+            continue
+        engagement = document.get("engagement") if isinstance(document.get("engagement"), dict) else {}
+        exceptions = document.get("integrityExceptions")
+        runs = document.get("runs") if isinstance(document.get("runs"), list) else []
+        facts = {
+            "path": f"{directory.name}/report.json",
+            "generatedAt": engagement.get("generatedAt") if isinstance(engagement.get("generatedAt"), str) else None,
+            "integrityExceptions": len(exceptions) if isinstance(exceptions, list) else None,
+            "runs": sorted(str(run.get("id")) for run in runs if isinstance(run, dict) and run.get("id")),
+            "audience": document.get("audience"),
+        }
+        if newest is None or (facts["generatedAt"] or "") >= (newest["generatedAt"] or ""):
+            newest = facts
+    return newest
 
 
 def _plan_facts(path: Path) -> dict[str, Any] | None:
@@ -589,7 +658,7 @@ def build_model(
         "runs": discover(root) if engagement_facts["exists"] else [],
         "files": _files(root, repo_path) if engagement_facts["exists"] else {
             "profile": False, "campaign": False, "plan": False, "expectations": False, "packs": False,
-            "internalReport": False, "planFacts": None},
+            "internalReport": False, "planFacts": None, "ownerReport": None},
         "commands": sorted(commands) if commands is not None else None,
         "preferences": load_preferences(root),
     }
