@@ -67,6 +67,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
                 "rehearse",
                 "one-call",
                 "status",
+                "scope",
                 "capture",
                 "preflight",
                 "campaign",

@@ -1,0 +1,85 @@
+# ANNOTATED EXAMPLE ONLY. Every value below is a placeholder.
+#
+# This file is deliberately pending and uses documentation-only addresses, so
+# `./bin/sippycup scope check` rejects it and `scope compile` cannot turn it
+# into an approved profile or a campaign manifest. Create your own private file
+# with `./bin/sippycup scope init ENGAGEMENT_DIR` and fill it only from the
+# service owner's written answers. Never put a password, token, or private key
+# in it: the scope file holds credential REFERENCE names only.
+schema_version: sippycup.dev/scope/v1
+name: example-engagement              # [a-z][a-z0-9-]{0,62}; also names the campaign
+
+authorization:
+  status: pending                     # pending | approved | revoked. Only the owner's written approval makes it approved.
+  approval_id: null                   # the owner's ticket/e-mail/contract identifier
+  approved_by: null                   # who approved it
+  valid_from: null                    # RFC 3339 WITH a timezone; unquoted is fine: 2026-12-01T09:00:00+01:00
+  valid_until: null
+
+signaling:                            # what the owner approved for SIP signaling
+  networks: [203.0.113.0/24]          # literal IPs or CIDRs (documentation range: placeholder)
+  ports: [5060, 5061]
+  transports: [udp, tls]              # udp | tcp | tls
+
+targets:                              # what a baseline will actually probe; one options + one call case each
+  - name: edge                        # [a-z][a-z0-9-]{0,40}
+    address: 203.0.113.10             # literal IP, inside signaling.networks (placeholder)
+    transport: udp                    # must be in signaling.transports
+    port: 5060                        # must be in signaling.ports
+  - name: edge-tls
+    address: 203.0.113.10
+    transport: tls
+    port: 5061
+    tls_server_name: sbc.example.invalid   # required for tls: the name to validate
+
+media:
+  networks: [203.0.113.0/28]          # literal IPs or CIDRs that carry RTP (up to 1024 addresses for oracle expectations)
+  port_range: {start: 10000, end: 10100}
+  protection: [rtp]                   # rtp | sdes-srtp | dtls-srtp
+  codecs: [PCMU]                      # PCMU | PCMA | G722 | OPUS
+  dtmf: rfc4733                       # rfc4733 | sip-info | inband | none
+  symmetric_rtp: true                 # does the service send media to the observed source (clients behind NAT)?
+
+client:
+  source_addresses: [198.51.100.9]    # what the service sees our traffic come from (placeholder)
+
+account:
+  required: true                      # false when no account is needed; then drop the rest
+  username: null
+  realm: null
+  credential_ref: null                # NAME of the secret in your approved external secret source
+  credential_delivery: null           # secret-manager | encrypted-message | in-person | phone-call | other
+
+destinations:                         # what to dial and what it should do
+  - name: echo                        # [a-z][a-z0-9-]{0,62}
+    target: edge                      # optional when there is exactly one target
+    user: "9196"
+    expect: echo                      # echo | agent | reject
+
+limits:                               # all mandatory; the owner's numbers, never a guess
+  calls: null
+  concurrent_calls: null
+  calls_per_second: null
+  packets_per_second: null
+  packets: null
+  bytes: null
+  call_duration_seconds: null
+  total_duration_seconds: null
+
+stop_conditions:
+  consecutive_failures: null
+  unexpected_response: null           # true or false
+  packet_loss_percent: null           # 0..100
+
+test_scope:
+  allowed_classes: [options, call]    # compile generates options and call baseline cases
+  exclusions: [none]                  # explicit exclusions; write [none] if there are none
+
+contact:
+  name: null                          # a live contact who can stop the test
+  channel: null
+  can_stop_test: null
+
+evidence:
+  retention_days: null
+  disclosure: null                    # private | coordinated | public-after-remediation

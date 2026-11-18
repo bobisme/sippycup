@@ -27,6 +27,7 @@
         "engagement": {"type": "object"},
         "journal": {"type": "object"},
         "profile": {"type": "object"},
+        "scope": {"type": "object"},
         "torture": {"type": "object"},
         "runs": {"type": "object"}
       }

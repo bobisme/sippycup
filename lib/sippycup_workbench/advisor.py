@@ -13,6 +13,8 @@ from sippycup_torture.exit_gate import run_exit_gate, validate_review
 
 from .journal import JournalError, verify
 from .profile import ProfileError, load_profile, rehearse
+from .scope import SCOPE_FILE, inspect as inspect_scope
+from .scope_derive import derivative_state
 
 
 ADVISOR_VERSION = "sippycup.dev/engagement-status/v1"
@@ -150,6 +152,100 @@ def _run_facts(root: Path) -> tuple[dict[str, Any], list[str], list[dict[str, An
     return facts, warnings, actions
 
 
+def _scope_facts(
+    root: Path, now: datetime | None
+) -> tuple[dict[str, Any], list[str], list[str], list[dict[str, Any]]]:
+    """Inspect the scope intake file and its derivatives; all local and offline."""
+    scope_file = root / SCOPE_FILE
+    facts: dict[str, Any] = {"path": str(scope_file), "present": False}
+    blockers: list[str] = []
+    warnings: list[str] = []
+    actions: list[dict[str, Any]] = []
+    if not scope_file.is_file() or scope_file.is_symlink():
+        actions.append(
+            _action(
+                "scope-init",
+                "Create the private scope intake file",
+                "One scope file replaces hand-copying the owner's answers into the "
+                "profile, campaign manifest, and oracle expectations.",
+                argv=["./bin/sippycup", "scope", "init", str(root)],
+            )
+        )
+        actions.append(
+            _action(
+                "scope-questions",
+                "Render the question sheet for the service owner",
+                "The sheet lists every answer needed before any live step.",
+                argv=["./bin/sippycup", "scope", "questions"],
+            )
+        )
+        return facts, blockers, warnings, actions
+    report = inspect_scope(scope_file, now=now)
+    derivatives = derivative_state(root, scope_file)
+    facts.update(
+        {
+            "present": True,
+            "sha256": report.sha256,
+            "ok": report.ok,
+            "complete": report.complete,
+            "consistent": report.consistent,
+            "errorCount": len(report.errors),
+            "errorCodes": sorted({item.code for item in report.errors}),
+            "derivatives": derivatives,
+        }
+    )
+    if not report.ok:
+        blockers.append(
+            f"scope intake is incomplete or inconsistent ({len(report.errors)} errors)"
+        )
+        actions.append(
+            _action(
+                "scope-check",
+                "Check the scope intake file",
+                "Lists exactly which answers are missing, malformed, or inconsistent.",
+                argv=["./bin/sippycup", "scope", "check", str(root)],
+            )
+        )
+        actions.append(
+            _action(
+                "scope-questions-open",
+                "Send the unanswered questions to the service owner",
+                "Marks each question answered or unanswered without showing values.",
+                argv=["./bin/sippycup", "scope", "questions", str(root)],
+            )
+        )
+    state = derivatives["state"]
+    if state in {"stale", "invalid"}:
+        stale = sorted(
+            f"{name} ({item['state']})"
+            for name, item in derivatives["items"].items()
+            if item["state"] != "current"
+        )
+        blockers.append(
+            "scope derivatives are stale: " + (", ".join(stale) or derivatives.get("problem", state))
+        )
+        actions.append(
+            _action(
+                "scope-compile",
+                "Regenerate the derived profile, manifest, and expectations",
+                "The scope file changed since compile, or a derivative was edited or removed.",
+                argv=["./bin/sippycup", "scope", "compile", str(root)],
+            )
+        )
+    elif state == "not-compiled" and report.ok:
+        actions.append(
+            _action(
+                "scope-compile",
+                "Generate the profile, manifest, and expectations from the scope file",
+                "The scope is complete and consistent but nothing was generated from it.",
+                argv=["./bin/sippycup", "scope", "compile", str(root)],
+            )
+        )
+    elif state == "partial":
+        warnings.append("some scope derivatives were skipped for unanswered questions")
+    return facts, blockers, warnings, actions
+
+
 def assess(
     engagement: str | Path,
     *,
@@ -196,6 +292,11 @@ def assess(
             "warnings": warnings,
             "nextActions": actions,
         }
+    scope_facts, scope_blockers, scope_warnings, scope_actions = _scope_facts(root, now)
+    facts["scope"] = scope_facts
+    blockers.extend(scope_blockers)
+    warnings.extend(scope_warnings)
+    actions.extend(scope_actions)
     try:
         journal = verify(root)
         facts["journal"] = {
@@ -243,18 +344,19 @@ def assess(
     facts["profile"]["path"] = str(selected_profile)
     if not selected_profile.is_file() or selected_profile.is_symlink():
         blockers.append("target profile is missing")
-        actions.append(
-            _action(
-                "create-target-profile",
-                "Create a pending target profile",
-                "The profile starts blocked and contains no invented approval or address.",
-                argv=[
-                    "./bin/sippycup",
-                    "init",
-                    str(selected_profile),
-                ],
+        if not scope_facts["present"]:
+            actions.append(
+                _action(
+                    "create-target-profile",
+                    "Create a pending target profile",
+                    "The profile starts blocked and contains no invented approval or address.",
+                    argv=[
+                        "./bin/sippycup",
+                        "init",
+                        str(selected_profile),
+                    ],
+                )
             )
-        )
     else:
         facts["profile"]["present"] = True
         try:
@@ -392,6 +494,14 @@ def assess(
                 ],
             )
         )
+
+    if scope_facts.get("derivatives", {}).get("state") in {"stale", "invalid"}:
+        # Do not steer the operator toward stale derived files.
+        actions = [
+            action
+            for action in actions
+            if action["id"] not in {"review-one-call-plan", "prepare-baseline-record"}
+        ]
 
     overall = (
         "blocked"

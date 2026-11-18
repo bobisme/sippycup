@@ -5,6 +5,10 @@ times in UTC and use a new PCAP for each test case.
 
 ## Information to obtain first
 
+`./bin/sippycup scope questions` renders this list as a question sheet for the
+service owner, and `./bin/sippycup scope check` shows what is still unanswered
+(see `SCOPE-INTAKE.md`). The essentials:
+
 - Staging SIP hostname and port.
 - UDP, TCP, or TLS signaling transport.
 - Test username, SIP domain, and password delivery method.

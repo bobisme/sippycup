@@ -111,11 +111,21 @@ accounts or roles, allowed test classes, traffic ceilings, stop conditions,
 validity window, live contact, evidence retention, and disclosure status.
 Credential values stay in the approved external secret source.
 
+Record them once in the private scope file instead of in several files:
+`./bin/sippycup scope init`, `scope questions` (the sheet to send to the
+owner), then fill the file from the written answers and run `scope check`. The
+file holds credential reference names only. See `SCOPE-INTAKE.md`.
+
 ### 3. Network-free rehearsal
 
 Compile the small target profile and full campaign plan. Pin every resolved
 address, lower ceilings as needed, and archive the reviewed manifest and
 frozen plan. Planning and rehearsal send no SIP or RTP traffic.
+
+`./bin/sippycup scope compile` generates the target profile, a baseline campaign
+manifest, and oracle expectations from the scope file; review them, then run
+`rehearse` and `campaign plan` on them as usual. If the scope changes, `status`
+reports the derivatives as stale until you compile again.
 
 ### 4. Baseline
 

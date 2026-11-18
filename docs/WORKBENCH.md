@@ -127,6 +127,13 @@ target. They maintain the human engagement record alongside the campaign
 executor's machine evidence and produce separate internal and public report
 scaffolds. See `ASSESSMENT-WORKFLOW.md`.
 
+## Scope intake
+
+`./bin/sippycup scope init|questions|check|compile` keeps the owner's written
+scope in one private file and generates the profile, a baseline campaign
+manifest, and oracle expectations from it. `status` includes the scope check and
+reports stale derivatives. See `SCOPE-INTAKE.md`.
+
 ## Engagement advisor
 
 Ask Sippycup what is ready and what safe preparation remains:
