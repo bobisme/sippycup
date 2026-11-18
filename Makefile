@@ -236,6 +236,16 @@ practice-proxy-gate:
 		PYTHONDONTWRITEBYTECODE=1 \
 		python3 -m unittest tests.test_practice_proxy_gate -v
 
+# Live, loopback-only emergency-stop gate: starts a long guided call, a call
+# matrix, a softphone campaign, and a checks run against the practice target
+# and stops each mid-flight with `./bin/sippycup stop`; asserts BYE in the
+# capture, no RTP after it, `cancelled` run records, and proved silence.
+# Opt-in like practice-gate; needs both images. See docs/COCKPIT.md.
+.PHONY: stop-gate
+stop-gate:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		PYTHONDONTWRITEBYTECODE=1 python3 tools/stop_gate.py
+
 .PHONY: codec-gate
 codec-gate:
 	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \

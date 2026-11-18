@@ -143,6 +143,100 @@ def _practice_target(root: Path) -> dict[str, Any]:
     }
 
 
+def route_source(address: str, port: int = 5060) -> dict[str, Any]:
+    """The local source address the kernel would use to reach ``address``.
+
+    A connected UDP socket makes the kernel look the route up and bind a
+    source address; ``connect`` on a datagram socket sends no packet.
+    """
+    import ipaddress
+    import socket
+
+    try:
+        family = socket.AF_INET6 if ipaddress.ip_address(address).version == 6 else socket.AF_INET
+    except ValueError:
+        return {"ok": False, "error": "not a literal IP address"}
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect((address, int(port)))
+            source = probe.getsockname()[0]
+    except OSError as error:
+        return {"ok": False, "error": error.strerror or str(error)}
+    return {"ok": True, "source": source}
+
+
+def loopback_capture_probe(timeout: float = 8.0) -> dict[str, Any]:
+    """Prove that capture works here: capture our own datagrams on ``lo``.
+
+    The datagrams go from 127.0.0.1 to 127.0.0.1 inside this network
+    namespace only; nothing reaches any target. Uses the same dumpcap and
+    capabilities as the live commands' capture.
+    """
+    import socket
+    import tempfile
+    import time
+
+    dumpcap = shutil.which("dumpcap")
+    if dumpcap is None:
+        return {"ok": False, "error": "dumpcap is not installed"}
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sink:
+        sink.bind(("127.0.0.1", 0))
+        port = sink.getsockname()[1]
+        with tempfile.TemporaryDirectory(prefix="sippycup-ready-") as scratch:
+            output = Path(scratch) / "probe.pcapng"
+            try:
+                process = subprocess.Popen(
+                    [dumpcap, "-q", "-i", "lo", "-f", f"udp and dst port {port}", "-c", "3",
+                     "-a", f"duration:{int(timeout)}", "-w", str(output)],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                )
+            except OSError as error:
+                return {"ok": False, "error": f"cannot start dumpcap: {error.strerror or error}"}
+            deadline = time.monotonic() + timeout + 2
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+                while process.poll() is None and time.monotonic() < deadline:
+                    sender.sendto(b"sippycup-ready-loopback-probe", ("127.0.0.1", port))
+                    time.sleep(0.2)
+            try:
+                _, stderr = process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                _, stderr = process.communicate()
+            size = output.stat().st_size if output.is_file() else 0
+            packets = 0
+            capinfos = shutil.which("capinfos")
+            if size and capinfos:
+                counted = subprocess.run([capinfos, "-M", "-c", "-r", "-T", str(output)],
+                                         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+                                         check=False)
+                fields = counted.stdout.strip().split("\t")
+                if counted.returncode == 0 and fields and fields[-1].strip().isdigit():
+                    packets = int(fields[-1].strip())
+    ok = process.returncode == 0 and packets > 0
+    value: dict[str, Any] = {"ok": ok, "interface": "lo", "packets": packets, "exit": process.returncode}
+    if not ok:
+        lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+        value["error"] = (lines[-1] if lines else "no packet was captured")[:300]
+    return value
+
+
+def ready_probe(workdir: str | Path, route_to: str | None = None, route_port: int = 5060) -> dict[str, Any]:
+    """The in-container half of ``./bin/sippycup ready``; sends nothing to any target."""
+    caps = _effective_capabilities()
+    value: dict[str, Any] = {
+        "schema_version": "sippycup.dev/ready-probe/v1",
+        "network_activity": "loopback only (datagrams to 127.0.0.1 inside this namespace)",
+        "network_mode": os.environ.get("SIPPYCUP_NETWORK_MODE", "unknown"),
+        "cap_net_raw": 13 in caps,
+        "capture": loopback_capture_probe(),
+        "tools": {name: shutil.which(name) is not None for name in ("dumpcap", "tshark", "pjsua", "sipp")},
+        "route": route_source(route_to, route_port) if route_to else None,
+    }
+    root = Path(workdir)
+    value["workdir_writable"] = root.is_dir() and os.access(root, os.W_OK)
+    return value
+
+
 def diagnose(workdir: str | Path) -> dict[str, Any]:
     tools = {
         name: {"available": shutil.which(name) is not None, "version": _version(name)}

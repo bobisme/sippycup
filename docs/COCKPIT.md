@@ -55,6 +55,8 @@ container), so the dashboard comes from files alone.
 - **Practice**: whether the local practice target is up (from
   `work/practice/connection.json`) and the state of its practice profile.
 - **Journal**: whether the hash chain verifies, and the last entry.
+- **Go/no-go**: the newest `ready` result (`DIR/readiness/`), whether it was
+  for the current profile, and the source address it saw.
 - **Runs**: guided calls, practice calls, campaign runs, and security-check
   runs (`findings.json`, `sippycup.dev/findings/v1`). Unreadable or oversized
   files are shown as `[??]` and never stop the dashboard.
@@ -90,7 +92,9 @@ press `?` or type `sN` to read it in the cockpit.
    done.
 3. **Scope**: answer the owner questions, check, and compile.
 4. **Rehearse**: the compiled profile is approved, in its window, and names a
-   literal address.
+   literal address, and the go/no-go check (`./bin/sippycup ready DIR`, see
+   below) said GO for exactly this profile. It is the gate before the first
+   live stage.
 5. **First call**: one guided baseline call with a PASS verdict.
 6. **Campaign**: freeze the campaign plan, then run it.
 7. **Security checks**: `checks plan`, then `checks run` (through `--practice`
@@ -133,6 +137,10 @@ action starts only when you type the last four characters of the approval id.
 A wrong or empty token starts nothing. The cockpit refuses a LIVE action, and
 offers no token prompt, when:
 
+- there is no GO from `./bin/sippycup ready DIR` for the current profile (the
+  last check said NO-GO, was for an earlier version of the profile, or was
+  never run). The practice call is not gated. A GO older than 12 hours is
+  shown with a reminder to run `ready` again;
 - the profile has no approval id;
 - the profile is not ready (`rehearse` would refuse it: expired, not yet
   valid, not approved, or not a literal address);
@@ -173,6 +181,90 @@ SIGTERM (exit status 143).
 
 When the command finishes, the cockpit shows its exit code and any new run
 directory, then refreshes the dashboard.
+
+## Go/no-go: `./bin/sippycup ready DIR`
+
+Run it right before the first live packet (the cockpit offers it as the
+`[local]` action of stage 4). It sends nothing to the target and gives one
+verdict, GO or NO-GO, with one line per check and, for every NO-GO or
+warning, the command or manual step that fixes it:
+
+| Line | GO when | NO-GO when (fix) |
+| --- | --- | --- |
+| Engagement record | the journal hash chain verifies | no engagement or a broken journal (`journal verify`) |
+| Scope compiled and current | scope.yaml is complete, consistent, and compiled | stale, incomplete, or not compiled (`scope compile`, `scope check`) |
+| Profile passes rehearse | `rehearse` would accept it | any `rehearse` error (fix scope.yaml, compile) |
+| Approval window | it started, and more than `--margin` minutes (default 60) plus a frozen campaign plan's duration remain; shown in local time and UTC with the time remaining (less is a warning) | not open yet (wait until the printed time), expired, or not approved |
+| Clock synchronised | `timedatectl` (or `chronyc tracking`) says synchronised; no time server is contacted | the host says it is not synchronised (`timedatectl set-ntp true`); unknown is a warning |
+| Toolbox image | present and its build record matches this checkout | missing or built from other code (`make build IMAGE=...`) |
+| Capture and disk | a loopback-only capture works inside a container started exactly like the live commands' (`--isolated`, or `--practice` for the practice target), and work/ has `--min-free-mb` (default 2048) free | the capture or the container fails, work/ is not writable, or the disk is short |
+| Credentials | the `--secret-file` or `--secret-env` you will use exists, is yours, mode 0600, beneath work/, and holds exactly one line (a trailing line break is fine: the tools remove it) | missing, group- or world-readable, empty, more than one line, leading or trailing spaces, a byte-order mark, not UTF-8, or inside a run, report, or pack directory |
+| TLS trust (TLS profiles) | the server name is set, the CA file parses, matches the digest frozen in plan.json, and has not expired (under 7 days is a warning) | no server name, an unreadable CA, a changed CA, or an expired one |
+| Network position | the kernel has a route to the target (`ip route get`, no packet), from the host and inside the live commands' container | no route |
+
+The network line prints your source address prominently: it is the address
+the owner allowlists. When that source is private and the target public, a
+NAT sits in the path (the owner must allowlist your public address, and
+one-way audio is more likely); a VPN interface or two default routes are
+also warnings. Without `--secret-file`/`--secret-env`, `DIR/account.password`
+is checked when it exists; otherwise the line is a warning.
+
+The result ends with what the profile authorizes on one screen (addresses,
+media networks and ports, codecs, transports, limits, campaign maxima,
+approved checks, account, window, approval id) for a last read-through. It
+asks for no typed phrase: the LIVE action itself asks for the last four
+characters of the approval id, as always.
+
+`ready` writes the result (no secret) to `DIR/readiness/ready-STAMP.json`
+(mode 0600; `--no-record` skips it) and prints the `journal add` command that
+records it. Exit codes: 0 GO, 1 NO-GO, 2 usage error. `--format json` prints
+the same result (`sippycup.dev/ready/v1`).
+
+```bash
+./bin/sippycup ready work/acme --secret-file work/acme/account.password
+./bin/sippycup ready work/acme --secret-env SIP_PASSWORD --margin 90 --format json
+```
+
+## Emergency stop: `./bin/sippycup stop`
+
+When the owner says "stop now", run `./bin/sippycup stop` in any terminal on
+this host. It ends every Sippycup sender started from this checkout and
+proves the silence:
+
+1. It finds every running container that `./bin/sippycup` started from this
+   checkout (each carries the labels `dev.sippycup.checkout` and
+   `dev.sippycup.command`; an unlabelled container from exactly
+   `$SIPPYCUP_IMAGE` also counts), lists the processes inside each
+   (PJSUA, SIPp, the media sender, dumpcap), and any host process started
+   from this checkout's sender commands.
+2. It sends SIGTERM to each. Every Sippycup command handles it: the guided
+   call, the matrix, the checks, and the campaign's softphone runner hang
+   up an answered call with BYE (CANCEL a ringing one), unregister, stop the
+   capture, and record the run as `cancelled`.
+3. After `--grace` seconds (default 30) anything still running is killed and
+   reported as FORCED.
+4. It looks again from scratch and proves that no container of this
+   checkout is running and no sender process is left (`Silence: PROVED`).
+
+It never touches evidence under work/, containers of another checkout or
+image, or the practice target (add `--include-practice` to take the practice
+target down too, through `practice-target down`). It prints what it stopped
+and how (clean or forced), and a `journal add` command to record the stop
+(`--engagement DIR` fills in the directory). Exit codes: 0 silence proved (or
+nothing was running), 1 something could not be stopped or the runtime could
+not be asked, 2 usage error. `stop --dry-run` lists what would be stopped and
+signals nothing.
+
+```bash
+./bin/sippycup stop --dry-run
+./bin/sippycup stop --engagement work/acme
+```
+
+`make stop-gate` (opt-in, needs both images, about 4 minutes) proves this
+against the practice target: it stops a 60-second guided call, a call matrix,
+a softphone campaign, and a checks run mid-flight and checks that each
+capture shows the BYE and no RTP after it, that each run records
+`cancelled`, and that silence is proved.
 
 ## Run browser
 

@@ -245,6 +245,14 @@ TABLE: tuple[ActionSpec, ...] = (
         requires="scope", progress=False,
     ),
     ActionSpec(
+        "ready", "rehearse", "Go/no-go check before the first live packet (ready)",
+        "Checks window, clock, image, capture, disk, credentials, TLS, and network position; sends nothing to "
+        "the target (one loopback-only capture in a local container).",
+        "local",
+        lambda m: [LAUNCHER, "ready", _eng(m)] if m["profile"]["present"] and m["profile"]["ready"] else None,
+        requires="ready",
+    ),
+    ActionSpec(
         "rehearse", "rehearse", "Rehearse the target profile",
         "Parses scope and expiration without network traffic.",
         "none", lambda m: [LAUNCHER, "rehearse", _profile(m)] if m["profile"]["present"] else None,
@@ -547,6 +555,27 @@ def _bounded_lines(model: dict[str, Any], action: dict[str, Any], repo: Path, no
     return lines
 
 
+GO_STALE_SECONDS = 12 * 3600
+
+
+def _go_no_go_lines(model: dict[str, Any], lines: list[str], now) -> str | None:
+    """The cockpit's gate before a LIVE action: a GO from `ready` for the current profile."""
+    facts = (model.get("readiness") or {}).get("goNoGo") or {}
+    command = f"{LAUNCHER} ready {_eng(model)}"
+    if not facts.get("present"):
+        return f"no go/no-go check yet; run {command} first (it sends nothing to the target)"
+    if not facts.get("current"):
+        return f"the last go/no-go check was for another version of the profile; run {command} again"
+    if facts.get("verdict") != "GO":
+        return f"the last go/no-go check said {facts.get('verdict')} ({facts.get('path')}); fix it and run {command}"
+    age = facts.get("ageSeconds")
+    lines.append(f"Go/no-go: GO at {facts.get('generatedAt')} ({facts.get('path')}); "
+                 f"source address {facts.get('sourceAddress') or '-'}")
+    if isinstance(age, (int, float)) and age > GO_STALE_SECONDS:
+        lines.append(f"  [!!] that check is {int(age // 3600)} hours old; consider running {command} again")
+    return None
+
+
 def prepare_confirmation(
     action: dict[str, Any],
     model: dict[str, Any],
@@ -596,6 +625,11 @@ def prepare_confirmation(
     if not ready:
         confirmation.refused = "the profile is not ready, so the gate would refuse: " + "; ".join(errors or ["blocked"])
         return confirmation
+    if action.get("approval") != "practice":
+        refusal = _go_no_go_lines(model, lines, instant)
+        if refusal:
+            confirmation.refused = refusal
+            return confirmation
     spec = TABLE_BY_ID.get(action["id"])
     if spec and spec.preview:
         preview_argv = spec.preview(model)

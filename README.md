@@ -27,6 +27,20 @@ need the last four characters of the approval id; the cockpit never bypasses a
 gate. `--plain` prints the dashboard once; `--format json` gives the model.
 See [docs/COCKPIT.md](docs/COCKPIT.md).
 
+On the day, two more commands matter:
+
+```sh
+./bin/sippycup ready work/acme --secret-file work/acme/account.password   # GO / NO-GO, sends nothing
+./bin/sippycup stop                                                        # "stop now": end every sender, prove silence
+```
+
+`ready` is the go/no-go check right before the first live packet: approval
+window and margin, clock, image, a loopback-only capture, disk, credentials,
+TLS, and the source address the owner allowlists, each with the command that
+fixes a NO-GO. The cockpit's LIVE actions start only after a GO. `stop` ends
+every Sippycup sender this checkout started (calls hang up with BYE) and
+proves silence; `stop --dry-run` lists what it would stop.
+
 ## Build and enter
 
 ```sh

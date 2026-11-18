@@ -64,8 +64,12 @@ STAGES: tuple[StageText, ...] = (
         "no network traffic: approval present, inside its validity window, "
         "and the target a literal approved address. The one-call plan shows "
         "the exact capture, preflight, and analysis commands. Nothing sends "
-        "traffic unless this stage is ready.",
-        "docs/ASSESSMENT-WORKFLOW.md (Network-free rehearsal)",
+        "traffic unless this stage is ready. Right before the first live "
+        "packet, `ready` gives one GO or NO-GO: approval window and margin, "
+        "clock, image, a loopback-only capture, disk, credentials, TLS, and "
+        "your source address (the one the owner allowlists); the stage is "
+        "done, and LIVE actions start, only with a GO for the current profile.",
+        "docs/ASSESSMENT-WORKFLOW.md (Network-free rehearsal), docs/COCKPIT.md (Go/no-go)",
     ),
     StageText(
         "first-call",

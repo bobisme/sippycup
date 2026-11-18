@@ -117,6 +117,17 @@ def _journal_line(journal: dict[str, Any]) -> str:
             f"{last['kind']}: {last['summary']}")
 
 
+def _go_line(facts: dict[str, Any], model: dict[str, Any]) -> str:
+    command = f"./bin/sippycup ready {model['engagement']['display']}"
+    if not facts.get("present"):
+        return f"[  ] not run yet ({command}, right before the first live packet)"
+    if not facts.get("current"):
+        return f"[!!] last check {facts.get('generatedAt')} was for another profile; run {command}"
+    if facts.get("verdict") != "GO":
+        return f"[!!] NO-GO at {facts.get('generatedAt')} ({facts.get('path')}); fix and run {command}"
+    return f"[ok] GO at {facts.get('generatedAt')}; source address {facts.get('sourceAddress') or '-'}"
+
+
 def run_line(index: int, run: dict[str, Any]) -> str:
     marker = "[ok]" if run["passed"] else "[??]" if not run["readable"] else "[!!]"
     if run.get("verdict") == "incomplete":
@@ -167,6 +178,7 @@ def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, ques
     lines.append(f"Image          {_image_line(model['readiness']['image'])}")
     lines.append(f"Practice       {_practice_line(model['readiness']['practice'], now)}")
     lines.append(f"Journal        {_journal_line(model['journal'])}")
+    lines.append(f"Go/no-go       {_go_line(model['readiness'].get('goNoGo') or {}, model)}")
     for blocker in (model.get("advisor") or {}).get("blockers") or []:
         lines.append(f"Blocker        [!!] {blocker}")
     lines.append("")

@@ -321,6 +321,14 @@ def _practice_facts(repo: Path, now: datetime) -> dict[str, Any]:
     return facts
 
 
+def _go_no_go(root: Path, profile_present: bool, now: datetime) -> dict[str, Any]:
+    from .ready import gate_facts
+
+    facts = gate_facts(root, profile_present, now)
+    facts["command"] = None
+    return facts
+
+
 def _journal_facts(root: Path) -> dict[str, Any]:
     from sippycup_workbench.journal import JournalError, verify
 
@@ -377,6 +385,15 @@ def _step(label: str, done: bool | None) -> dict[str, Any]:
     return {"label": label, "done": done}
 
 
+def _go_label(facts: dict[str, Any]) -> str:
+    if not facts.get("present"):
+        return "go/no-go check says GO for this profile (ready)"
+    when = facts.get("generatedAt")
+    if not facts.get("current"):
+        return f"go/no-go check says GO for this profile (ready; the last one, {when}, was for another profile)"
+    return f"go/no-go check says GO for this profile (ready; last {facts.get('verdict')} at {when})"
+
+
 def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
     """Return the guided stages with completion derived from the model."""
     engagement = model["engagement"]
@@ -387,6 +404,7 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
     runs = model["runs"]
     journal = model["journal"]
     files = model["files"]
+    go_no_go = model["readiness"].get("goNoGo") or {}
     image_ok = None if image.get("present") is None else bool(image.get("present") and not image.get("stale"))
     practice_pass = any(run["kind"] == "practice-call" and run["passed"] for run in runs)
     live_runs = [run for run in runs if run["kind"] not in {"practice-call"}]
@@ -429,6 +447,7 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
         "rehearse": [
             _step("target profile present", profile["present"]),
             _step("rehearse ready (approved, in window, literal address)", profile["ready"]),
+            _step(_go_label(go_no_go), bool(go_no_go.get("go"))),
         ],
         "first-call": [
             _step("guided call run recorded", call_any),
@@ -462,7 +481,9 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
         "prepare": bool(engagement["initialized"]) and image_ok is not False,
         "practice": practice_pass,
         "scope": scope_ok,
-        "rehearse": bool(profile["ready"]),
+        # The go/no-go gate before the first live stage: a GO from `ready`
+        # for exactly the current profile (docs/COCKPIT.md).
+        "rehearse": bool(profile["ready"]) and bool(go_no_go.get("go")),
         "first-call": call_pass,
         "campaign": campaign_pass,
         "checks": checks_done,
@@ -666,6 +687,9 @@ def build_model(
                                "detail": "image not checked (no runtime query was made)"},
             "practice": _practice_facts(repo_path, instant),
             "doctor": {"command": "./bin/sippycup doctor", "note": "inspects the image; network-free"},
+            # The newest `ready` result (DIR/readiness/) against the current profile.
+            "goNoGo": _go_no_go(root, profile["present"], instant) if engagement_facts["exists"] else {
+                "present": False, "verdict": None, "current": False, "go": False},
         },
         "journal": _journal_facts(root) if engagement_facts["exists"] else {
             "valid": False, "entries": 0, "last": None, "error": "engagement directory does not exist",
