@@ -300,6 +300,17 @@ class GatingTests(GuidedCallCase):
         self.assertIn("(outbound: pt 0 x10, pt 8 x2)", note)
         self.assertNotIn("{", note)
 
+    def test_journal_command_names_capture_only_when_it_exists(self):
+        engagement = self.engagement
+        run_dir = engagement / "calls" / "run-1"
+        run_dir.mkdir(parents=True)
+        argv = guided._journal_command(engagement, run_dir, self.work, "cancelled", "p")
+        self.assertNotIn("calls/run-1/capture.pcap", argv)
+        self.assertIn("calls/run-1/result.json", argv)
+        (run_dir / "capture.pcap").write_bytes(b"")
+        argv = guided._journal_command(engagement, run_dir, self.work, "pass", "p")
+        self.assertIn("calls/run-1/capture.pcap", argv)
+
     def test_loopback_preflight_note_points_at_practice(self):
         self.assertIn("./bin/sippycup --practice", guided._loopback_preflight_note("127.0.0.3"))
         self.assertTrue(guided._is_loopback("127.0.0.3"))

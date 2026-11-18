@@ -736,6 +736,10 @@ def _journal_command(
     ]
     if prefix is not None:
         for name in ("result.json", "evidence-manifest.json", "capture.pcap"):
+            # A run cancelled before capture started has no capture.pcap; a
+            # reference to it would make journal verify report missing evidence.
+            if name == "capture.pcap" and not (run_dir / name).exists():
+                continue
             argv.extend(["--evidence", f"{prefix}/{name}"])
     return argv
 
