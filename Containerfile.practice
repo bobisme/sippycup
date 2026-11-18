@@ -1,0 +1,161 @@
+# Optional local practice target: a real, standards-compliant SIP server
+# (Asterisk with chan_pjsip) kept outside the core toolbox image. It is built
+# from a pinned upstream release because Debian 13 (trixie) does not package
+# Asterisk. Only the modules the practice target needs are compiled.
+ARG DEBIAN_IMAGE=docker.io/library/debian:13-slim
+
+FROM ${DEBIAN_IMAGE} AS asterisk-builder
+
+ARG ASTERISK_VERSION=22.12.0
+ARG ASTERISK_SHA256=f8b2ba98aac6c4ff3376bc0a2868bea6ed577ca684efb7ec739ae6e8ce6e35e2
+# Asterisk's bundled pjproject; the build also checks the upstream MD5.
+ARG PJPROJECT_VERSION=2.17
+ARG PJPROJECT_SHA256=04b2eb1f0f01aa0ad1945b167171843448a51aa6b7c3e806496d434f13a112b7
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        build-essential \
+        bzip2 \
+        ca-certificates \
+        curl \
+        libedit-dev \
+        libjansson-dev \
+        libsqlite3-dev \
+        libsrtp2-dev \
+        libssl-dev \
+        libxml2-dev \
+        patch \
+        pkg-config \
+        uuid-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --fail --location --show-error \
+        "https://downloads.asterisk.org/pub/telephony/asterisk/releases/asterisk-${ASTERISK_VERSION}.tar.gz" \
+        --output /tmp/asterisk.tar.gz \
+    && echo "${ASTERISK_SHA256}  /tmp/asterisk.tar.gz" | sha256sum --check - \
+    && mkdir -p /src/asterisk /cache \
+    && tar --extract --gzip --file /tmp/asterisk.tar.gz \
+        --directory /src/asterisk --strip-components=1 \
+    && rm /tmp/asterisk.tar.gz \
+    && grep -qx "PJPROJECT_VERSION=${PJPROJECT_VERSION}" /src/asterisk/third-party/versions.mak \
+    && curl --fail --location --show-error \
+        "https://raw.githubusercontent.com/asterisk/third-party/master/pjproject/${PJPROJECT_VERSION}/pjproject-${PJPROJECT_VERSION}.tar.bz2" \
+        --output "/cache/pjproject-${PJPROJECT_VERSION}.tar.bz2" \
+    && echo "${PJPROJECT_SHA256}  /cache/pjproject-${PJPROJECT_VERSION}.tar.bz2" \
+        | sha256sum --check -
+
+WORKDIR /src/asterisk
+RUN ./configure \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --localstatedir=/var \
+        --with-pjproject-bundled \
+        --with-download-cache=/cache \
+        --with-jansson \
+        --with-srtp \
+        --with-ssl \
+        --without-x11 \
+        --without-gtk2 \
+    && make menuselect.makeopts \
+    && menuselect/menuselect \
+        --disable BUILD_NATIVE \
+        --disable-category MENUSELECT_ADDONS \
+        --disable-category MENUSELECT_AGIS \
+        --disable-category MENUSELECT_APPS \
+        --disable-category MENUSELECT_BRIDGES \
+        --disable-category MENUSELECT_CDR \
+        --disable-category MENUSELECT_CEL \
+        --disable-category MENUSELECT_CHANNELS \
+        --disable-category MENUSELECT_CODECS \
+        --disable-category MENUSELECT_FORMATS \
+        --disable-category MENUSELECT_FUNCS \
+        --disable-category MENUSELECT_PBX \
+        --disable-category MENUSELECT_RES \
+        --disable-category MENUSELECT_TESTS \
+        --disable-category MENUSELECT_UTILS \
+        --disable-category MENUSELECT_CORE_SOUNDS \
+        --disable-category MENUSELECT_MOH \
+        --disable-category MENUSELECT_EXTRA_SOUNDS \
+        --enable app_echo \
+        --enable app_playback \
+        --enable chan_pjsip \
+        --enable codec_alaw \
+        --enable codec_ulaw \
+        --enable format_pcm \
+        --enable format_wav \
+        --enable pbx_config \
+        --enable res_pjproject \
+        --enable res_pjsip \
+        --enable res_pjsip_authenticator_digest \
+        --enable res_pjsip_caller_id \
+        --enable res_pjsip_dlg_options \
+        --enable res_pjsip_dtmf_info \
+        --enable res_pjsip_endpoint_identifier_ip \
+        --enable res_pjsip_endpoint_identifier_user \
+        --enable res_pjsip_logger \
+        --enable res_pjsip_nat \
+        --enable res_pjsip_pubsub \
+        --enable res_pjsip_registrar \
+        --enable res_pjsip_rfc3326 \
+        --enable res_pjsip_sdp_rtp \
+        --enable res_pjsip_session \
+        --enable res_rtp_asterisk \
+        --enable res_sorcery_astdb \
+        --enable res_sorcery_config \
+        --enable res_sorcery_memory \
+        --enable res_srtp \
+        --enable res_timing_timerfd \
+        menuselect.makeopts \
+    && make --jobs="$(nproc)" \
+    && make install DESTDIR=/out \
+    && find /out/usr/lib -name '*.so*' -type f -exec strip --strip-unneeded '{}' + \
+    && strip --strip-unneeded /out/usr/sbin/asterisk \
+    && for module in app_echo app_playback chan_pjsip res_pjsip res_srtp \
+        res_pjsip_registrar res_pjsip_authenticator_digest codec_ulaw codec_alaw; do \
+        test -f "/out/usr/lib/asterisk/modules/${module}.so" || exit 1; \
+    done
+
+FROM ${DEBIAN_IMAGE}
+
+ARG ASTERISK_VERSION=22.12.0
+ARG PJPROJECT_VERSION=2.17
+ARG SIPPYCUP_PRACTICE_COMMIT=unknown
+ARG SIPPYCUP_PRACTICE_SOURCE_DIGEST=unknown
+LABEL org.opencontainers.image.title="sippycup-practice"
+LABEL org.opencontainers.image.description="Loopback-only Asterisk practice target for Sippycup rehearsals"
+LABEL dev.sippycup.profile="practice"
+LABEL dev.sippycup.asterisk.version="${ASTERISK_VERSION}"
+LABEL dev.sippycup.pjproject.version="${PJPROJECT_VERSION}"
+LABEL dev.sippycup.source.commit="${SIPPYCUP_PRACTICE_COMMIT}"
+LABEL dev.sippycup.source.digest="${SIPPYCUP_PRACTICE_SOURCE_DIGEST}"
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        libedit2 \
+        libjansson4 \
+        libsqlite3-0 \
+        libsrtp2-1 \
+        libssl3t64 \
+        libuuid1 \
+        libxml2 \
+        openssl \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=asterisk-builder /out/usr/sbin/ /usr/sbin/
+COPY --from=asterisk-builder /out/usr/lib/ /usr/lib/
+# The configuration framework refuses options that have no XML documentation.
+COPY --from=asterisk-builder /out/var/lib/asterisk/documentation/ /var/lib/asterisk/documentation/
+COPY practice-target/entrypoint /usr/local/bin/sippycup-practice-entrypoint
+COPY practice-target/asterisk/ /usr/local/share/sippycup-practice/asterisk/
+COPY media/canary-v1/callee_to_caller.pcmu /var/lib/asterisk/sounds/sippycup/canary.ulaw
+COPY media/canary-v1/callee_to_caller.pcma /var/lib/asterisk/sounds/sippycup/canary.alaw
+
+RUN chmod 0755 /usr/local/bin/sippycup-practice-entrypoint \
+    && ldconfig \
+    && if ldd /usr/sbin/asterisk /usr/lib/asterisk/modules/*.so | grep -q 'not found'; then \
+        ldd /usr/sbin/asterisk /usr/lib/asterisk/modules/*.so | grep 'not found'; exit 1; \
+    fi \
+    && /usr/sbin/asterisk -V | grep -q "Asterisk ${ASTERISK_VERSION}"
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sippycup-practice-entrypoint"]

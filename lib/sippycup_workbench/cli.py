@@ -97,6 +97,16 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
             "WebRTC WSS verification: "
             "./bin/sippycup webrtc signaling-self-test"
         )
+        practice = value.get("practice_target", {})
+        if practice.get("installed"):
+            print(f"Practice target profile: installed ({practice['image']})")
+        else:
+            print(
+                "Practice target profile: not installed; "
+                "install: ./bin/sippycup practice-target build"
+            )
+        print(f"Practice target: {'up' if practice.get('up') else 'down'} "
+              "(live check: ./bin/sippycup practice-target status)")
         print("Network activity: none")
         return
     if value.get("schema_version") == "sippycup.dev/triage/v1":
@@ -136,9 +146,9 @@ def _one_call_plan(profile_path: str) -> dict[str, Any]:
             "one-call v1 requires target.host itself to be one of the literal approved_addresses"
         )
     commands = [
-        ["./bin/capture", *scope_arguments, "--interface", interface, "--output", output, "--dry-run"],
-        ["./bin/preflight", host, port, transport],
-        ["./bin/report", output],
+        ["./bin/sippycup", "capture", *scope_arguments, "--interface", interface, "--output", output, "--dry-run"],
+        ["./bin/sippycup", "preflight", host, port, transport],
+        ["./bin/sippycup", "report", output],
         ["./bin/sippycup", "triage", output],
     ]
     return {

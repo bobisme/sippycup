@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_dir
+readonly image="${SIPPYCUP_PRACTICE_IMAGE:-localhost/sippycup-practice:latest}"
+readonly container="${SIPPYCUP_PRACTICE_CONTAINER:-sippycup-practice}"
+readonly state_dir="${project_dir}/work/practice"
+readonly default_address="127.0.0.2"
+
+usage() {
+    cat <<'EOF'
+Usage: ./bin/sippycup practice-target COMMAND [OPTIONS]
+
+Manage the optional local practice target: a real Asterisk SIP server that
+listens only on a loopback address inside its own private network namespace.
+Toolbox commands reach it with the global option `--practice`, for example
+`./bin/sippycup --practice preflight 127.0.0.2 5060 udp`.
+
+Commands:
+  build              Build the pinned optional practice image
+  up [--address A]   Start the target on loopback address A (default 127.0.0.2)
+                     with a fresh throwaway account, password, CA, and profile
+  down               Stop and remove the target and delete its secret files
+  status             Report whether the image is installed and the target is up
+  info [--format json]
+                     Print connection facts (addresses, ports, account user,
+                     and file locations; never the password)
+  help               Show this help
+
+`up` refuses any address outside 127.0.0.0/8 and 127.0.0.1 itself (the
+caller's source). The target container has no network interface except
+loopback, so it can never be reached from, or reach, a real host. Its profile
+uses approval id LOCAL-PRACTICE-ONLY and authorizes nothing else.
+
+Environment:
+  SIPPYCUP_PRACTICE_IMAGE      Image tag (default localhost/sippycup-practice:latest)
+  SIPPYCUP_PRACTICE_CONTAINER  Container name (default sippycup-practice)
+
+Network activity: none (this help)
+EOF
+}
+
+fail() {
+    printf 'practice-target: %s\n' "$*" >&2
+    exit "${2:-1}"
+}
+
+helper() {
+    PYTHONDONTWRITEBYTECODE=1 \
+        PYTHONPATH="${project_dir}/lib${PYTHONPATH:+:${PYTHONPATH}}" \
+        python3 -m sippycup.practice "$@"
+}
+
+validate_container_name() {
+    if [[ ! "${container}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$ ]]; then
+        fail "invalid SIPPYCUP_PRACTICE_CONTAINER: ${container}" 2
+    fi
+}
+
+runtime_path() {
+    "${project_dir}/bin/container-runtime"
+}
+
+image_exists() {
+    "$1" image inspect "${image}" >/dev/null 2>&1
+}
+
+# Prints "running|profile|network" for the named container, or nothing.
+container_state() {
+    "$1" container inspect \
+        --format '{{.State.Running}}|{{index .Config.Labels "dev.sippycup.profile"}}|{{.HostConfig.NetworkMode}}' \
+        -- "${container}" 2>/dev/null || true
+}
+
+no_arguments() {
+    local name="$1"
+    shift
+    if (( $# != 0 )); then
+        fail "${name} accepts no arguments." 2
+    fi
+}
+
+command_name="${1:-help}"
+if (( $# > 0 )); then
+    shift
+fi
+
+case "${command_name}" in
+    help|--help|-h)
+        usage
+        ;;
+    build)
+        no_arguments build "$@"
+        runtime="$(runtime_path)"
+        source_commit="$(
+            git -C "${project_dir}" rev-parse --verify HEAD 2>/dev/null \
+                || printf 'unknown\n'
+        )"
+        source_digest="$(
+            cd "${project_dir}"
+            sha256sum \
+                Containerfile.practice \
+                practice-target/entrypoint \
+                practice-target/asterisk/*.conf \
+                media/canary-v1/callee_to_caller.pcmu \
+                media/canary-v1/callee_to_caller.pcma \
+                | sha256sum | cut -d ' ' -f 1
+        )"
+        "${runtime}" build \
+            --build-arg "SIPPYCUP_PRACTICE_COMMIT=${source_commit}" \
+            --build-arg "SIPPYCUP_PRACTICE_SOURCE_DIGEST=${source_digest}" \
+            --tag "${image}" \
+            --file "${project_dir}/Containerfile.practice" \
+            "${project_dir}"
+        # A local record lets the runtime-free doctor report the profile.
+        helper record-build --project-dir "${project_dir}" --image "${image}" \
+            --image-id "$("${runtime}" image inspect --format '{{.Id}}' "${image}")"
+        ;;
+    up)
+        address="${default_address}"
+        while (( $# > 0 )); do
+            case "$1" in
+                --address)
+                    (( $# >= 2 )) || fail "Missing value for --address" 2
+                    address="$2"
+                    shift 2
+                    ;;
+                --address=*)
+                    address="${1#--address=}"
+                    shift
+                    ;;
+                *)
+                    fail "Unknown up option: $1" 2
+                    ;;
+            esac
+        done
+        # Refuse a routable or otherwise unsafe bind before any side effect.
+        address="$(helper validate-address "${address}")" || exit 2
+        validate_container_name
+        runtime="$(runtime_path)"
+        image_exists "${runtime}" || {
+            printf 'Optional practice image is not installed: %s\n' "${image}" >&2
+            printf 'Run: ./bin/sippycup practice-target build\n' >&2
+            exit 1
+        }
+        if [[ -n "$(container_state "${runtime}")" ]]; then
+            fail "container ${container} already exists; run ./bin/sippycup practice-target down first"
+        fi
+        helper prepare \
+            --project-dir "${project_dir}" \
+            --address "${address}" \
+            --container "${container}" \
+            --image "${image}" >/dev/null
+        # --network=none leaves only loopback in the target's namespace, so it
+        # cannot be reached from or reach any real host. The hosts entries let
+        # toolbox containers that join the namespace resolve their own fixed
+        # hostname (sipsak needs it) and the certificate's DNS name.
+        "${runtime}" run \
+            --detach \
+            --name "${container}" \
+            --label dev.sippycup.profile=practice \
+            --network=none \
+            --hostname=sippycup-practice \
+            --hosts-file=none \
+            --add-host=sippycup:127.0.0.1 \
+            --add-host="sippycup-practice:${address}" \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges=true \
+            --read-only \
+            --tmpfs=/run:rw,nosuid,nodev,size=32m \
+            --pids-limit=256 \
+            --memory=512m \
+            --env="SIPPYCUP_PRACTICE_ADDRESS=${address}" \
+            --volume="${state_dir}:/practice:z" \
+            "${image}" >/dev/null
+        ready=0
+        for _ in $(seq 1 60); do
+            if "${runtime}" exec "${container}" \
+                asterisk -C /run/sippycup-practice/etc/asterisk.conf \
+                -rx 'core waitfullybooted' >/dev/null 2>&1 \
+                && [[ -s "${state_dir}/ca.crt" ]]
+            then
+                ready=1
+                break
+            fi
+            if [[ "$(container_state "${runtime}")" != true\|* ]]; then
+                break
+            fi
+            sleep 0.5
+        done
+        if (( ready == 0 )); then
+            "${runtime}" logs "${container}" >&2 2>&1 || true
+            "${runtime}" rm --force "${container}" >/dev/null 2>&1 || true
+            helper remove-secrets --project-dir "${project_dir}" >/dev/null || true
+            fail "the practice target did not become ready; it was removed"
+        fi
+        state="$(container_state "${runtime}")"
+        if [[ "${state}" != "true|practice|none" ]]; then
+            "${runtime}" rm --force "${container}" >/dev/null 2>&1 || true
+            helper remove-secrets --project-dir "${project_dir}" >/dev/null || true
+            fail "unexpected container state '${state}'; the target was removed"
+        fi
+        helper info --project-dir "${project_dir}"
+        ;;
+    down)
+        no_arguments down "$@"
+        validate_container_name
+        runtime="$(runtime_path)"
+        state="$(container_state "${runtime}")"
+        if [[ -n "${state}" ]]; then
+            if [[ "${state}" != *"|practice|"* ]]; then
+                fail "refusing to remove ${container}: it is not a Sippycup practice target"
+            fi
+            "${runtime}" rm --force --time 5 "${container}" >/dev/null
+            printf 'Removed practice target container %s\n' "${container}"
+        else
+            printf 'Practice target container %s is not running\n' "${container}"
+        fi
+        helper remove-secrets --project-dir "${project_dir}"
+        printf 'Network activity: none\n'
+        ;;
+    status)
+        no_arguments status "$@"
+        validate_container_name
+        runtime="$(runtime_path)"
+        status=0
+        if image_exists "${runtime}"; then
+            printf 'Practice profile: installed\n'
+        else
+            printf 'Practice profile: not installed\n'
+            printf 'Install: ./bin/sippycup practice-target build\n'
+            status=1
+        fi
+        printf 'Image: %s\n' "${image}"
+        state="$(container_state "${runtime}")"
+        if [[ "${state}" == "true|practice|none" ]]; then
+            printf 'Target: up (container %s, loopback-only namespace)\n' "${container}"
+            printf 'Facts: ./bin/sippycup practice-target info\n'
+        else
+            printf 'Target: down\n'
+            printf 'Start: ./bin/sippycup practice-target up\n'
+            status=1
+        fi
+        printf 'Network activity: none\n'
+        exit "${status}"
+        ;;
+    info)
+        format=human
+        while (( $# > 0 )); do
+            case "$1" in
+                --format)
+                    (( $# >= 2 )) || fail "Missing value for --format" 2
+                    format="$2"
+                    shift 2
+                    ;;
+                *)
+                    fail "Unknown info option: $1" 2
+                    ;;
+            esac
+        done
+        [[ "${format}" == human || "${format}" == json ]] \
+            || fail "--format must be human or json" 2
+        validate_container_name
+        runtime="$(runtime_path)"
+        if [[ "$(container_state "${runtime}")" != "true|practice|none" ]]; then
+            fail "the practice target is not up; run ./bin/sippycup practice-target up"
+        fi
+        helper info --project-dir "${project_dir}" --format "${format}"
+        ;;
+    *)
+        printf 'Unknown practice-target command: %s\n' "${command_name}" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

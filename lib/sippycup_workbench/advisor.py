@@ -117,7 +117,8 @@ def _run_facts(root: Path) -> tuple[dict[str, Any], list[str], list[dict[str, An
                     f"Inventory evidence for run {run.name}",
                     "The run has no evidence manifest.",
                     argv=[
-                        "./bin/sippycup-evidence",
+                        "./bin/sippycup",
+                        "evidence",
                         "manifest",
                         str(run),
                         "--write",
@@ -139,7 +140,8 @@ def _run_facts(root: Path) -> tuple[dict[str, Any], list[str], list[dict[str, An
                         f"Review privacy findings for run {run.name}",
                         "The evidence manifest reports blocked privacy findings.",
                         argv=[
-                            "./bin/sippycup-evidence",
+                            "./bin/sippycup",
+                        "evidence",
                             "lint",
                             str(run),
                         ],

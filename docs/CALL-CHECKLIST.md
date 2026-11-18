@@ -68,6 +68,11 @@ or shell history:
 ```
 
 Omit the five account lines for a service that accepts unauthenticated calls.
+These options, including registration, Digest authentication, TLS server
+verification, and SDES-SRTP, are verified against the local practice target
+by `make practice-gate`; `./bin/sippycup practice-target up` writes ready
+configurations to `work/practice/` (see `PRACTICE-TARGET.md`). Rehearse there
+before the first call to a real service.
 Start the scoped host capture in one terminal, then place the call from the
 toolbox in another:
 

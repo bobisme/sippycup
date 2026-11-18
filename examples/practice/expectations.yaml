@@ -1,0 +1,23 @@
+# Packet-oracle expectations for one authenticated PJSUA echo call against the
+# local practice target. `practice-target up` renders the practice address.
+schema_version: sippycup.expectations/v1
+capture:
+  allowed_endpoints:
+    - '@CALLER_ADDRESS@'
+    - '@ADDRESS@'
+expectations:
+  - id: practice-echo-call
+    type: call_path
+    on_unknown: inconclusive
+    parameters:
+      require_bidirectional: true
+      expected_codecs:
+        - PCMU
+      require_dtmf: false
+      allow_symmetric_rtp: true
+      max_setup_ms: 5000
+      max_loss_fraction: 0.01
+      max_duplicates: 0
+      max_reordered: 0
+      max_jitter_ms: 30
+      timestamp_jump_tolerance_ms: 200

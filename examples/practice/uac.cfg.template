@@ -1,0 +1,21 @@
+--null-audio
+--add-codec PCMU
+--id sip:@ACCOUNT@@@ADDRESS@
+--registrar @REGISTRAR@
+--realm *
+--username @ACCOUNT@
+--password @PASSWORD@
+--reg-timeout 120
+--local-port @CALLER_SIP_PORT@
+--bound-addr @CALLER_ADDRESS@
+--ip-addr @CALLER_ADDRESS@
+--rtp-port @CALLER_RTP_PORT@
+--max-calls 1
+@VARIANT_OPTIONS@
+--play-file @PLAY_FILE@
+--auto-play
+--rec-file @REC_FILE@
+--auto-rec
+--duration @DURATION@
+--log-file @LOG_FILE@
+--log-level 4

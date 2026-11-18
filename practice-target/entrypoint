@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Start the loopback-only Sippycup practice target.
+#
+# The launcher (`./bin/sippycup practice-target up`) mounts the ignored
+# work/practice directory at /practice, supplies the practice address as an
+# environment variable, and writes the throwaway account password to
+# /practice/account.password with mode 0600. This script never places the
+# password in argv: it is read and substituted with shell builtins only.
+set -euo pipefail
+
+readonly state=/practice
+readonly runtime_root=/run/sippycup-practice
+readonly templates=/usr/local/share/sippycup-practice/asterisk
+readonly address="${SIPPYCUP_PRACTICE_ADDRESS:-127.0.0.2}"
+readonly dns_name="${SIPPYCUP_PRACTICE_DNS_NAME:-sippycup-practice}"
+readonly account="${SIPPYCUP_PRACTICE_ACCOUNT:-practice}"
+
+fail() {
+    printf 'sippycup-practice: %s\n' "$*" >&2
+    exit 1
+}
+
+# Defence in depth: the launcher already refuses anything else.
+if [[ ! "${address}" =~ ^127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    fail "practice address must be an IPv4 loopback literal: ${address}"
+fi
+for octet in "${BASH_REMATCH[@]:1}"; do
+    (( octet <= 255 )) || fail "invalid practice address: ${address}"
+done
+if [[ "${address}" == 127.0.0.1 ]]; then
+    fail "127.0.0.1 is reserved for the caller so captures show direction"
+fi
+if [[ ! "${dns_name}" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
+    fail "invalid practice DNS name"
+fi
+if [[ ! "${account}" =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
+    fail "invalid practice account name"
+fi
+# The container must have no interface other than loopback.
+for interface in /sys/class/net/*; do
+    [[ "$(basename -- "${interface}")" == lo ]] \
+        || fail "refusing to start with a non-loopback interface: ${interface##*/}"
+done
+
+[[ -f "${state}/account.password" && ! -L "${state}/account.password" ]] \
+    || fail "missing ${state}/account.password"
+IFS= read -r password <"${state}/account.password" || true
+[[ "${password}" =~ ^[A-Za-z0-9_-]{24,128}$ ]] \
+    || fail "account password has an unexpected shape"
+
+umask 077
+mkdir -p \
+    "${runtime_root}/etc" \
+    "${runtime_root}/tls" \
+    "${runtime_root}/db" \
+    "${runtime_root}/log" \
+    "${runtime_root}/spool" \
+    "${runtime_root}/run"
+
+# A fresh CA and server certificate for every `up`. The CA key never leaves
+# this tmpfs and is deleted as soon as the server certificate is signed.
+tls="${runtime_root}/tls"
+openssl req -x509 -new -nodes -quiet \
+    -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -keyout "${tls}/ca.key" -out "${tls}/ca.crt" -days 2 \
+    -subj "/O=Sippycup/CN=Sippycup LOCAL-PRACTICE-ONLY CA" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+openssl req -new -nodes -quiet \
+    -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -keyout "${tls}/server.key" -out "${tls}/server.csr" \
+    -subj "/O=Sippycup/CN=${dns_name}" 2>/dev/null
+printf '%s\n' \
+    "basicConstraints=critical,CA:FALSE" \
+    "keyUsage=critical,digitalSignature" \
+    "extendedKeyUsage=serverAuth" \
+    "subjectAltName=DNS:${dns_name},IP:${address}" \
+    >"${tls}/server.ext"
+openssl x509 -req -in "${tls}/server.csr" \
+    -CA "${tls}/ca.crt" -CAkey "${tls}/ca.key" -CAcreateserial \
+    -days 2 -sha256 -extfile "${tls}/server.ext" \
+    -out "${tls}/server.crt" 2>/dev/null
+rm -f -- "${tls}/ca.key" "${tls}/ca.srl" "${tls}/server.csr"
+openssl verify -CAfile "${tls}/ca.crt" "${tls}/server.crt" >/dev/null
+
+render() {
+    local source="$1" destination="$2" text
+    text="$(<"${source}")"
+    text="${text//@ADDRESS@/${address}}"
+    text="${text//@DNS_NAME@/${dns_name}}"
+    text="${text//@ACCOUNT@/${account}}"
+    text="${text//@RUNTIME@/${runtime_root}}"
+    text="${text//@PASSWORD@/${password}}"
+    printf '%s\n' "${text}" >"${destination}"
+}
+
+for template in "${templates}"/*.conf; do
+    render "${template}" "${runtime_root}/etc/$(basename -- "${template}")"
+done
+unset password
+
+# Publish only public material back to the operator.
+
+install -m 0644 -- "${tls}/ca.crt" "${state}/ca.crt.tmp"
+mv -f -- "${state}/ca.crt.tmp" "${state}/ca.crt"
+install -m 0644 -- "${tls}/server.crt" "${state}/server.crt.tmp"
+mv -f -- "${state}/server.crt.tmp" "${state}/server.crt"
+
+exec /usr/sbin/asterisk -f -n -C "${runtime_root}/etc/asterisk.conf"

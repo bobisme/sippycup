@@ -1,0 +1,67 @@
+# Baseline campaign for the local practice target. `practice-target up`
+# renders it into work/practice/campaign.yaml with the practice address.
+#
+# Both cases are OPTIONS. The bundled SIPp runner cannot authenticate (it would
+# expose the password in argv), and the practice target challenges every
+# unauthenticated INVITE, so an unauthenticated `call` case here could only
+# fail. The authenticated call is placed with PJSUA instead; see
+# docs/PRACTICE-TARGET.md.
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata:
+  name: local-practice-baseline
+authorization:
+  networks: ['@ADDRESS@/32']
+  signalingPorts: [5060]
+  mediaPorts: {start: 20000, end: 20019}
+  transports: [udp, tcp]
+  credentialRefs: []
+  ceilings:
+    calls: 2
+    packets: 100
+    bytes: 100000
+    durationSeconds: 30
+    concurrentCalls: 1
+    packetsPerSecond: 50
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: practice-udp
+    address: '@ADDRESS@'
+    signaling: {transport: udp, port: 5060}
+  - name: practice-tcp
+    address: '@ADDRESS@'
+    signaling: {transport: tcp, port: 5060}
+cases:
+  - id: options-udp
+    type: options
+    target: practice-udp
+    count: 1
+    budget:
+      packetsPerRun: 10
+      bytesPerRun: 10000
+      durationSecondsPerRun: 5
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+  - id: options-tcp
+    type: options
+    target: practice-tcp
+    count: 1
+    budget:
+      packetsPerRun: 20
+      bytesPerRun: 20000
+      durationSecondsPerRun: 5
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+expectations:
+  allowedSipStatuses: [200]
+  requireBidirectionalRtp: false
+evidence:
+  capture: true
+  retainPayload: false
+  directory: evidence/local-practice

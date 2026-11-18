@@ -17,7 +17,7 @@ _sippycup() {
     for ((index = 1; index < COMP_CWORD; index++)); do
         word="${COMP_WORDS[index]}"
         case "${word}" in
-            --admin|--isolated)
+            --admin|--isolated|--practice)
                 ;;
             --)
                 return 0
@@ -34,7 +34,7 @@ _sippycup() {
     if [[ -z "${command_name}" ]]; then
         COMPREPLY=(
             $(compgen -W \
-                "--admin --isolated --help --version $(_sippycup_public_commands)" \
+                "--admin --isolated --practice --help --version $(_sippycup_public_commands)" \
                 -- "${current}")
         )
         return 0
@@ -64,6 +64,13 @@ _sippycup() {
             COMPREPLY=(
                 $(compgen -W \
                     "--dial --duration --answer-timeout --play --codec --username --realm --no-register --secret-env --secret-file --run-root --engagement --no-media-required --format --dry-run --help" \
+                    -- "${current}")
+            )
+            ;;
+        practice-target)
+            COMPREPLY=(
+                $(compgen -W \
+                    "build up down status info help --address --format" \
                     -- "${current}")
             )
             ;;

@@ -111,6 +111,21 @@ capture options:
 - Run the image through the host's approved rootful Podman setup when both
   host networking and in-container capture are required.
 
+To rehearse the whole sequence, including capture, rootlessly and without
+sudo, use the optional local practice target: a real Asterisk server that
+listens only on loopback inside its own network namespace. `--practice` runs
+toolbox commands in that namespace:
+
+```sh
+./bin/sippycup practice-target build
+./bin/sippycup practice-target up
+./bin/sippycup --practice preflight 127.0.0.2 5060 udp
+make practice-gate
+./bin/sippycup practice-target down
+```
+
+See `docs/PRACTICE-TARGET.md` for the step-by-step rehearsal and its limits.
+
 Do not casually add `--privileged`.
 
 ## Included tools
@@ -268,8 +283,8 @@ Open the same capture in a terminal UI:
 See `docs/CALL-CHECKLIST.md` for the details to request and a repeatable
 manual-call procedure.
 
-Heavyweight ViSQOL, Zeek, HOMER/HEP, and the independent WebRTC peer are kept
-outside the core image. Their scope and admission criteria are documented in
+Heavyweight ViSQOL, Zeek, HOMER/HEP, the independent WebRTC peer, and the
+local practice target are kept outside the core image. Their scope and admission criteria are documented in
 `docs/OPTIONAL-PROFILES.md`. The WebRTC trust boundaries and versioned offline
 contracts are in `docs/WEBRTC-THREAT-MODEL.md` and
 `docs/WEBRTC-CONTRACTS.md`.
