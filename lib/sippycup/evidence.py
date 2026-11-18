@@ -187,7 +187,11 @@ def _authorized_networks(plan: dict[str, Any], extras: Iterable[str]) -> list[An
     media = authorization.get("media_networks", [])
     if not isinstance(media, list):
         raise EvidenceError("plan authorization media_networks must be a list")
-    raw = list(configured) + list(media) + list(extras)
+    # A campaign plan's media-only networks (authorization.mediaNetworks).
+    campaign_media = authorization.get("mediaNetworks", [])
+    if not isinstance(campaign_media, list):
+        raise EvidenceError("plan authorization mediaNetworks must be a list")
+    raw = list(configured) + list(media) + list(campaign_media) + list(extras)
     networks = []
     for value in raw:
         try:
@@ -198,6 +202,14 @@ def _authorized_networks(plan: dict[str, Any], extras: Iterable[str]) -> list[An
 
 
 def _classic_pcap_addresses(data: bytes) -> tuple[set[str], bool]:
+    """Every IP address in a classic PCAP, for the link types tcpdump writes.
+
+    The link type comes from the header (Ethernet on ``lo``, Linux cooked
+    SLL/SLL2 on ``any``, raw IP); a capture of any other link type is
+    reported as not completely inspected rather than as address-free.
+    """
+    from sippycup.capture_scope import SUPPORTED_LINKTYPES, ip_addresses
+
     if len(data) < 24:
         return set(), False
     if data[:4] == b"\xd4\xc3\xb2\xa1":
@@ -205,6 +217,9 @@ def _classic_pcap_addresses(data: bytes) -> tuple[set[str], bool]:
     elif data[:4] == b"\xa1\xb2\xc3\xd4":
         endian = ">"
     else:
+        return set(), False
+    linktype = struct.unpack(endian + "I", data[20:24])[0] & 0x0FFFFFFF
+    if linktype not in SUPPORTED_LINKTYPES:
         return set(), False
     addresses: set[str] = set()
     offset = 24
@@ -217,19 +232,9 @@ def _classic_pcap_addresses(data: bytes) -> tuple[set[str], bool]:
             return addresses, False
         packet = data[offset : offset + included]
         offset += included
-        if len(packet) < 14:
-            continue
-        network = 14
-        ether_type = int.from_bytes(packet[12:14], "big")
-        if ether_type == 0x8100 and len(packet) >= 18:
-            ether_type = int.from_bytes(packet[16:18], "big")
-            network = 18
-        if ether_type == 0x0800 and len(packet) >= network + 20:
-            addresses.add(str(ipaddress.ip_address(packet[network + 12 : network + 16])))
-            addresses.add(str(ipaddress.ip_address(packet[network + 16 : network + 20])))
-        elif ether_type == 0x86DD and len(packet) >= network + 40:
-            addresses.add(str(ipaddress.ip_address(packet[network + 8 : network + 24])))
-            addresses.add(str(ipaddress.ip_address(packet[network + 24 : network + 40])))
+        found = ip_addresses(linktype, packet)
+        if found is not None:
+            addresses.update(found)
     return addresses, offset == len(data)
 
 

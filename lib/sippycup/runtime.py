@@ -764,24 +764,34 @@ def _validate_tls_facts(
 
 
 def _capture_filter(steps: list[dict[str, Any]], media: dict[str, Any]) -> str:
-    scopes: dict[str, set[tuple[str, int]]] = {}
-    for step in steps:
-        destination = step["destination"]
-        for address in destination["addresses"]:
-            scopes.setdefault(address, set()).add(
-                (destination["transport"], destination["port"])
-            )
-    rendered = []
-    for address in sorted(
-        scopes, key=lambda value: (ipaddress.ip_address(value).version, int(ipaddress.ip_address(value)))
-    ):
-        signaling = [
-            f"{'udp' if transport == 'udp' else 'tcp'} port {port}"
-            for transport, port in sorted(scopes[address])
-        ]
-        signaling.append(f"udp portrange {media['start']}-{media['end']}")
-        rendered.append(f"(host {address} and ({' or '.join(signaling)}))")
-    return " or ".join(rendered)
+    """The original per-destination filter (see ``sippycup.capture_scope``)."""
+    from sippycup.capture_scope import signaling_filter
+
+    return signaling_filter(steps, media)
+
+
+def _validate_media_networks(value: Any) -> list[str]:
+    """Independently check the optional media-only ``mediaNetworks``.
+
+    Canonical CIDR strings in frozen (sorted) order, unique, and within the
+    target-profile media breadth rule (at most 16 networks, 1024 addresses).
+    """
+    from sippycup_workbench.media_scope import validate_networks
+
+    items = _unique_array(value, "authorization.mediaNetworks")
+    if any(not isinstance(item, str) for item in items):
+        raise RuntimeError("authorization.mediaNetworks values must be strings")
+    errors: list[str] = []
+    canonical = validate_networks(items, errors)
+    if canonical is None or canonical != items:
+        raise RuntimeError(
+            "authorization.mediaNetworks is invalid or not canonical"
+            + (f": {errors[0]}" if errors else "")
+        )
+    parsed = [ipaddress.ip_network(item) for item in items]
+    if parsed != sorted(parsed, key=lambda item: (item.version, int(item.network_address), item.prefixlen)):
+        raise RuntimeError("authorization.mediaNetworks is not in frozen sorted order")
+    return items
 
 
 def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -827,7 +837,10 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         {
             "networks", "signalingPorts", "mediaPorts", "transports",
             "credentialRefs", "hardMaxima", "stopConditions",
-        },
+        }
+        # Optional, media only: present only when the manifest states it, so
+        # plans frozen without it validate exactly as before.
+        | ({"mediaNetworks"} if "mediaNetworks" in authorization else set()),
     )
     raw_networks = _unique_array(authorization["networks"], "authorization.networks")
     networks = []
@@ -839,6 +852,11 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         except ValueError as error:
             raise RuntimeError(f"invalid authorized network {value!r}") from error
         networks.append(network)
+    media_networks = (
+        _validate_media_networks(authorization["mediaNetworks"])
+        if "mediaNetworks" in authorization
+        else None
+    )
     ports = _unique_array(
         authorization["signalingPorts"], "authorization.signalingPorts"
     )
@@ -1060,7 +1078,9 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     assumptions = _unique_array(plan["assumptions"], "assumptions", allow_empty=True)
     if any(not isinstance(item, str) or not item for item in assumptions):
         raise RuntimeError("plan assumptions must be non-empty strings")
-    expected_filter = _capture_filter(steps, media)
+    from sippycup.capture_scope import frozen_filter
+
+    expected_filter = frozen_filter(steps, media, raw_networks, media_networks)
     if plan["captureFilter"] != expected_filter:
         raise RuntimeError("captureFilter is not the minimal filter for frozen steps")
     pins = _object(plan["resolutionPins"], "resolutionPins")

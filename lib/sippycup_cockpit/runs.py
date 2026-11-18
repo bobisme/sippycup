@@ -174,6 +174,39 @@ def _count_events(path: Path) -> tuple[int, dict[str, Any] | None, str | None]:
     return count, last, problem
 
 
+def _campaign_media_scopes(path: Path, limit: int = 16) -> list[tuple[Any, dict[str, Any]]]:
+    """``(step, mediaScope)`` from the softphone runner's step results, bounded."""
+    found: list[tuple[Any, dict[str, Any]]] = []
+    if not _regular(path):
+        return found
+    try:
+        with path.open("rb") as source:
+            consumed = 0
+            for count, raw in enumerate(source):
+                consumed += len(raw)
+                if consumed > MAX_EVENT_BYTES or count >= MAX_EVENT_LINES or len(found) >= limit:
+                    break
+                try:
+                    event = json.loads(raw)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(event, dict) or event.get("event") != "step.output" \
+                        or not isinstance(event.get("text"), str):
+                    continue
+                for line in event["text"].splitlines()[:4]:
+                    try:
+                        value = json.loads(line)
+                    except (ValueError, RecursionError):
+                        continue
+                    if isinstance(value, dict) and isinstance(value.get("mediaScope"), dict) \
+                            and value["mediaScope"].get("peer"):
+                        found.append((event.get("step"), value["mediaScope"]))
+                        break
+    except OSError:
+        return found
+    return found
+
+
 def _files(run: Path) -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
     try:
@@ -306,6 +339,25 @@ def _campaign_summary(run: Path, document: dict[str, Any], summary: dict[str, An
         facts.append(("Preflight", json.dumps(preflight, sort_keys=True)[:160]))
     except Unreadable:
         pass
+    capture = document.get("capture") if isinstance(document.get("capture"), dict) else {}
+    watchdog = capture.get("watchdog") if isinstance(capture.get("watchdog"), dict) else {}
+    if isinstance(watchdog.get("packets"), int):
+        facts.append((
+            "Capture",
+            f"watchdog counted {watchdog['packets']} packets, {watchdog.get('mediaPackets')} of them media"
+            + (" (filter extended with the plan's authorized media networks)"
+               if capture.get("filterSource") == "plan+authorized-media" else ""),
+        ))
+    for step, scope in _campaign_media_scopes(run / "events.jsonl"):
+        rule = scope.get("admittedBy")
+        source = {"destination": "the step's destination address", "networks": "authorization.networks",
+                  "mediaNetworks": "authorization.mediaNetworks (media only)"}.get(str(scope.get("authorization")))
+        facts.append((
+            f"Media step {step}",
+            f"peer {scope.get('peer')} "
+            + (f"admitted by {source}" if rule and source else "admitted" if rule else "NOT approved (media-scope stop)")
+            + ("; port outside the approved media port range" if scope.get("portAdmitted") is False else ""),
+        ))
     summary["facts"] = facts
     notes = []
     for key in ("error", "reason", "stopReason", "message"):

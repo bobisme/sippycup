@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from sippycup import options
+from sippycup import capture_scope, options
 from sippycup.campaign import ManifestError, verify_frozen_plan
 from sippycup.runtime import RunResult, RuntimeError, run_plan, validate_plan
 
@@ -34,18 +34,35 @@ class _FinishExecution(Exception):
 class CaptureWatchdog:
     """Continuously enforce traffic ceilings from an immediate-mode PCAP.
 
+    Every record tcpdump writes counts against the packet, byte, and rate
+    ceilings, including RTP to and from authorized media networks (the
+    capture filter covers them, see ``sippycup.capture_scope``). Records that
+    are media by the payload-stripping rule (UDP with a port in the media
+    range and no signaling port) are also counted separately as
+    ``mediaPackets`` for the evidence.
+
     Calls are counted by cleartext ``INVITE``, so TLS calls are invisible here.
     ``ceilings.calls`` holds for them through the plan-time bound in
     ``runtime._validate_plan`` (one call per call step, summed against
     ``hardMaxima.calls``); see docs/CAMPAIGN-MANIFEST.md.
     """
 
-    def __init__(self, capture: Path, maxima: Mapping[str, int]) -> None:
+    def __init__(
+        self,
+        capture: Path,
+        maxima: Mapping[str, int],
+        *,
+        media_ports: Mapping[str, int] | None = None,
+        signaling_ports: Sequence[int] = (),
+    ) -> None:
         self.capture = capture
         self.maxima = maxima
+        self.media_ports = media_ports
+        self.signaling_ports = frozenset(signaling_ports)
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._violation: str | None = None
+        self._counts = {"packets": 0, "bytes": 0, "calls": 0, "mediaPackets": 0}
         self._thread = threading.Thread(
             target=self._run, name="campaign-capture-watchdog", daemon=True
         )
@@ -54,12 +71,18 @@ class CaptureWatchdog:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop after one final pass over every complete record already written."""
         self._stop.set()
         self._thread.join(timeout=2)
 
     def violation(self) -> str | None:
         with self._lock:
             return self._violation
+
+    def counts(self) -> dict[str, int]:
+        """What the watchdog has counted so far (records it read from the capture)."""
+        with self._lock:
+            return dict(self._counts)
 
     def _fail(self, reason: str) -> None:
         with self._lock:
@@ -69,19 +92,27 @@ class CaptureWatchdog:
     def _run(self) -> None:
         offset = 24
         endian: str | None = None
+        linktype: int | None = None
         packets = 0
         byte_count = 0
         calls = 0
+        media_packets = 0
         packet_times: deque[float] = deque()
         call_times: deque[float] = deque()
         seen_call_ids: set[bytes] = set()
-        while not self._stop.is_set():
+        final_pass = False
+        while True:
+            if not final_pass and self._stop.is_set():
+                # Capture has stopped: read what it flushed, then exit.
+                final_pass = True
             try:
                 with self.capture.open("rb") as source:
                     header = source.read(24)
                     source.seek(offset)
                     record_header = source.read(16)
             except OSError:
+                if final_pass:
+                    return
                 time.sleep(0.01)
                 continue
             if endian is None and len(header) >= 24:
@@ -92,6 +123,7 @@ class CaptureWatchdog:
                 else:
                     self._fail("capture_format_invalid")
                     return
+                linktype = struct.unpack(endian + "I", header[20:24])[0] & 0x0FFFFFFF
             if endian is not None and len(record_header) == 16:
                 seconds, fraction, included, original = struct.unpack(
                     endian + "IIII", record_header
@@ -104,15 +136,27 @@ class CaptureWatchdog:
                         source.seek(offset + 16)
                         packet = source.read(included)
                 except OSError:
+                    if final_pass:
+                        return
                     time.sleep(0.01)
                     continue
                 if len(packet) < included:
+                    if final_pass:
+                        return
                     time.sleep(0.01)
                     continue
                 offset += 16 + included
                 timestamp = seconds + fraction / 1_000_000
                 packets += 1
                 byte_count += original
+                if (
+                    self.media_ports is not None
+                    and linktype is not None
+                    and capture_scope.media_header_length(
+                        linktype, packet, self.media_ports, self.signaling_ports
+                    ) is not None
+                ):
+                    media_packets += 1
                 packet_times.append(timestamp)
                 while packet_times and packet_times[0] < timestamp - 1:
                     packet_times.popleft()
@@ -129,6 +173,13 @@ class CaptureWatchdog:
                         call_times.append(timestamp)
                     while call_times and call_times[0] < timestamp - 1:
                         call_times.popleft()
+                with self._lock:
+                    self._counts = {
+                        "packets": packets,
+                        "bytes": byte_count,
+                        "calls": calls,
+                        "mediaPackets": media_packets,
+                    }
                 if packets > self.maxima["packets"]:
                     self._fail("packet_ceiling_exceeded")
                 elif byte_count > self.maxima["bytes"]:
@@ -141,6 +192,8 @@ class CaptureWatchdog:
                     self._fail("call_rate_ceiling_exceeded")
                 if self.violation() is not None:
                     return
+            elif final_pass:
+                return
             else:
                 time.sleep(0.01)
 
@@ -441,7 +494,12 @@ def strip_media_payload(
     media_ports: dict[str, int],
     signaling_ports: Sequence[int],
 ) -> None:
-    """Truncate UDP media packets after their UDP header in a classic PCAP."""
+    """Truncate UDP media records after the fixed RTP header in a classic PCAP.
+
+    The link type comes from the PCAP header: Ethernet (``-i lo``), Linux
+    cooked SLL and SLL2 (``-i any``), and raw IP are understood. Any other
+    link type is refused rather than kept with media payload.
+    """
     raw = capture.read_bytes()
     if len(raw) < 24:
         raise RuntimeError("capture is too short to sanitize")
@@ -452,9 +510,12 @@ def strip_media_payload(
         endian = ">"
     else:
         raise RuntimeError("retainPayload=false requires classic PCAP capture")
+    linktype = struct.unpack(endian + "I", raw[20:24])[0] & 0x0FFFFFFF
+    if linktype not in capture_scope.SUPPORTED_LINKTYPES:
+        raise RuntimeError(f"retainPayload=false cannot sanitize PCAP link type {linktype}")
     output = bytearray(raw[:24])
     offset = 24
-    signal_set = set(signaling_ports)
+    signal_set = frozenset(signaling_ports)
     while offset < len(raw):
         if offset + 16 > len(raw):
             raise RuntimeError("capture record header is truncated")
@@ -466,7 +527,9 @@ def strip_media_payload(
             raise RuntimeError("capture packet is truncated")
         packet = raw[offset : offset + included]
         offset += included
-        keep = _media_header_length(packet, media_ports, signal_set)
+        # Preserve UDP plus the fixed RTP header (V/PT, sequence, timestamp,
+        # SSRC) while dropping CSRC/extensions and encoded media bytes.
+        keep = capture_scope.media_header_length(linktype, packet, media_ports, signal_set)
         if keep is not None:
             packet = packet[:keep]
         output.extend(
@@ -479,42 +542,6 @@ def strip_media_payload(
         os.replace(temporary, capture)
     finally:
         temporary.unlink(missing_ok=True)
-
-
-def _media_header_length(
-    packet: bytes,
-    media_ports: dict[str, int],
-    signaling_ports: set[int],
-) -> int | None:
-    if len(packet) < 14:
-        return None
-    network = 14
-    ether_type = int.from_bytes(packet[12:14], "big")
-    if ether_type == 0x8100 and len(packet) >= 18:
-        ether_type = int.from_bytes(packet[16:18], "big")
-        network = 18
-    if ether_type == 0x0800 and len(packet) >= network + 20:
-        if packet[network + 9] != 17:
-            return None
-        udp = network + (packet[network] & 0x0F) * 4
-    elif ether_type == 0x86DD and len(packet) >= network + 40:
-        if packet[network + 6] != 17:
-            return None
-        udp = network + 40
-    else:
-        return None
-    if len(packet) < udp + 8:
-        return None
-    source = int.from_bytes(packet[udp : udp + 2], "big")
-    destination = int.from_bytes(packet[udp + 2 : udp + 4], "big")
-    if source in signaling_ports or destination in signaling_ports:
-        return None
-    start, end = media_ports["start"], media_ports["end"]
-    if start <= source <= end or start <= destination <= end:
-        # Preserve UDP plus the fixed RTP header (V/PT, sequence, timestamp,
-        # SSRC) while dropping CSRC/extensions and encoded media bytes.
-        return min(len(packet), udp + 8 + 12)
-    return None
 
 
 def _used_destinations(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -638,6 +665,10 @@ def execute_campaign(
         raise RuntimeError("unresolved credential references: " + ", ".join(missing))
 
     capture_path = run_dir / "capture.pcap"
+    # The frozen filter, extended for an older plan with the authorized media
+    # term (capture_scope.execution_filter), so the capture and its watchdog
+    # see every packet of media the runner admits.
+    capture_filter, capture_filter_source = capture_scope.execution_filter(plan)
     capture_log = (run_dir / "capture.log").open("wb")
     capture = None
     watchdog: CaptureWatchdog | None = None
@@ -656,13 +687,13 @@ def execute_campaign(
                 *(("-Z", "root") if os.geteuid() == 0 else ()),
                 "-w",
                 str(capture_path),
-                plan["captureFilter"],
+                capture_filter,
             ]
             if capture_command is None
             else [
                 argument.format(
                     capture=str(capture_path),
-                    filter=plan["captureFilter"],
+                    filter=capture_filter,
                     interface=interface,
                 )
                 for argument in capture_command
@@ -761,7 +792,10 @@ def execute_campaign(
             if capture.poll() is not None:
                 raise RuntimeError("capture process died after readiness")
             watchdog = CaptureWatchdog(
-                capture_path, plan["authorization"]["hardMaxima"]
+                capture_path,
+                plan["authorization"]["hardMaxima"],
+                media_ports=plan["authorization"]["mediaPorts"],
+                signaling_ports=plan["authorization"]["signalingPorts"],
             )
             watchdog.start()
 
@@ -870,6 +904,12 @@ def execute_campaign(
                     "authorization": {
                         "networks": plan["authorization"]["networks"],
                         "mediaPorts": plan["authorization"]["mediaPorts"],
+                        # Media-only networks, only when the plan has them.
+                        **(
+                            {"mediaNetworks": plan["authorization"]["mediaNetworks"]}
+                            if "mediaNetworks" in plan["authorization"]
+                            else {}
+                        ),
                     },
                     "expectations": plan["expectations"],
                     "evidence": {"retainPayload": plan["evidence"]["retainPayload"]},
@@ -971,6 +1011,14 @@ def execute_campaign(
                 "state": result.state,
                 "exitCode": result.exit_code,
                 "completedSteps": result.completed_steps,
+                # What the capture kept and what the watchdog counted from it
+                # (before payload stripping), so the evidence shows that the
+                # ceilings saw the media too.
+                "capture": {
+                    "filter": capture_filter,
+                    "filterSource": capture_filter_source,
+                    "watchdog": watchdog.counts() if watchdog is not None else None,
+                },
             },
         )
         _write_json(

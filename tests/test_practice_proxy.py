@@ -125,10 +125,17 @@ class ProxyPrepareTests(unittest.TestCase):
 
     def test_proxy_campaign_authorizes_both_networks_with_one_call(self) -> None:
         manifest = yaml.safe_load((self.state / "campaign-proxy.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["authorization"]["networks"], ["127.0.0.3/32", "127.0.0.2/32"])
+        # Signaling only to the proxy; the media address is media only.
+        self.assertEqual(manifest["authorization"]["networks"], ["127.0.0.3/32"])
+        self.assertEqual(manifest["authorization"]["mediaNetworks"], ["127.0.0.2/32"])
         self.assertEqual(manifest["authorization"]["ceilings"]["calls"], 1)
         plan = compile_plan(manifest, "0" * 64, resolver=lambda host: [])
         self.assertEqual({item["address"] for item in plan["resolvedDestinations"]}, {"127.0.0.3"})
+        self.assertEqual(
+            plan["captureFilter"],
+            "(host 127.0.0.3 and (tcp port 5060 or udp port 5060 or udp portrange 20000-20019))"
+            " or (udp portrange 20000-20019 and (host 127.0.0.2))",
+        )
         self.assertEqual([step["type"] for step in plan["steps"]], ["options", "options", "call"])
         expectations = yaml.safe_load((self.state / "expectations-proxy.yaml").read_text())
         self.assertEqual(

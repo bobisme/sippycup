@@ -791,7 +791,62 @@ class Rehearsal:
         self.require(result.get("state") == "succeeded" and result.get("completedSteps") == 4,
                      f"campaign result {result}")
         self.fact(f"campaign succeeded: 4 steps (UDP and TLS OPTIONS, UDP and TLS calls); run {printed}")
+        self.campaign_media(runs[0], result)
         self.cockpit("checks")
+
+    def campaign_media(self, run: Path, result: dict[str, Any]) -> None:
+        """The campaign capture holds the calls' RTP both ways, and the watchdog counted it.
+
+        Read from the run's own files: the capture (with the same media rule
+        the watchdog and payload stripping use), result.json's watchdog
+        counts, and each call step's recorded media peer and the
+        authorization that admitted it.
+        """
+        from .capture_scope import media_flows
+
+        assert self.shape is not None
+        plan = json.loads((run / "plan.json").read_text(encoding="utf-8"))
+        authorization = plan["authorization"]
+        records, flows = media_flows((run / "capture.pcap").read_bytes(), authorization["mediaPorts"],
+                                     authorization["signalingPorts"])
+        media = set(self.shape.media)
+        to_media = sum(count for (source, destination), count in flows.items()
+                       if destination in media and source not in media)
+        from_media = sum(count for (source, destination), count in flows.items()
+                         if source in media and destination not in media)
+        watchdog = (result.get("capture") or {}).get("watchdog") or {}
+        counted = sum(flows.values())
+        self.require(to_media > 50 and from_media > 50,
+                     f"the campaign capture holds {to_media} RTP packets to and {from_media} from the media "
+                     f"address {', '.join(sorted(media))} (expected more than 50 each way)")
+        self.require(watchdog.get("packets") == records and watchdog.get("mediaPackets") == counted,
+                     f"the capture watchdog counted {watchdog} but the capture holds {records} packets, "
+                     f"{counted} of them media")
+        scopes = []
+        for line in (run / "events.jsonl").read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            if event.get("event") != "step.output" or event.get("stream") != "stdout":
+                continue
+            try:
+                value = json.loads(event.get("text") or "")
+            except ValueError:
+                continue
+            if isinstance(value, dict) and value.get("runner") == "campaign-softphone-runner":
+                scopes.append(value.get("mediaScope") or {})
+        expected = "mediaNetworks" if self.shape.kind == "proxy" else "destination"
+        self.require(len(scopes) == 2 and all(
+            str(item.get("peer") or "").rsplit(":", 1)[0] in media and item.get("inScope") is True
+            and item.get("authorization") == expected for item in scopes),
+            f"the campaign call steps do not record media peers admitted by {expected}: {scopes}")
+        if self.shape.kind == "proxy":
+            self.require(authorization.get("mediaNetworks") and not any(
+                address in authorization["networks"] for address in (f"{item}/32" for item in media)),
+                f"the plan does not keep the media address media-only: {authorization}")
+        self.fact(f"campaign capture: {to_media} RTP packets to and {from_media} from the media address "
+                  f"{', '.join(sorted(media))}; the watchdog counted all {records} packets ({counted} media); "
+                  "each call's media peer admitted by "
+                  + ("authorization.mediaNetworks (media only)" if expected == "mediaNetworks"
+                     else "the step's own destination address"))
 
     def checks(self) -> None:
         model = self.cockpit("checks")

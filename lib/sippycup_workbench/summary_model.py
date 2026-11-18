@@ -511,6 +511,9 @@ def _manifest_source(document: dict[str, Any], ref: str) -> Source:
         ports=_int_list(auth.get("signalingPorts")),
         transports=[t for t in _str_list(auth.get("transports")) if t in {"udp", "tcp", "tls"}],
     )
+    # Media-only networks (authorization.mediaNetworks): approved for media
+    # and evidence, never as a signaling target.
+    source.media_networks = [n for n in _str_list(auth.get("mediaNetworks")) if _is_network(n)]
     media_ports = _dict(auth.get("mediaPorts"))
     if _int(media_ports.get("start")) and _int(media_ports.get("end")):
         source.media_ports = (media_ports["start"], media_ports["end"])
@@ -1134,6 +1137,7 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
                     state["output"] = value
                     break
     cases = []
+    media_peers: list[tuple[int, str]] = []
     totals = {"options": 0, "register": 0, "calls": 0, "rtp": 0, "rtpKnown": not any(step.get("type") == "call" for step in steps), "optionsLowerBound": False}
     not_exercised: list[dict[str, Any]] = []
     for index, step in enumerate(steps):
@@ -1151,6 +1155,10 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
         register = _dict(auth.get("REGISTER"))
         tls_out = _dict(output.get("tls"))
         tls_verified = _bool(output.get("tls_verified")) if "tls_verified" in output else _bool(tls_out.get("verified"))
+        media_scope = _dict(output.get("mediaScope"))
+        media_peer, media_port = _split_host_port(media_scope.get("peer"))
+        if media_peer:
+            media_peers.append((number, media_peer))
         case = {
             "step": number,
             "case": san.identifier(step.get("case"), f"{case_prefix}.case", limit=64),
@@ -1166,6 +1174,19 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
             "rtpFromPeer": _int(rtp.get("rxPackets")),
             "setupSeconds": _num(output.get("setupSeconds")),
             "codec": san.identifier(output.get("codec"), f"{case_prefix}.codec", limit=32) if output.get("codec") else None,
+            # The media peer the softphone runner recorded (mediaScope), how
+            # the report's own records approve it, and the rule the run says
+            # admitted it (destination, networks, or media-only mediaNetworks).
+            "mediaPeer": scope.addresses.label(media_peer) if media_peer else None,
+            "mediaPeerPort": media_port,
+            "mediaPeerApproved": bool(media_peer and scope.addresses.approved(media_peer)) if media_peer else None,
+            "mediaPeerApprovedBy": _media_rule(scope, media_peer) if media_peer else None,
+            "mediaPeerRecordedRule": _ident(media_scope.get("admittedBy")) if media_scope else None,
+            "mediaPeerAuthorization": (
+                media_scope.get("authorization")
+                if media_scope.get("authorization") in {"destination", "networks", "mediaNetworks"}
+                else None
+            ),
             "tlsVerified": tls_verified,
             "reasons": sorted(
                 {
@@ -1221,6 +1242,8 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
     packets = _PACKETS_LINE.search(report_text)
     capture_bytes = _capture_size(run)
     completed = _int(result.get("completedSteps"))
+    capture_record = _dict(result.get("capture"))
+    watchdog = _dict(capture_record.get("watchdog"))
     model["details"] = {
         "cases": cases,
         "preflight": preflight_entries,
@@ -1231,7 +1254,20 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
         "plannedTotals": {k: v for k, v in _dict(plan.get("plannedTotals")).items() if _int(v) is not None},
         "hardMaxima": hard,
         "notExercised": not_exercised,
+        # What the campaign's capture watchdog counted (result.json capture):
+        # every captured packet, and how many were media (RTP/RTCP).
+        "capture": None
+        if not capture_record
+        else {
+            "filterSource": capture_record.get("filterSource")
+            if capture_record.get("filterSource") in {"plan", "plan+authorized-media"}
+            else None,
+            "watchdogPackets": _int(watchdog.get("packets")),
+            "watchdogMediaPackets": _int(watchdog.get("mediaPackets")),
+            "watchdogCalls": _int(watchdog.get("calls")),
+        },
     }
+    model["_mediaPeersRaw"] = media_peers
     if model["state"] not in (None, "succeeded"):
         model["reasons"].append(
             san.text(
@@ -1579,6 +1615,16 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
         for case in details.get("cases", []):
             if case.get("tlsVerified") is False:
                 found.append(_observation("tls-not-verified", run, f"Step {case['step']}."))
+                break
+        for case in details.get("cases", []):
+            # The softphone runner's media-scope stop: a safety stop, not a
+            # target failure (the same observation as a guided call's).
+            if "media_peer_outside_scope" in (case.get("reasons") or []):
+                sent = case.get("rtpToPeer")
+                found.append(_observation(
+                    "media-outside-scope", run,
+                    f"Step {case['step']}" + (f"; RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else "."),
+                ))
                 break
         if run.get("state") not in (None, "succeeded"):
             reason = details.get("stopReason") or run.get("state")
@@ -1956,11 +2002,19 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address or inside an approved media network"
                                + _stop_detail(model))
                 )
+            for step_number, campaign_peer in model.pop("_mediaPeersRaw", None) or []:
+                if not addresses.approved(campaign_peer):
+                    model["integrity"].append(
+                        _exception("media-peer-not-approved", raw.name,
+                                   f"step {step_number} media peer {addresses.label(campaign_peer)} is not an approved "
+                                   "address or inside an approved media network")
+                    )
             model["integrity"].extend(_window_check(run_scope, model, raw_targets))
             model["integrity"].extend(_ceiling_check(model, run_scope))
             if model["started"] is None:
                 model["problems"].append("no recorded start time; approval window not checked")
         model.pop("_mediaPeerRaw", None)
+        model.pop("_mediaPeersRaw", None)
         runs.append(model)
     # Addresses outside the approved set that appeared in any artifact text.
     for path, label in sorted(set(sanitizer.unapproved_hits)):

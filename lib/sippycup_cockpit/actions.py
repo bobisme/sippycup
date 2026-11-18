@@ -528,6 +528,8 @@ def _bounded_lines(model: dict[str, Any], action: dict[str, Any], repo: Path, no
         else:
             lines.append(f"  Plan {plan.get('name')}: {plan.get('steps')} step(s)")
             lines.append(f"  Destinations (literal): {', '.join(plan.get('destinations') or []) or 'none'}")
+            if plan.get("mediaNetworks"):
+                lines.append(f"  Media only (never signaling; captured): {', '.join(plan['mediaNetworks'])}")
             lines.append(f"  Planned totals: {json.dumps(plan.get('plannedTotals'), sort_keys=True)}")
             lines.append(f"  Hard maxima: {json.dumps(plan.get('hardMaxima'), sort_keys=True)}")
         return lines

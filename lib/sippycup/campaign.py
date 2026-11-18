@@ -15,6 +15,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import capture_scope
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - exercised by installation smoke tests
@@ -374,6 +376,35 @@ def system_resolver(host: str) -> list[str]:
 def _address_sort_key(value: str) -> tuple[int, int]:
     address = ipaddress.ip_address(value)
     return address.version, int(address)
+
+
+def _media_networks(value: Any) -> list[str]:
+    """Validate the optional media-only ``authorization.mediaNetworks``.
+
+    The same breadth rule as a target profile's ``media.networks`` (at most 16
+    networks and 1024 addresses together, no unspecified, multicast, reserved,
+    or broadcast addresses), no documentation range, and canonical sorted
+    output. These networks admit media only: a target must still resolve
+    inside ``authorization.networks``.
+    """
+    from sippycup_workbench.media_scope import validate_networks
+
+    items = _unique_list(value, "authorization.mediaNetworks")
+    errors: list[str] = []
+    canonical = validate_networks(items, errors)
+    if canonical is None:
+        raise ManifestError(
+            "; ".join(item.replace("media.networks", "authorization.mediaNetworks") for item in errors)
+        )
+    parsed = [ipaddress.ip_network(item) for item in canonical]
+    for network in parsed:
+        if any(
+            network.version == documentation.version and network.subnet_of(documentation)
+            for documentation in DOCUMENTATION_NETWORKS
+        ):
+            raise ManifestError(f"documentation-only network {str(network)!r} is a placeholder")
+    parsed.sort(key=lambda item: (item.version, int(item.network_address), item.prefixlen))
+    return [str(item) for item in parsed]
 
 
 def _validate_ceilings(value: Any) -> dict[str, int]:
@@ -878,6 +909,7 @@ def compile_plan(
         "authorization",
         {
             "networks",
+            "mediaNetworks",
             "signalingPorts",
             "mediaPorts",
             "transports",
@@ -904,6 +936,11 @@ def compile_plan(
             raise ManifestError(f"documentation-only network {text!r} is a placeholder")
         networks.append(network)
     networks.sort(key=lambda item: (item.version, int(item.network_address), item.prefixlen))
+    media_networks = (
+        _media_networks(authorization["mediaNetworks"])
+        if "mediaNetworks" in authorization
+        else None
+    )
 
     signaling_ports = {
         _uint(value, f"authorization.signalingPorts[{index}]")
@@ -1011,8 +1048,17 @@ def compile_plan(
         for answer in answers:
             address = ipaddress.ip_address(answer)
             if not any(address in network for network in networks):
+                media_only = media_networks is not None and any(
+                    address in ipaddress.ip_network(item) for item in media_networks
+                )
                 raise ManifestError(
                     f"target {host!r} resolved to {answer}, outside approved networks"
+                    + (
+                        " (it is inside authorization.mediaNetworks, which admits media "
+                        "only, never a signaling destination)"
+                        if media_only
+                        else ""
+                    )
                 )
 
         signaling = _mapping(target.get("signaling"), f"targets[{index}].signaling")
@@ -1266,26 +1312,22 @@ def compile_plan(
     used_destinations = [
         item for item in destinations if item["target"] in used_target_names
     ]
-    capture_scopes: list[str] = []
-    for address in sorted(
-        {item["address"] for item in used_destinations}, key=_address_sort_key
-    ):
-        signaling_terms = sorted(
-            {
-                (item["transport"], item["port"])
-                for item in used_destinations
-                if item["address"] == address
-            }
+    del used_destinations  # the capture scope is derived from the steps below
+    # One rule for planner, runtime validator, and execution (capture_scope):
+    # a manifest without mediaNetworks keeps the original filter byte for
+    # byte; with it, the plan freezes the authorized media term too.
+    capture_filter = capture_scope.frozen_filter(
+        steps,
+        {"start": media_start, "end": media_end},
+        [str(item) for item in networks],
+        media_networks,
+    )
+    if media_networks is not None:
+        assumptions.append(
+            "media (never signaling) may also flow to and from authorization.mediaNetworks "
+            f"{', '.join(media_networks)} on UDP ports {media_start}-{media_end}; the capture "
+            "and its watchdog include UDP in that port range with every authorized network"
         )
-        port_filters = [
-            f"{'udp' if transport == 'udp' else 'tcp'} port {port}"
-            for transport, port in signaling_terms
-        ]
-        port_filters.append(f"udp portrange {media_start}-{media_end}")
-        capture_scopes.append(
-            f"(host {address} and ({' or '.join(port_filters)}))"
-        )
-    capture_filter = " or ".join(capture_scopes)
 
     plan = {
         "apiVersion": "sippycup.dev/plan/v1",
@@ -1296,6 +1338,7 @@ def compile_plan(
         },
         "authorization": {
             "networks": [str(item) for item in networks],
+            **({"mediaNetworks": media_networks} if media_networks is not None else {}),
             "signalingPorts": port_terms,
             "mediaPorts": {"start": media_start, "end": media_end},
             "transports": sorted(transports),
