@@ -130,6 +130,16 @@ Generates, atomically and mode 0600, into the engagement directory:
   leave, about 100 packets per second per direction plus signaling at 256 bytes
   each, shared evenly across targets. A call needs at least 5 seconds, 24
   packets, and 8192 bytes to fit, otherwise `scope.ceiling_infeasible`.
+  Each `call` case dials (`dial.user`) the `user` of the first destination on
+  its target whose `expect` is not `reject`; a target whose destinations all
+  reject gets no `dial`, so nothing is invented. When `account.required` is
+  true, every target carries `credentialRef: <account.credential_ref>` and
+  `account: {username, realm, register: true}` from the scope (registration
+  first, like the guided call). Such calls run on the softphone campaign
+  runner (see `CAMPAIGN-MANIFEST.md`). A destination `user` or account
+  `username` outside the manifest's stricter grammar (letters, digits, and
+  `+ * . _ -`; for example one containing `#` or `@`) fails the manifest
+  validator, so `campaign.yaml` is skipped with that reason.
 - `expectations.yaml`, the oracle expectations: allowed endpoints (target
   addresses, enumerated media addresses up to 1024, and your source addresses),
   expected codecs, bidirectional media when a destination echoes or answers,

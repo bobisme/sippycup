@@ -8,6 +8,9 @@ commands=(
     boo
     campaign
     campaign-sipp-runner
+    campaign-softphone-runner
+    campaign-softphone-selftest
+    campaign-sip-challenge-stub
     campaign-loopback-uas
     campaign-integration-selftest
     call-integration-selftest

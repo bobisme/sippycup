@@ -67,9 +67,13 @@ RUN curl --fail --location --show-error \
         --directory /src/pjproject --strip-components=1 \
     && rm /tmp/pjproject.tar.gz
 
+# PJSIP_MAX_STALE_COUNT 1: after a rejected digest response PJSIP otherwise
+# re-sends credentials up to three times whenever the server issues a new
+# nonce, which costs three failed logins per wrong password (lockout risk).
 RUN cd /src/pjproject \
     && printf '%s\n' \
         '#define PJ_HAS_IPV6 1' \
+        '#define PJSIP_MAX_STALE_COUNT 1' \
         '#include <pj/config_site_sample.h>' \
         > pjlib/include/pj/config_site.h \
     && ./configure \
@@ -181,6 +185,9 @@ COPY --from=sipp-builder /build/sipp/sipp /usr/local/bin/sipp
 COPY --from=pjsip-builder /build-pjsua /usr/local/bin/pjsua
 COPY bin/campaign /usr/local/bin/campaign
 COPY bin/campaign-sipp-runner /usr/local/bin/campaign-sipp-runner
+COPY bin/campaign-softphone-runner /usr/local/bin/campaign-softphone-runner
+COPY bin/campaign-softphone-selftest /usr/local/bin/campaign-softphone-selftest
+COPY bin/campaign-sip-challenge-stub /usr/local/bin/campaign-sip-challenge-stub
 COPY bin/campaign-loopback-uas /usr/local/bin/campaign-loopback-uas
 COPY bin/campaign-integration-selftest /usr/local/bin/campaign-integration-selftest
 COPY bin/call-integration-selftest /usr/local/bin/call-integration-selftest
@@ -233,6 +240,9 @@ COPY completions/campaign.bash /usr/share/bash-completion/completions/campaign
 RUN chmod 0755 \
         /usr/local/bin/campaign \
         /usr/local/bin/campaign-sipp-runner \
+        /usr/local/bin/campaign-softphone-runner \
+        /usr/local/bin/campaign-softphone-selftest \
+        /usr/local/bin/campaign-sip-challenge-stub \
         /usr/local/bin/campaign-loopback-uas \
         /usr/local/bin/campaign-integration-selftest \
         /usr/local/bin/call-integration-selftest \

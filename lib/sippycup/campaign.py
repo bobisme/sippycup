@@ -76,6 +76,11 @@ DOCUMENTATION_NETWORKS = tuple(
     ipaddress.ip_network(value)
     for value in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
 )
+# The SIP user part a call dials and the account username: letters, digits,
+# and + * . _ - only, never an @, URI parameter, header, or whitespace. The
+# grammar equals the softphone driver's destination grammar.
+SIP_USER_PATTERN = re.compile(r"[A-Za-z0-9+*][A-Za-z0-9._+*-]{0,63}")
+SIP_REALM_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,252}")
 
 
 class ManifestError(ValueError):
@@ -157,6 +162,50 @@ def _name(value: Any, field: str) -> str:
     result = _string(value, field)
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", result):
         raise ManifestError(f"{field} must match [a-z][a-z0-9-]{{0,62}}")
+    return result
+
+
+def _sip_user(value: Any, field: str) -> str:
+    if isinstance(value, bool) or isinstance(value, int):
+        raise ManifestError(
+            f"{field} must be a quoted string (YAML reads an unquoted number as an integer)"
+        )
+    if not isinstance(value, str) or SIP_USER_PATTERN.fullmatch(value) is None:
+        raise ManifestError(
+            f"{field} must be 1-64 characters of letters, digits, and + * . _ - "
+            "starting with a letter, digit, + or * (no @, URI parameters, or whitespace)"
+        )
+    if PLACEHOLDER_WORDS.search(value.lower()):
+        raise ManifestError(f"{field} {value!r} is a placeholder")
+    return value
+
+
+def _dial(value: Any, field: str) -> dict[str, str]:
+    dial = _mapping(value, field)
+    _keys(dial, field, {"user"})
+    if "user" not in dial:
+        raise ManifestError(f"{field}.user is required")
+    return {"user": _sip_user(dial["user"], f"{field}.user")}
+
+
+def _account(value: Any, field: str) -> dict[str, Any]:
+    account = _mapping(value, field)
+    _keys(account, field, {"username", "realm", "register"})
+    if "username" not in account:
+        raise ManifestError(f"{field}.username is required")
+    result: dict[str, Any] = {"username": _sip_user(account["username"], f"{field}.username")}
+    if "realm" in account:
+        realm = account["realm"]
+        if not isinstance(realm, str) or SIP_REALM_PATTERN.fullmatch(realm) is None:
+            raise ManifestError(
+                f"{field}.realm must be 1-253 characters of letters, digits, and . _ - "
+                "(omit it to answer a challenge for any realm)"
+            )
+        result["realm"] = realm
+    register = account.get("register", False)
+    if not isinstance(register, bool):
+        raise ManifestError(f"{field}.register must be a boolean")
+    result["register"] = register
     return result
 
 
@@ -812,7 +861,11 @@ def compile_plan(
     resolution_pins: dict[str, list[str]] = {}
     for index, raw_target in enumerate(_list(manifest.get("targets"), "targets")):
         target = _mapping(raw_target, f"targets[{index}]")
-        _keys(target, f"targets[{index}]", {"name", "address", "signaling", "credentialRef"})
+        _keys(
+            target,
+            f"targets[{index}]",
+            {"name", "address", "signaling", "credentialRef", "account"},
+        )
         target_name = _name(target.get("name"), f"targets[{index}].name")
         if target_name in targets:
             raise ManifestError(f"duplicate target name {target_name!r}")
@@ -858,12 +911,21 @@ def compile_plan(
                 raise ManifestError(
                     f"target {target_name!r} uses unauthorized credential reference {credential!r}"
                 )
+        account = None
+        if "account" in target:
+            account = _account(target["account"], f"targets[{index}].account")
+            if credential is None:
+                raise ManifestError(
+                    f"targets[{index}].account requires the target's credentialRef "
+                    "(the password is supplied at run time, never in the manifest)"
+                )
         targets[target_name] = {
             "host": host,
             "addresses": answers,
             "transport": transport,
             "port": port,
             "credentialRef": credential,
+            "account": account,
         }
         for address in answers:
             destinations.append(
@@ -902,7 +964,11 @@ def compile_plan(
     seen_cases: set[str] = set()
     for index, raw_case in enumerate(_list(manifest.get("cases"), "cases")):
         case = _mapping(raw_case, f"cases[{index}]")
-        _keys(case, f"cases[{index}]", {"id", "type", "target", "count", "budget", "expectations", "generated"})
+        _keys(
+            case,
+            f"cases[{index}]",
+            {"id", "type", "target", "count", "budget", "expectations", "generated", "dial"},
+        )
         case_id = _name(case.get("id"), f"cases[{index}].id")
         if case_id in seen_cases:
             raise ManifestError(f"duplicate case id {case_id!r}")
@@ -913,6 +979,11 @@ def compile_plan(
         target_name = _name(case.get("target"), f"cases[{index}].target")
         if target_name not in targets:
             raise ManifestError(f"case {case_id!r} references unknown target {target_name!r}")
+        dial = None
+        if "dial" in case:
+            if case_type != "call":
+                raise ManifestError(f"cases[{index}].dial is only valid for a call case")
+            dial = _dial(case["dial"], f"cases[{index}].dial")
         count = _uint(case.get("count"), f"cases[{index}].count")
         planned_step_count = _checked_add(
             planned_step_count, count, "generated step count"
@@ -999,6 +1070,12 @@ def compile_plan(
                 }
             if generated is not None:
                 step["generated"] = generated
+            # Optional call facts are added only when declared so a manifest
+            # without them compiles to exactly the same plan bytes as before.
+            if dial is not None:
+                step["dial"] = dict(dial)
+            if case_type == "call" and targets[target_name]["account"] is not None:
+                step["account"] = dict(targets[target_name]["account"])
             steps.append(step)
 
     for key, value in totals.items():

@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# End-to-end self-test for the credential-safe softphone campaign runner.
+# Runs inside ONE isolated container with loopback traffic only:
+#   - a PJSUA auto-answer/auto-loop echo peer on 127.0.0.2:5062, and
+#   - a SIP stub on 127.0.0.3:5063 that rejects every credential (lockout).
+# Each campaign is planned and executed with the real `campaign run`.
+set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'EOF'
+Usage: campaign-softphone-selftest [BASE]
+
+1. Plan and run a campaign whose call case dials `echo` with an account and a
+   credential reference supplied through --secret-env, against a PJSUA echo
+   peer on 127.0.0.2. Assert success, exactly one INVITE dialog whose
+   Request-URI user is `echo`, bidirectional RTP with payload stripped
+   (retainPayload: false) but RTP headers kept, an oracle PASS on the run's
+   capture, and that the secret appears nowhere under BASE.
+2. Run the same account against a stub that rejects every credential, once
+   with registration and once without, and assert from each capture that the
+   wrong password produced exactly ONE credentialed attempt and no retry.
+The default BASE is /work/campaign-softphone-selftest.
+EOF
+    exit 0
+fi
+
+base="${1:-/work/campaign-softphone-selftest}"
+root="${base}-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
+mkdir -m 0700 "${root}"
+peer=127.0.0.2
+peer_port=5062
+stub=127.0.0.3
+stub_port=5063
+realm=selftest.lab
+peer_pid=""
+holder_pid=""
+stub_pid=""
+
+cleanup() {
+    local pid
+    for pid in "${peer_pid}" "${stub_pid}" "${holder_pid}"; do
+        if [[ -n "${pid}" ]]; then
+            kill "${pid}" 2>/dev/null || true
+            wait "${pid}" 2>/dev/null || true
+        fi
+    done
+}
+trap cleanup EXIT
+
+fail() {
+    printf 'campaign softphone self-test FAILED: %s\n' "$*" >&2
+    exit 1
+}
+
+# PJSUA quits when its standard input reaches EOF, so the peer reads from a
+# FIFO that a sleeping writer holds open.
+mkfifo -m 0600 "${root}/peer.stdin"
+sleep 600 >"${root}/peer.stdin" &
+holder_pid=$!
+pjsua \
+    --null-audio \
+    --no-color \
+    --no-vad \
+    --bound-addr="${peer}" \
+    --ip-addr="${peer}" \
+    --local-port="${peer_port}" \
+    --no-tcp \
+    --auto-answer=200 \
+    --auto-loop \
+    --max-calls=1 \
+    --add-codec=PCMU \
+    --rtp-port=20000 \
+    --log-file="${root}/peer.log" \
+    --log-level=4 \
+    --app-log-level=0 \
+    <"${root}/peer.stdin" >"${root}/peer.out" 2>&1 &
+peer_pid=$!
+campaign-sip-challenge-stub "${stub}" "${stub_port}" "${realm}" >"${root}/stub.log" 2>&1 &
+stub_pid=$!
+
+for _ in $(seq 100); do
+    if ss -Hlun "src ${peer}:${peer_port}" 2>/dev/null | grep -q . \
+        && ss -Hlun "src ${stub}:${stub_port}" 2>/dev/null | grep -q .; then
+        break
+    fi
+    sleep 0.05
+done
+ss -Hlun "src ${peer}:${peer_port}" | grep -q . || fail "echo peer did not listen"
+ss -Hlun "src ${stub}:${stub_port}" | grep -q . || fail "challenge stub did not listen"
+
+secret="selftest-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+export SIPPYCUP_SELFTEST_SECRET="${secret}"
+
+write_manifest() {
+    local name="$1" address="$2" port="$3" dial="$4" register="$5"
+    cat >"${root}/${name}.yaml" <<YAML
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata: {name: ${name}}
+authorization:
+  networks: [${address}/32]
+  signalingPorts: [${port}]
+  mediaPorts: {start: 20000, end: 20100}
+  transports: [udp]
+  credentialRefs: [selftest-user]
+  ceilings:
+    calls: 1
+    packets: 3000
+    bytes: 1500000
+    durationSeconds: 60
+    concurrentCalls: 1
+    packetsPerSecond: 400
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: peer
+    address: ${address}
+    signaling: {transport: udp, port: ${port}}
+    credentialRef: selftest-user
+    account: {username: selftest, realm: ${realm}, register: ${register}}
+cases:
+  - id: dial-call
+    type: call
+    target: peer
+    count: 1
+    dial: {user: "${dial}"}
+    budget:
+      packetsPerRun: 2500
+      bytesPerRun: 1200000
+      durationSecondsPerRun: 15
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+      requireBidirectionalRtp: true
+expectations:
+  allowedSipStatuses: [100, 180, 200]
+  requireBidirectionalRtp: true
+evidence:
+  capture: true
+  retainPayload: false
+  directory: evidence/${name}
+YAML
+    chmod 0600 "${root}/${name}.yaml"
+}
+
+# Sets run_dir and run_status for campaign NAME.
+run_campaign() {
+    local name="$1"
+    campaign plan "${root}/${name}.yaml" --output "${root}/${name}.plan.json"
+    set +e
+    run_dir="$(
+        campaign run "${root}/${name}.plan.json" \
+            --manifest "${root}/${name}.yaml" \
+            --run-root "${root}/runs-${name}" \
+            --interface lo \
+            --secret-env selftest-user=SIPPYCUP_SELFTEST_SECRET \
+            2>"${root}/${name}.stderr"
+    )"
+    run_status=$?
+    set -e
+    [[ -n "${run_dir}" && -d "${run_dir}" ]] || {
+        cat "${root}/${name}.stderr" >&2 || true
+        fail "${name}: campaign run produced no run directory (exit ${run_status})"
+    }
+}
+
+count() {
+    tshark -r "$1" -o rtp.heuristic_rtp:TRUE -Y "$2" -T fields -e frame.number 2>/dev/null | wc -l
+}
+
+distinct() {
+    tshark -r "$1" -Y "$2" -T fields -e "$3" 2>/dev/null | sort -u | grep -c . || true
+}
+
+step_result() {
+    jq -r 'select(.event == "step.output" and .stream == "stdout") | .text' "$1/events.jsonl"
+}
+
+# 1. Authenticated-account call to a real destination with bidirectional RTP.
+write_manifest softphone-echo "${peer}" "${peer_port}" echo true
+run_campaign softphone-echo
+echo_dir="${run_dir}"
+if (( run_status != 0 )); then
+    cat "${root}/softphone-echo.stderr" >&2 || true
+    jq -c . "${echo_dir}/events.jsonl" >&2 || true
+    fail "softphone-echo campaign exited ${run_status}"
+fi
+jq -e '.state == "succeeded" and .completedSteps == 1' "${echo_dir}/result.json" >/dev/null \
+    || fail "softphone-echo result is not succeeded"
+jq -e '.stepRunners == [{"firstStep": 1, "lastStep": 1, "runner": "campaign-softphone-runner", "sha256": .runners["campaign-softphone-runner"].sha256}]' \
+    "${echo_dir}/versions.json" >/dev/null || fail "versions.json does not record the softphone runner"
+step_result "${echo_dir}" | jq -e '
+    .outcome == "passed" and .registered == true and .finalStatus == 200
+    and .rtp.txPackets > 20 and .rtp.rxPackets > 20 and .dial.user == "echo"
+    and .payloadRetained == false' >/dev/null \
+    || { step_result "${echo_dir}" >&2; fail "runner result line does not show a passed call"; }
+
+capture="${echo_dir}/capture.pcap"
+invites="$(count "${capture}" 'sip.Method == "INVITE"')"
+dialogs="$(distinct "${capture}" 'sip.Method == "INVITE"' sip.Call-ID)"
+ruri_users="$(tshark -r "${capture}" -Y 'sip.Method == "INVITE"' -T fields -e sip.r-uri.user 2>/dev/null | sort -u | tr '\n' ' ')"
+(( invites >= 1 )) || fail "no INVITE was captured"
+(( dialogs == 1 )) || fail "expected exactly one INVITE dialog, saw ${dialogs}"
+[[ "${ruri_users}" == "echo " ]] || fail "INVITE Request-URI user is '${ruri_users}', expected 'echo'"
+to_peer="$(count "${capture}" "rtp && ip.dst == ${peer}")"
+from_peer="$(count "${capture}" "rtp && ip.src == ${peer}")"
+(( to_peer > 20 && from_peer > 20 )) \
+    || fail "RTP is not bidirectional (to peer ${to_peer}, from peer ${from_peer})"
+# retainPayload: false keeps Ethernet+IPv4+UDP+12-byte RTP header (54 bytes)
+# and records the original length.
+oversized="$(count "${capture}" 'rtp && frame.cap_len > 54')"
+truncated="$(count "${capture}" 'rtp && frame.len > frame.cap_len')"
+(( oversized == 0 )) || fail "${oversized} RTP packets still carry payload"
+(( truncated > 40 )) || fail "RTP headers were not kept with payload stripped (${truncated})"
+outside="$(count "${capture}" "!(ip.addr == ${peer})")"
+(( outside == 0 )) || fail "capture contains ${outside} packets outside the approved address"
+
+cat >"${root}/expectations.yaml" <<YAML
+schema_version: sippycup.expectations/v1
+capture:
+  allowed_endpoints: [${peer}, 127.0.0.1]
+expectations:
+  - id: softphone-campaign-call
+    type: call_path
+    on_unknown: inconclusive
+    parameters:
+      require_bidirectional: true
+      require_dtmf: false
+      allow_symmetric_rtp: true
+      max_setup_ms: 5000
+      max_loss_fraction: 0.01
+      max_duplicates: 0
+      max_reordered: 0
+YAML
+set +e
+sippycup-assert "${capture}" --expect "${root}/expectations.yaml" --format json \
+    >"${root}/assert.json" 2>"${root}/assert.stderr"
+assert_status=$?
+set -e
+if ! jq -e '.verdict == "pass"' "${root}/assert.json" >/dev/null; then
+    cat "${root}/assert.stderr" >&2 || true
+    jq . "${root}/assert.json" >&2 || cat "${root}/assert.json" >&2 || true
+    fail "oracle verdict is not pass (exit ${assert_status})"
+fi
+
+# 2. Wrong password, registration first: one credentialed REGISTER, no retry.
+write_manifest lockout-register "${stub}" "${stub_port}" echo true
+run_campaign lockout-register
+register_dir="${run_dir}"
+(( run_status != 0 )) || fail "lockout-register succeeded against a stub that rejects every credential"
+jq -e '.state == "failed"' "${register_dir}/result.json" >/dev/null \
+    || fail "lockout-register state is $(jq -r .state "${register_dir}/result.json")"
+capture="${register_dir}/capture.pcap"
+registers="$(distinct "${capture}" 'sip.Method == "REGISTER"' sip.CSeq.seq)"
+credentialed="$(distinct "${capture}" 'sip.Method == "REGISTER" && sip.Authorization' sip.CSeq.seq)"
+register_invites="$(count "${capture}" 'sip.Method == "INVITE"')"
+(( registers == 2 && credentialed == 1 )) \
+    || fail "wrong password sent ${registers} REGISTER transactions (${credentialed} credentialed); expected 2 (1)"
+(( register_invites == 0 )) || fail "an INVITE was sent after registration failed"
+step_result "${register_dir}" | jq -e '
+    .outcome == "failed" and (.reasons | index("registration_failed"))
+    and .authentication.REGISTER == {"attempts": 1, "rejected": 1}' >/dev/null \
+    || { step_result "${register_dir}" >&2; fail "runner did not report one rejected REGISTER"; }
+
+# 3. Wrong password on the INVITE challenge, no registration.
+write_manifest lockout-invite "${stub}" "${stub_port}" echo false
+run_campaign lockout-invite
+invite_dir="${run_dir}"
+(( run_status != 0 )) || fail "lockout-invite succeeded against a stub that rejects every credential"
+# "failed", not call_ceiling_exceeded: the digest re-send is the same dialog.
+jq -e '.state == "failed"' "${invite_dir}/result.json" >/dev/null \
+    || fail "lockout-invite state is $(jq -r .state "${invite_dir}/result.json")"
+capture="${invite_dir}/capture.pcap"
+invite_transactions="$(distinct "${capture}" 'sip.Method == "INVITE"' sip.CSeq.seq)"
+invite_credentialed="$(distinct "${capture}" 'sip.Method == "INVITE" && sip.Proxy-Authorization' sip.CSeq.seq)"
+invite_dialogs="$(distinct "${capture}" 'sip.Method == "INVITE"' sip.Call-ID)"
+invite_registers="$(count "${capture}" 'sip.Method == "REGISTER"')"
+(( invite_transactions == 2 && invite_credentialed == 1 && invite_dialogs == 1 )) \
+    || fail "wrong password sent ${invite_transactions} INVITE transactions (${invite_credentialed} credentialed, ${invite_dialogs} dialogs); expected 2 (1, 1)"
+(( invite_registers == 0 )) || fail "REGISTER was sent although the plan says register: false"
+step_result "${invite_dir}" | jq -e '
+    .outcome == "failed" and .finalStatus == 407
+    and .authentication.INVITE == {"attempts": 1, "rejected": 1}' >/dev/null \
+    || { step_result "${invite_dir}" >&2; fail "runner did not report one rejected INVITE"; }
+
+unset SIPPYCUP_SELFTEST_SECRET
+if grep -rqF -- "${secret}" "${root}"; then
+    fail "the credential value appears in the self-test tree"
+fi
+if compgen -G '/dev/shm/sippycup-softphone-*' >/dev/null \
+    || compgen -G '/dev/shm/sippycup-campaign-softphone-*' >/dev/null; then
+    fail "a private softphone directory was not removed"
+fi
+
+printf 'campaign softphone self-test passed: %s\n' "${root}"
+printf '  echo call: run=%s INVITE dialogs=%s R-URI user=%s RTP to-peer=%s from-peer=%s stripped=%s oracle=%s\n' \
+    "${echo_dir##*/}" "${dialogs}" "${ruri_users% }" "${to_peer}" "${from_peer}" "${truncated}" \
+    "$(jq -r .verdict "${root}/assert.json")"
+printf '  wrong password + REGISTER: REGISTER transactions=%s credentialed=%s INVITE=%s\n' \
+    "${registers}" "${credentialed}" "${register_invites}"
+printf '  wrong password on INVITE: INVITE transactions=%s credentialed=%s dialogs=%s state=%s\n' \
+    "${invite_transactions}" "${invite_credentialed}" "${invite_dialogs}" \
+    "$(jq -r .state "${invite_dir}/result.json")"
+printf 'Network activity: loopback only inside this container (127.0.0.1 <-> %s, %s)\n' "${peer}" "${stub}"

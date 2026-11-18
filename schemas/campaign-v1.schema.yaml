@@ -105,6 +105,22 @@ properties:
         credentialRef:
           type: string
           pattern: '^[a-z][a-z0-9-]{0,62}$'
+        account:
+          description: >-
+            Account used by the softphone runner for digest challenges and
+            optional registration. Requires credentialRef; the password is
+            never part of the manifest.
+          type: object
+          additionalProperties: false
+          required: [username]
+          properties:
+            username: {$ref: '#/$defs/sipUser'}
+            realm:
+              type: string
+              pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$'
+            register: {type: boolean, default: false}
+      dependentRequired:
+        account: [credentialRef]
   cases:
     type: array
     minItems: 1
@@ -144,6 +160,20 @@ properties:
             maxSetupSeconds: {$ref: '#/$defs/positiveU64'}
         generated:
           $ref: '#/$defs/generatedCase'
+        dial:
+          description: >-
+            SIP user part a call case dials at the frozen target address
+            (sip:USER@ADDRESS:PORT). Valid only for type call.
+          type: object
+          additionalProperties: false
+          required: [user]
+          properties:
+            user: {$ref: '#/$defs/sipUser'}
+      if:
+        required: [dial]
+      then:
+        properties:
+          type: {const: call}
   matrix:
     $ref: '#/$defs/matrix'
   expectations:
@@ -166,6 +196,9 @@ properties:
       retainPayload: {type: boolean}
       directory: {type: string, minLength: 1}
 $defs:
+  sipUser:
+    type: string
+    pattern: '^[A-Za-z0-9+*][A-Za-z0-9._+*-]{0,63}$'
   positiveU64:
     type: integer
     minimum: 1

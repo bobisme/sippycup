@@ -200,11 +200,21 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
         }
         if credential:
             entry["credentialRef"] = credential
+            # A required account registers first, like the guided call; the
+            # softphone runner dials only after registration succeeds.
+            manifest_account: dict[str, Any] = {"username": account["username"]}
+            if account.get("realm"):
+                manifest_account["realm"] = account["realm"]
+            manifest_account["register"] = True
+            entry["account"] = manifest_account
         manifest_targets.append(entry)
     cases: list[dict[str, Any]] = []
     by_target: dict[str, list[str]] = {}
+    dial_user: dict[str, str] = {}
     for item in destinations:
         by_target.setdefault(item["target"], []).append(item["expect"])
+        if item["expect"] != "reject":
+            dial_user.setdefault(item["target"], item["user"])
     for item in targets:
         if budget["options"] is not None:
             cases.append(
@@ -230,20 +240,21 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
             if all(behavior != "reject" for behavior in behaviors):
                 expectations["finalStatus"] = 200
                 expectations["requireBidirectionalRtp"] = True
-            cases.append(
-                {
-                    "id": f"{item['name']}-call",
-                    "type": "call",
-                    "target": item["name"],
-                    "count": 1,
-                    "budget": {
-                        "packetsPerRun": budget["call"]["packets"],
-                        "bytesPerRun": budget["call"]["bytes"],
-                        "durationSecondsPerRun": budget["call"]["seconds"],
-                    },
-                    "expectations": expectations,
-                }
-            )
+            call_case: dict[str, Any] = {
+                "id": f"{item['name']}-call",
+                "type": "call",
+                "target": item["name"],
+                "count": 1,
+            }
+            if item["name"] in dial_user:
+                call_case["dial"] = {"user": dial_user[item["name"]]}
+            call_case["budget"] = {
+                "packetsPerRun": budget["call"]["packets"],
+                "bytesPerRun": budget["call"]["bytes"],
+                "durationSecondsPerRun": budget["call"]["seconds"],
+            }
+            call_case["expectations"] = expectations
+            cases.append(call_case)
     authorization: dict[str, Any] = {
         "networks": networks,
         "signalingPorts": list(doc["signaling"]["ports"]),

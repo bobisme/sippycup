@@ -128,6 +128,8 @@ class CampaignSupervisor:
         redactions: Sequence[str] = (),
         child_env: dict[str, str] | None = None,
         external_stop: Callable[[], str | None] | None = None,
+        runner_for: Callable[[dict[str, Any]], Sequence[str]] | None = None,
+        output_limit_for: Callable[[dict[str, Any]], int] | None = None,
     ) -> None:
         if not runner:
             raise RuntimeError("runner command must not be empty")
@@ -150,6 +152,10 @@ class CampaignSupervisor:
         self.redactions = tuple(value for value in redactions if value)
         self.child_env = child_env
         self.external_stop = external_stop or (lambda: None)
+        # Per-step selection is a pure function of the frozen step, chosen by
+        # the integration layer; the command line never supplies it.
+        self.runner_for = runner_for or (lambda _step: self.runner)
+        self.output_limit_for = output_limit_for or (lambda _step: self.output_limit)
         self._last_call_start: float | None = None
         self._external_reason: str | None = None
         self._cancel_signal: int | None = None
@@ -313,6 +319,12 @@ class CampaignSupervisor:
                 raise RuntimeError(
                     f"runner input exceeds {MAX_STEP_INPUT_BYTES} byte limit"
                 )
+            runner = list(self.runner_for(step))
+            if not runner:
+                raise RuntimeError("runner command must not be empty")
+            output_limit = self.output_limit_for(step)
+            if isinstance(output_limit, bool) or not isinstance(output_limit, int) or output_limit < 0:
+                raise RuntimeError("output limit must not be negative")
         except (RuntimeError, OSError, ValueError) as error:
             self.events.emit(
                 "step.start_failed",
@@ -323,7 +335,7 @@ class CampaignSupervisor:
             return "failed"
         try:
             child = subprocess.Popen(
-                self.runner,
+                runner,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -395,7 +407,7 @@ class CampaignSupervisor:
             if chunk is None:
                 stream_ends += 1
                 continue
-            remaining = max(0, self.output_limit - kept)
+            remaining = max(0, output_limit - kept)
             retained = chunk[:remaining]
             dropped += len(chunk) - len(retained)
             if retained:
@@ -600,6 +612,54 @@ def _validate_case_expectations(value: Any, step: int) -> None:
         raise RuntimeError(f"step {step} setup deadline is invalid")
 
 
+OPTIONAL_STEP_KEYS = {"generated", "dial", "account"}
+_SIP_USER = re.compile(r"[A-Za-z0-9+*][A-Za-z0-9._+*-]{0,63}")
+_SIP_REALM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,252}")
+
+
+def _validate_call_facts(
+    step: dict[str, Any], index: int, account_by_target: dict[str, Any]
+) -> None:
+    """Independently check the optional dial destination and account facts."""
+    if "dial" in step:
+        dial = _object(step["dial"], f"step {index} dial")
+        _exact_keys(dial, f"step {index} dial", {"user"})
+        if step["type"] != "call":
+            raise RuntimeError(f"plan step {index} dial is only valid for a call")
+        if not isinstance(dial["user"], str) or _SIP_USER.fullmatch(dial["user"]) is None:
+            raise RuntimeError(f"plan step {index} dial user is invalid")
+    if step["type"] != "call":
+        if "account" in step:
+            raise RuntimeError(f"plan step {index} account is only valid for a call")
+        return
+    account = step.get("account")
+    if account is not None:
+        account = _object(account, f"step {index} account")
+        keys = set(account)
+        if keys not in ({"username", "register"}, {"username", "realm", "register"}):
+            raise RuntimeError(f"plan step {index} account has invalid fields")
+        if (
+            not isinstance(account["username"], str)
+            or _SIP_USER.fullmatch(account["username"]) is None
+        ):
+            raise RuntimeError(f"plan step {index} account username is invalid")
+        if "realm" in account and (
+            not isinstance(account["realm"], str)
+            or _SIP_REALM.fullmatch(account["realm"]) is None
+        ):
+            raise RuntimeError(f"plan step {index} account realm is invalid")
+        if not isinstance(account["register"], bool):
+            raise RuntimeError(f"plan step {index} account register must be boolean")
+        if step["credentialRef"] is None:
+            raise RuntimeError(f"plan step {index} account requires a credential reference")
+    # An account belongs to its target: every call step of a target carries
+    # the same account, so one step cannot be edited to register elsewhere.
+    target = step["target"]
+    if target in account_by_target and account_by_target[target] != account:
+        raise RuntimeError(f"plan step {index} account differs from its target's account")
+    account_by_target[target] = account
+
+
 def _capture_filter(steps: list[dict[str, Any]], media: dict[str, Any]) -> str:
     scopes: dict[str, set[tuple[str, int]]] = {}
     for step in steps:
@@ -800,13 +860,14 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
     steps = _unique_array(plan["steps"], "steps")
     calculated = {"calls": 0, "packets": 0, "bytes": 0, "durationSeconds": 0}
+    account_by_target: dict[str, Any] = {}
     for expected_index, step in enumerate(steps, 1):
         step = _object(step, f"steps[{expected_index - 1}]")
         step_keys = {
             "index", "case", "sequence", "type", "target", "destination",
             "credentialRef", "budget", "expectations",
         }
-        if set(step) not in (step_keys, step_keys | {"generated"}):
+        if not step_keys <= set(step) or set(step) - step_keys - OPTIONAL_STEP_KEYS:
             raise RuntimeError(f"plan step {expected_index} has invalid fields")
         if step["index"] != expected_index:
             raise RuntimeError("plan step indexes must be contiguous starting at 1")
@@ -821,6 +882,7 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         credential = step["credentialRef"]
         if credential is not None and credential not in credentials:
             raise RuntimeError(f"plan step {expected_index} credential is unauthorized")
+        _validate_call_facts(step, expected_index, account_by_target)
         step_destination = _object(
             step["destination"], f"steps[{expected_index - 1}].destination"
         )
@@ -937,6 +999,8 @@ def run_plan(
     redactions: Sequence[str] = (),
     child_env: dict[str, str] | None = None,
     external_stop: Callable[[], str | None] | None = None,
+    runner_for: Callable[[dict[str, Any]], Sequence[str]] | None = None,
+    output_limit_for: Callable[[dict[str, Any]], int] | None = None,
 ) -> RunResult:
     campaign = _validate_plan(plan)["metadata"]["name"]
     with EventWriter(event_path, campaign) as events:
@@ -950,6 +1014,8 @@ def run_plan(
             redactions=redactions,
             child_env=child_env,
             external_stop=external_stop,
+            runner_for=runner_for,
+            output_limit_for=output_limit_for,
         )
         previous: dict[int, Any] = {}
 

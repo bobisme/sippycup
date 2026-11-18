@@ -501,6 +501,18 @@ class CompileTests(ScopeTestCase):
                 ("edge-tls-call", "call"),
             },
         )
+        calls = [step for step in plan["steps"] if step["type"] == "call"]
+        for step in calls:
+            self.assertEqual(step["dial"], {"user": "9196"})
+            self.assertEqual(
+                step["account"],
+                {"username": "staging-user", "realm": "ferivox.test", "register": True},
+            )
+            self.assertEqual(step["credentialRef"], "staging-user")
+        for step in plan["steps"]:
+            if step["type"] == "options":
+                self.assertNotIn("dial", step)
+                self.assertNotIn("account", step)
 
         expectation, on_unknown, selector = load_expectations(self.root / "expectations.yaml")
         self.assertEqual(on_unknown, "inconclusive")
@@ -534,6 +546,37 @@ class CompileTests(ScopeTestCase):
         )
         self.assertEqual({step["type"] for step in plan["steps"]}, {"options"})
         self.assertEqual(plan["authorization"]["credentialRefs"], [])
+
+    def test_call_dials_first_non_reject_destination_without_account(self) -> None:
+        document = complete_scope()
+        document["account"].update({"required": False})
+        for key in ("username", "realm", "credential_ref", "credential_delivery"):
+            del document["account"][key]
+        document["destinations"] = [
+            {"name": "blocked", "target": "edge", "user": "0000", "expect": "reject"},
+            {"name": "agent", "target": "edge", "user": "+15550100", "expect": "agent"},
+            {"name": "echo", "target": "edge", "user": "9196", "expect": "echo"},
+            {"name": "tls-blocked", "target": "edge-tls", "user": "0001", "expect": "reject"},
+        ]
+        self.write_scope(document)
+        result = self.compile()
+        self.assertEqual(result.exit_code, 0, result.as_dict())
+        manifest = yaml.safe_load((self.root / "campaign.yaml").read_bytes())
+        self.assertTrue(all("account" not in item for item in manifest["targets"]))
+        plan = compile_plan(manifest, "0" * 64, resolver=self.fail_dns)
+        calls = {step["case"]: step for step in plan["steps"] if step["type"] == "call"}
+        self.assertEqual(calls["edge-call"]["dial"], {"user": "+15550100"})
+        self.assertNotIn("account", calls["edge-call"])
+        # Only a reject destination: no dial user is invented for that target.
+        self.assertNotIn("dial", calls["edge-tls-call"])
+
+    def test_scope_user_outside_manifest_grammar_is_not_written(self) -> None:
+        document = complete_scope()
+        document["destinations"][0]["user"] = "9196#"
+        self.write_scope(document)
+        result = self.compile()
+        self.assertIn("campaign", result.skipped)
+        self.assertFalse((self.root / "campaign.yaml").exists())
 
     def test_dtls_srtp_and_no_dtmf_flow_through(self) -> None:
         document = complete_scope()

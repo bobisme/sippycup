@@ -28,6 +28,11 @@ The planner additionally enforces relationships JSON Schema cannot express:
   Payload-, credential-, SDP-, and audio-shaped fields are rejected so private
   material cannot be copied into plans and event streams.
 - Evidence directories must be relative and cannot contain `..`.
+- A case `dial.user` and a target `account.username` use one conservative
+  grammar: 1-64 letters, digits, and `+ * . _ -`, starting with a letter,
+  digit, `+`, or `*`. No `@`, URI parameter, header, or whitespace can reach
+  a Request-URI. `dial` is valid only on a `call` case, and `account`
+  requires the same target's `credentialRef`.
 
 ## Plan a campaign
 
@@ -80,6 +85,47 @@ budget. `stopConditions` are mandatory even for a one-step campaign.
 The v1 planner rejects more than 100,000 expanded steps; split a larger
 authorization into separately reviewed campaigns instead of producing an
 unreviewable plan or exhausting planner memory.
+
+## Dial destinations and accounts
+
+A `call` case can name the SIP user it dials, and a target can name the
+account its calls use:
+
+```yaml
+targets:
+  - name: pbx
+    address: 10.20.30.40
+    signaling: {transport: udp, port: 5060}
+    credentialRef: staging-user          # the password's opaque name
+    account:
+      username: "1001"                   # digest and registration username
+      realm: pbx.lab                     # optional; omit to answer any realm
+      register: true                     # optional; default false
+cases:
+  - id: dial-echo
+    type: call
+    target: pbx
+    count: 1
+    dial: {user: "9196"}                 # sip:9196@10.20.30.40:5060
+    budget: {packetsPerRun: 2500, bytesPerRun: 1200000, durationSecondsPerRun: 15}
+```
+
+The destination belongs to the case; the account belongs to the target next
+to its `credentialRef`. Quote numeric users: YAML reads `9196` as an integer,
+which the planner rejects. `register: true` sends REGISTER to the frozen target
+address and dials only after it succeeds; `false` answers only the INVITE's
+digest challenge. The password is never a manifest field.
+
+Both are frozen into every generated `call` step (`step.dial` and
+`step.account`; OPTIONS steps carry neither) and are therefore covered by the
+manifest lock: `campaign run` recompiles the reviewed manifest and refuses a
+plan whose dial user, username, realm, or registration flag differs. The
+runtime validator also checks both independently: exact keys, the grammar,
+`call` steps only, an account only with a credential reference, and the same
+account on every call step of a target. Manifests without these fields compile
+to exactly the same plan bytes as before they existed (golden digests in
+`tests/test_softphone_runner.py`). Matrix compilation copies the template
+case's `dial` into every generated case.
 
 ## Determinism and review
 
@@ -257,6 +303,17 @@ The bundled basic SIPp adapter currently consumes the selected destination
 transport and call budget. The remaining generated factor/action annotation is
 preserved for scenario-capable adapters and result correlation; do not report
 those behaviors as observed until an adapter and packet evidence confirm them.
+When a generated case runs on the softphone runner (it has a dial destination
+or a credential), the runner performs transport, address family, codec
+preference (`pcmu`, `pcma`, `g722`; `opus` is offered first but counted only
+if negotiated), call duration, and caller-initiated teardown. Its result line
+lists each factor under `factors.exercised` or `factors.notExercised` with a
+reason, and each action by position: only a caller `hangup` is ever performed.
+Absence values it deliberately honors (`dtmf: none`, `mediaProtection: plain`,
+`holdReinvite: disabled`, `impairment: none`) count as exercised; `ptime`,
+`earlyMedia`, `nat`, DTMF, SRTP, hold, and impairments are never claimed.
+A codec counts only when PJSUA reports that codec negotiated; a duration
+clamped by the step budget is not exercised.
 
 Run the independent compact-coverage exit gate with:
 
@@ -316,10 +373,82 @@ plan's frozen DNS pins and reduced maxima, and compares the entire canonical
 plan. A coherent hand-written plan cannot authorize itself. `campaign execute`
 is an alias with the same authorization lock and evidence lifecycle.
 
-The bundled runner is started once per step in a new process group and receives
+A bundled runner is started once per step in a new process group and receives
 that step as a single JSON line on standard input. Active CLI execution does
 not accept arbitrary runners. Exit zero means the step succeeded; any other
-status stops the campaign. The smaller of the step budget and remaining global
+status stops the campaign.
+
+The frozen step alone selects the runner; no option, environment variable, or
+path on the command line can change it:
+
+| Step | Runner |
+| --- | --- |
+| `options` | `campaign-sipp-runner` (sipsak), unchanged |
+| `call` without `dial` and without `credentialRef` | `campaign-sipp-runner` (SIPp `uac`), unchanged |
+| `call` with `dial` or `credentialRef` | `campaign-softphone-runner` (PJSUA) |
+
+`versions.json` records every runner's path and SHA-256 under `runners` and
+the selection as run-length `stepRunners` ranges (`firstStep`, `lastStep`,
+`runner`, `sha256`); `commands.json` lists each runner command. `runner` keeps
+the first step's runner for older readers.
+
+### Softphone runner
+
+`campaign-softphone-runner` places exactly one PJSUA call per step through
+`lib/sippycup_softphone`. Its envelope adds `context` (the frozen media port
+range and networks, global expectations, `retainPayload`, and a mode-0700
+`steps/NNNNNN/` artifact directory in the run directory). It:
+
+- dials `sip:<dial.user>@<first frozen address>:<port>` over the step
+  transport (`service` when a credentialed call names no `dial`), with a
+  global outbound route that pins every request to that address and
+  `--accept-redirect=0`;
+- registers only when `account.register` is true, and dials only after the
+  registration succeeds;
+- takes the password value from the envelope in memory and passes it to the
+  driver, which writes it only to a private mode-0600 file in a mode-0700
+  `/dev/shm` directory that PJSUA reads and that is deleted. The value is
+  never in argv, PJSUA's environment (variables holding it, and
+  `SIPPYCUP_SECRET_*`, are removed), standard output or error, or any run
+  directory file;
+- plays a deterministic synthetic two-tone canary and records received audio
+  only to the private temporary directory, which is deleted, unless
+  `retainPayload: true`, in which case `heard.wav` is kept in the step
+  directory;
+- hangs up and fails when the negotiated media peer is not one of the step's
+  frozen addresses or its port is outside `authorization.mediaPorts`, so all
+  media stays inside the capture filter and its watchdog;
+- treats `durationSecondsPerRun` as a hard limit: the call lasts the generated
+  `duration` factor (5 seconds otherwise), clamped to the budget minus 3.5
+  seconds of setup and teardown (4.5 with registration). It hangs up when 1.5
+  seconds of budget remain, so it exits before the supervisor's deadline.
+  Budgets below 5 seconds are refused;
+- exits 0 only when the expected `finalStatus` (default 200) was received
+  and, for a 2xx expectation, the call was answered, the registration (if
+  any) succeeded, `maxSetupSeconds` held, and, when
+  `requireBidirectionalRtp` applies (case value, else the global one), PJSUA
+  counted RTP sent and received. A case that expects a non-2xx status passes
+  only if the call was not answered and that status arrived. Every other
+  outcome exits 1; an envelope it cannot execute safely exits 2;
+- prints one secret-free JSON line (`sippycup.dev/softphone-step-result/v1`,
+  at most 4 KiB) with the outcome and reasons, dial user, registration,
+  final status, connected and setup seconds, RTP tx/rx packet counts, codec,
+  hangup side, requested/effective duration, payload policy, credentialed
+  INVITE/REGISTER attempts and rejections, and matrix factors. It is recorded
+  as a `step.output` event even when secrets are in use (up to 16 KiB per
+  step; other runners stay silent when secrets exist). The step directory
+  also holds redacted `softphone.log`, `softphone-console.txt`, and
+  `softphone.json`.
+
+A wrong password costs exactly one credentialed attempt. The image's PJSIP is
+built with `PJSIP_MAX_STALE_COUNT 1` (PJSIP otherwise re-sends credentials up
+to three times whenever a server answers with a new nonce, which most servers
+do for a wrong password), PJSUA runs with `--rereg-delay=0` so a failed
+registration is not retried, and the driver quits on the first failure. The
+runner also counts credentialed transactions by CSeq in PJSUA's message log
+and fails with `repeated_rejected_authentication` if more than one was
+rejected. The capture watchdog counts calls by INVITE Call-ID, so the single
+digest re-send of an INVITE is not mistaken for a second call. The smaller of the step budget and remaining global
 duration is a hard deadline. SIGINT and SIGTERM stop new steps immediately,
 terminate the active process group, wait a bounded grace period, then kill
 stragglers. A successful leader is not enough: its complete process group is
@@ -416,11 +545,13 @@ name them explicitly. `--secret-fd` descriptors and a host `--secret-provider`
 path do not cross into the container.
 
 The provider receives only the reference name and returns the value on stdout.
-Secrets travel to a custom runner in its one-shot stdin envelope, never in
-argv. Known values and SIP Authorization headers are redacted before event
-persistence. The bundled SIPp runner intentionally refuses authenticated
-steps because SIPp's password option would expose the value in argv; use a
-runner with a safe stdin/FD credential interface for those cases.
+Secrets travel to the runner in its one-shot stdin envelope, never in argv.
+Known values and SIP Authorization headers are redacted before event
+persistence. A credentialed `call` step always runs on the softphone runner;
+the bundled SIPp runner still refuses any step with credentials because SIPp's
+password option would expose the value in argv. OPTIONS steps of a
+credentialed target run on sipsak unauthenticated, and their envelope carries
+no credential value.
 
 Secret source variables and any environment variable containing a resolved
 secret value are removed from capture, runner, report, and provider
@@ -441,9 +572,113 @@ Run the real isolated capture/SIPp/report check with:
 make campaign-selftest
 ```
 
+Run the isolated softphone-runner check with:
+
+```sh
+make campaign-softphone-selftest
+```
+
+In one isolated container it starts a PJSUA auto-answer echo peer on
+`127.0.0.2:5062` and plans and runs, with the real `campaign run`, a campaign
+whose call dials `echo` with an account (`register: true`) and a credential
+supplied through `--secret-env`. It asserts success, exactly one INVITE dialog
+whose Request-URI user is `echo`, more than 20 RTP packets each way with every
+RTP frame cut to its 12-byte header, an oracle PASS on the run's own capture,
+and that the secret appears nowhere in the tree. It then runs the same account
+against `campaign-sip-challenge-stub` on `127.0.0.3`, which rejects every
+credential with a fresh nonce, once with and once without registration, and
+asserts from each capture exactly two transactions of which one carries
+credentials, one dialog, no INVITE after a failed registration, and state
+`failed` (not a call-ceiling stop). A PJSUA peer cannot verify a password, so
+a successful digest login is not proven here; use the next section with a
+registrar.
+
 Before releasing campaign changes, `make campaign-gate` runs the complete
 planner/runtime/integration and oracle suites, oracle benchmark, tool smoke
-test, legacy call self-test, and isolated campaign self-test.
+test, legacy call self-test, and the isolated campaign and softphone
+campaign self-tests.
+
+### Authenticated call against a local server
+
+For a practice server that listens on loopback address `ADDRESS`, SIP port
+`PORT` (UDP), sends RTP from `ADDRESS` within `RTP_START`-`RTP_END`, and has
+account `USER` in realm `REALM` with destination `DIAL`, save as
+`work/practice-auth.yaml` (replace every capitalized word with a literal):
+
+```yaml
+apiVersion: sippycup.dev/v1
+kind: Campaign
+metadata: {name: practice-auth-call}
+authorization:
+  networks: [ADDRESS/32]
+  signalingPorts: [PORT]
+  mediaPorts: {start: RTP_START, end: RTP_END}
+  transports: [udp]
+  credentialRefs: [practice-user]
+  ceilings:
+    calls: 1
+    packets: 3000
+    bytes: 1500000
+    durationSeconds: 60
+    concurrentCalls: 1
+    packetsPerSecond: 400
+    callsPerSecond: 1
+  stopConditions:
+    consecutiveFailures: 1
+    unexpectedResponse: true
+    packetLossPercent: 5
+targets:
+  - name: practice
+    address: ADDRESS
+    signaling: {transport: udp, port: PORT}
+    credentialRef: practice-user
+    account: {username: "USER", realm: REALM, register: true}
+cases:
+  - id: authenticated-call
+    type: call
+    target: practice
+    count: 1
+    dial: {user: "DIAL"}
+    budget: {packetsPerRun: 2500, bytesPerRun: 1200000, durationSecondsPerRun: 15}
+    expectations:
+      apiVersion: sippycup.dev/case-expectations/v1
+      finalStatus: 200
+      requireBidirectionalRtp: true
+expectations:
+  allowedSipStatuses: [100, 180, 200]
+  requireBidirectionalRtp: true
+evidence: {capture: true, retainPayload: false, directory: evidence/practice-auth-call}
+```
+
+Then plan and run it in the network namespace where `ADDRESS` is reachable
+(capture needs `NET_RAW`, so under rootless Podman that is `--isolated`;
+the isolated container's loopback is its own, so the server must run in that
+same namespace):
+
+```sh
+./bin/sippycup campaign plan work/practice-auth.yaml --output work/practice-auth.plan.json
+read -rs PRACTICE_SIP_PASSWORD && export PRACTICE_SIP_PASSWORD
+./bin/sippycup --isolated campaign run work/practice-auth.plan.json \
+  --manifest work/practice-auth.yaml --run-root work/runs --interface lo \
+  --secret-env practice-user=PRACTICE_SIP_PASSWORD
+```
+
+The command prints the run directory. Check it with:
+
+```sh
+run=work/runs/<printed directory name>
+jq . "$run/result.json"            # state "succeeded"
+jq -r 'select(.event=="step.output") | .text' "$run/events.jsonl" | jq .
+# expect outcome "passed", registered true, finalStatus 200, rtp counts > 0,
+# authentication.REGISTER.rejected 0 and authentication.INVITE.rejected 0
+tshark -r "$run/capture.pcap" -Y 'sip.Method == "REGISTER"' -T fields -e sip.CSeq.seq -e sip.Authorization
+grep -rF -- "$PRACTICE_SIP_PASSWORD" "$run" && echo LEAK || echo clean
+```
+
+To check lockout safety, run the same plan with a wrong password: the result
+is `failed`, `authentication.REGISTER` is `{"attempts": 1, "rejected": 1}`,
+and the capture holds exactly one REGISTER with an `Authorization` header and
+no INVITE.
 
 ## Errors and emergency stop
 
@@ -470,12 +705,21 @@ container runtime or host cannot guarantee userspace cleanup; run impairment
 tests only in an isolated namespace or VM and inspect `tc qdisc show`
 afterward.
 
-Known limitations: the bundled SIPp adapter refuses authenticated calls because
-SIPp exposes its password option in process argv; supply a custom stdin-aware
-runner. Its `call` step is SIPp's built-in `uac` scenario: one unauthenticated
-INVITE to the user `service` with no audio. A target that requires
-credentials or a specific destination will reject it; use the manual softphone
-call in `CALL-CHECKLIST.md` for that baseline. TLS preflight uses normal
+Known limitations: a plain credential-free `call` without `dial` still runs
+SIPp's built-in `uac` scenario, one unauthenticated INVITE to the user
+`service` with no audio; add `dial` (and an account with a credential
+reference when the target requires one) to use the softphone runner instead.
+The softphone runner dials only the first frozen address of a multi-address
+target, accepts media only from the step's frozen addresses within the
+authorized RTP range (a separate media server address is refused, because
+the capture filter and watchdog would not see it), sends no DTMF, SRTP, hold,
+or re-INVITE, does not set ptime, and over TLS keeps PJSUA's default of not
+verifying the server certificate. A server that answers a correct response with a
+genuinely stale nonce is not retried (one attempt per transaction is the
+lockout rule), so that call fails. PJSUA's local RTP port is not forced into
+the authorized media range; only the remote port is checked. Digest
+authentication itself is exercised only against a real registrar, not by the
+loopback self-test. TLS preflight uses normal
 certificate validation against the frozen literal address, so it fails unless
 the certificate carries that IP as a subject alternative name. Campaign execution
 is local and sequential—there is no distributed controller.

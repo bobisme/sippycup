@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Run one frozen campaign call step with the PJSUA softphone driver.
+
+The step and any credential value arrive only as one JSON envelope on
+standard input; this program takes no options so a command line can never
+change what it dials or which binary it starts.
+"""
+
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from sippycup_softphone.campaign_runner import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

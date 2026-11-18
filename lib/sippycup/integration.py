@@ -6,6 +6,7 @@ import json
 import hashlib
 from collections import deque
 import os
+import re
 import secrets as random
 import shutil
 import signal
@@ -68,6 +69,7 @@ class CaptureWatchdog:
         calls = 0
         packet_times: deque[float] = deque()
         call_times: deque[float] = deque()
+        seen_call_ids: set[bytes] = set()
         while not self._stop.is_set():
             try:
                 with self.capture.open("rb") as source:
@@ -110,8 +112,16 @@ class CaptureWatchdog:
                 while packet_times and packet_times[0] < timestamp - 1:
                     packet_times.popleft()
                 if b"INVITE " in packet:
-                    calls += 1
-                    call_times.append(timestamp)
+                    # A call is a dialog, not a packet: a UDP retransmission
+                    # or the single digest re-send of an INVITE keeps its
+                    # Call-ID. An INVITE without a readable Call-ID counts
+                    # as a new call (fail closed).
+                    call_id = _invite_call_id(packet)
+                    if call_id is None or call_id not in seen_call_ids:
+                        if call_id is not None and len(seen_call_ids) < 65536:
+                            seen_call_ids.add(call_id)
+                        calls += 1
+                        call_times.append(timestamp)
                     while call_times and call_times[0] < timestamp - 1:
                         call_times.popleft()
                 if packets > self.maxima["packets"]:
@@ -128,6 +138,18 @@ class CaptureWatchdog:
                     return
             else:
                 time.sleep(0.01)
+
+
+_CALL_ID = re.compile(rb"\r\n(?:call-id|i)[ \t]*:[ \t]*([^\r\n]{1,256})", re.I)
+
+
+def _invite_call_id(packet: bytes) -> bytes | None:
+    """Return the Call-ID of an INVITE request in ``packet``, if readable."""
+    start = packet.find(b"INVITE ")
+    if start < 0:
+        return None
+    match = _CALL_ID.search(packet, start)
+    return match.group(1).strip() if match else None
 
 
 def _utc() -> str:
@@ -323,14 +345,54 @@ def _identity(command: str) -> dict[str, Any]:
     return identity
 
 
-def _bundled_runner() -> str:
-    installed = Path("/usr/local/bin/campaign-sipp-runner")
+SIPP_RUNNER = "campaign-sipp-runner"
+SOFTPHONE_RUNNER = "campaign-softphone-runner"
+SOFTPHONE_OUTPUT_LIMIT = 16 * 1024
+
+
+def _bundled_runner(name: str = SIPP_RUNNER) -> str:
+    installed = Path("/usr/local/bin") / name
     if installed.is_file():
         return str(installed)
-    source = Path(__file__).resolve().parents[2] / "bin" / "campaign-sipp-runner"
+    source = Path(__file__).resolve().parents[2] / "bin" / name
     if source.is_file():
         return str(source)
-    raise RuntimeError("bundled campaign SIP runner is unavailable")
+    raise RuntimeError(f"bundled campaign runner {name} is unavailable")
+
+
+def select_runner(step: Mapping[str, Any]) -> str:
+    """Name the bundled runner for a frozen step.
+
+    The choice is a pure function of the reviewed plan: a call that names a
+    dial destination or carries a credential reference needs the softphone
+    runner (SIPp would expose a password in argv and always dials
+    ``service``). OPTIONS and plain credential-free calls keep SIPp/sipsak.
+    """
+    if step["type"] == "call" and (
+        "dial" in step or step.get("credentialRef") is not None
+    ):
+        return SOFTPHONE_RUNNER
+    return SIPP_RUNNER
+
+
+def _bundled_runners(names: Sequence[str]) -> dict[str, list[str]]:
+    return {name: [_bundled_runner(name)] for name in names}
+
+
+def _runner_ranges(names: Mapping[int, str]) -> list[dict[str, Any]]:
+    """Run-length encode step-to-runner selection so metadata stays bounded."""
+    ranges: list[dict[str, Any]] = []
+    for index in sorted(names):
+        name = names[index]
+        if ranges and ranges[-1]["runner"] == name and ranges[-1]["lastStep"] == index - 1:
+            ranges[-1]["lastStep"] = index
+        else:
+            ranges.append({"firstStep": index, "lastStep": index, "runner": name})
+    return ranges
+
+
+def _step_artifact_directory(run_dir: Path, step: Mapping[str, Any]) -> Path:
+    return run_dir / "steps" / f"{step['index']:06d}"
 
 
 def strip_media_payload(
@@ -585,7 +647,15 @@ def execute_campaign(
         )
     else:
         capture_argv = []
-    runner_argv = list(runner or [_bundled_runner()])
+    if runner is not None:
+        # In-process test hook only (guarded above): one runner for every step.
+        step_runner_names = {step["index"]: "custom" for step in plan["steps"]}
+        runner_commands = {"custom": list(runner)}
+    else:
+        step_runner_names = {step["index"]: select_runner(step) for step in plan["steps"]}
+        runner_commands = _bundled_runners(sorted(set(step_runner_names.values())))
+    first_runner = step_runner_names[plan["steps"][0]["index"]]
+    runner_argv = runner_commands[first_runner]
     report_argv = (
         [shutil.which("sippycup-report") or "sippycup-report", str(capture_path)]
         if report_command is None
@@ -596,11 +666,18 @@ def execute_campaign(
     )
     redactions = list(secret_values.values())
     child_environment = _sanitized_environment(redactions, secret_env_names)
+    runner_identities = {
+        name: _identity(command[0]) for name, command in sorted(runner_commands.items())
+    }
     _write_json(
         run_dir / "commands.json",
         {
             "capture": _redact(capture_argv, redactions),
             "runner": _redact(runner_argv, redactions),
+            "runners": {
+                name: _redact(command, redactions)
+                for name, command in sorted(runner_commands.items())
+            },
             "report": _redact(report_argv, redactions),
         },
     )
@@ -609,7 +686,12 @@ def execute_campaign(
         {
             "campaign": "sippycup.dev/campaign-run/v1",
             "python": os.sys.version.split()[0],
-            "runner": _identity(runner_argv[0]),
+            "runner": runner_identities[first_runner],
+            "runners": runner_identities,
+            "stepRunners": [
+                {**item, "sha256": runner_identities[item["runner"]]["sha256"]}
+                for item in _runner_ranges(step_runner_names)
+            ],
             "capture": _identity(capture_argv[0]) if capture_argv else None,
             "report": _identity(report_argv[0]),
         },
@@ -698,10 +780,40 @@ def execute_campaign(
         def runner_input(step: dict[str, Any]) -> bytes:
             credentials = {}
             reference = step.get("credentialRef")
-            if reference is not None:
+            # Only a runner that uses a credential receives it. Selection
+            # sends every credentialed call to the softphone runner, so the
+            # SIPp/sipsak runner sees credentials only on OPTIONS steps of a
+            # credentialed target, which sipsak sends unauthenticated anyway.
+            if reference is not None and step_runner_names[step["index"]] != SIPP_RUNNER:
                 credentials[reference] = secret_values[reference]
-            envelope = {"step": step, "credentials": credentials}
+            envelope: dict[str, Any] = {"step": step, "credentials": credentials}
+            if step_runner_names[step["index"]] == SOFTPHONE_RUNNER:
+                # The softphone runner also needs the frozen media scope, the
+                # global expectations, the payload policy, and a private
+                # per-step directory for its redacted logs.
+                artifacts = _step_artifact_directory(run_dir, step)
+                artifacts.parent.mkdir(mode=0o700, exist_ok=True)
+                artifacts.mkdir(mode=0o700)
+                envelope["context"] = {
+                    "authorization": {
+                        "networks": plan["authorization"]["networks"],
+                        "mediaPorts": plan["authorization"]["mediaPorts"],
+                    },
+                    "expectations": plan["expectations"],
+                    "evidence": {"retainPayload": plan["evidence"]["retainPayload"]},
+                    # Absolute: --run-root may be relative to the CLI's cwd.
+                    "artifactDirectory": str(artifacts.resolve()),
+                }
             return json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+        def output_limit_for(step: dict[str, Any]) -> int:
+            if not secret_values:
+                return 256 * 1024
+            # The softphone runner prints one bounded, structured, redacted
+            # result line; other runners stay silent when secrets exist.
+            if step_runner_names[step["index"]] == SOFTPHONE_RUNNER:
+                return SOFTPHONE_OUTPUT_LIMIT
+            return 0
 
         result = run_plan(
             plan,
@@ -712,6 +824,8 @@ def execute_campaign(
             redactions=list(secret_values.values()),
             child_env=child_environment,
             external_stop=traffic_stop_reason,
+            runner_for=lambda step: runner_commands[step_runner_names[step["index"]]],
+            output_limit_for=output_limit_for,
         )
     except _FinishExecution:
         pass
