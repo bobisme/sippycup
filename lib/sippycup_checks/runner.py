@@ -13,6 +13,7 @@ import argparse
 import ipaddress
 import json
 import os
+import shutil
 import signal
 import sys
 import threading
@@ -42,6 +43,7 @@ TRANSACTION_TIMEOUT = 4.0
 INVITE_TIMEOUT = 8.0
 CAPTURE_READY_TIMEOUT = 5.0
 CAPTURE_TAIL_SECONDS = 0.5
+SRTP_CALL_SECONDS = 30.0  # pjsua start, answer wait, 1 s of media, hangup
 
 
 class ChecksError(ValueError):
@@ -117,6 +119,8 @@ def build_plan(
     invites = 0
     interval = interval_for(document)
     seconds = 10.0
+    tgt = document.get("target") if isinstance(document.get("target"), dict) else {}
+    tgt_transport = tgt.get("transport") if tgt.get("transport") in ("udp", "tcp", "tls") else None
     for spec in catalog.CHECKS:
         entry: dict[str, Any] = {
             "id": spec.id, "title": spec.title, "impact": spec.impact, "sends": spec.sends,
@@ -133,12 +137,14 @@ def build_plan(
             if missing:
                 entry.update(status="skipped", reason=missing)
         if entry["status"] == "will-run":
-            bound = catalog.declared_bound(spec, section)
+            bound = catalog.declared_bound(spec, section, tgt_transport)
             entry["maxRequests"] = bound
             total += bound
-            invites += catalog.invites_declared(spec, section)
+            invites += catalog.invites_declared(spec, section, tgt_transport)
             per_request = TRANSACTION_TIMEOUT + interval
             seconds += bound * per_request + (INVITE_TIMEOUT if spec.invites else 0) * max(1, spec.invites)
+            if spec.id == "srtp-policy":
+                seconds += SRTP_CALL_SECONDS * catalog.invites_declared(spec, section, tgt_transport)
             if spec.per_endpoint:
                 entry["endpoints"] = [f"{item['transport']}/{item['port']}" for item in catalog.cleartext_endpoints(section)]
         entries.append(entry)
@@ -227,6 +233,8 @@ class Dependencies:
     install_signal_handlers: bool = True
     tcpdump: str = "tcpdump"
     implementations: dict[str, Callable[[Context], CheckResult]] | None = None
+    place_call: Callable[..., Any] | None = None  # None: the softphone driver
+    pjsua: str = field(default_factory=lambda: shutil.which("pjsua") or "pjsua")
 
 
 @dataclass
@@ -356,9 +364,18 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         sleep=deps.sleep,
         should_stop=lambda: "cancelled by signal" if cancel.is_set() else None,
     )
+    from sippycup.integration import _sanitized_environment
+
+    features = document.get("features") if isinstance(document.get("features"), dict) else {}
     context = Context(endpoint=endpoint, section=section, budget=budget, password=password,
                       timeout=deps.timeout, invite_timeout=deps.invite_timeout, openssl=deps.openssl,
-                      now=deps.now, monotonic=deps.monotonic)
+                      now=deps.now, monotonic=deps.monotonic,
+                      approved_addresses=tuple(approved_addresses), recheck=lapsed, cancel=cancel,
+                      place_call=deps.place_call,
+                      call_environment=_sanitized_environment(
+                          secrets_list, [options.secret_env] if options.secret_env else [],
+                          environ=deps.environ),
+                      pjsua=deps.pjsua, run_dir=run_dir, srtp_expected=features.get("srtp") is True)
     implementations = deps.implementations or IMPLEMENTATIONS
     scope = capture_filter(approved_addresses)
     interface = str((document.get("capture") or {}).get("interface", "any"))

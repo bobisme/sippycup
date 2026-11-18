@@ -303,7 +303,7 @@ class CatalogTests(unittest.TestCase):
                 self.assertTrue(item.remediation)
             if spec.impact == "passive":
                 self.assertEqual(spec.invites, 0)
-        self.assertEqual(catalog.get("srtp-policy").state, "planned")
+        self.assertEqual(catalog.get("srtp-policy").state, "runnable")
 
     def test_list_and_explain_are_network_free(self) -> None:
         listed = subprocess.run([ROOT / "bin" / "sippycup", "checks", "list", "--format", "json"],
@@ -331,7 +331,6 @@ class CatalogTests(unittest.TestCase):
         cases = {
             "unknown check": {"approved": ["port-scan"], "max_requests": 5},
             "placeholder": {"approved": ["<check-id>"], "max_requests": 5},
-            "planned": {"approved": ["srtp-policy"], "max_requests": 5},
             "duplicates": {"approved": ["banner-disclosure", "banner-disclosure"], "max_requests": 5},
             "max_requests": {"approved": ["banner-disclosure"], "max_requests": 0},
             "unknown security_checks fields": {"approved": [], "max_requests": 5, "brute": True},
@@ -625,8 +624,16 @@ class TlsTests(ChecksTestCase):
             sent = result.requests_sent
             time.sleep(0.3)
             self.assertEqual(hardened.handshakes, sent)
-        self.assertEqual(result.status, "passed", result.findings)
+        untestable_ids = {item["label"] for item in result.detail["probes"] if item["outcome"] == "untestable"}
+        # A probe this library cannot offer is a finding, never a clean pass.
+        self.assertEqual(self.ids(result), {"tls-protocols.untestable-probes"} if untestable_ids else set(),
+                         result.findings)
+        self.assertEqual(result.status, "finding" if untestable_ids else "passed")
+        self.assertEqual(set(result.detail["notTestable"]), untestable_ids)
         probes = {item["label"]: item["outcome"] for item in result.detail["probes"]}
+        self.assertEqual([item["protocol"] for item in result.detail["acceptedVersions"]], ["TLS 1.2", "TLS 1.3"])
+        self.assertTrue(all(item["cipher"] for item in result.detail["acceptedVersions"]))
+        self.assertIn("TLS 1.2 (", result.summary)
         self.assertEqual(probes["TLS 1.2"], "accepted")
         self.assertEqual(probes["TLS 1.3"], "accepted")
         untestable = sum(1 for outcome in probes.values() if outcome == "untestable")

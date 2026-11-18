@@ -27,6 +27,13 @@ NEEDS = ("tls", "account", "password", "destination", "cleartext_endpoints", "sr
 MAX_REQUESTS_CEILING = 200
 MAX_CLEARTEXT_ENDPOINTS = 8
 CATALOG_VERSION = "sippycup.dev/checks-catalog/v1"
+# Worst case requests of one srtp-policy call: INVITE, ACK of the 401, INVITE
+# with credentials, then ACK, UPDATE (PJSUA sends one right after the 2xx;
+# observed against Asterisk), and BYE when answered, or CANCEL and ACK when
+# ringing. Over TCP or TLS the connection counts as the first request, not an
+# extra one (the same rule as every other check).
+SRTP_CALL_COST_UDP = 6
+SRTP_CALL_COST_STREAM = 6
 
 _ACCOUNT = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
 _DESTINATION = re.compile(r"^[A-Za-z0-9._+*#-]{1,64}$")
@@ -202,8 +209,10 @@ CHECKS: tuple[CheckSpec, ...] = (
         sends=(
             "up to 9 TLS handshakes, each closed right after the handshake: TLS 1.0, 1.1, 1.2, and "
             "1.3 offered one at a time, then NULL, EXPORT, RC4, 3DES, and anonymous cipher suites "
-            "offered one family at a time. A probe the local TLS library cannot offer is not sent. "
-            "No SIP is sent"
+            "offered one family at a time. The result lists every TLS 1.0-1.3 version the edge "
+            "accepted with the cipher it negotiated. A probe the local TLS library cannot offer "
+            "is not sent and is reported as NOT TESTABLE from this toolbox (never as 'not "
+            "accepted'). No SIP is sent"
         ),
         max_requests=9,
         transports=("tls",),
@@ -231,6 +240,13 @@ CHECKS: tuple[CheckSpec, ...] = (
             FindingSpec("tls-protocols.no-tls13", "Edge does not offer TLS 1.3", "info",
                         "Enable TLS 1.3 alongside TLS 1.2 where the SIP stack supports it.",
                         ("RFC 8446", "RFC 9325 section 3.1.1")),
+            FindingSpec("tls-protocols.untestable-probes",
+                        "Some TLS probes cannot be offered by this toolbox (result unknown)", "info",
+                        "Repeat these probes from a toolbox whose TLS library can offer them (for example "
+                        "an OpenSSL build with weak ciphers enabled), or check the edge's configured "
+                        "protocol and cipher list directly. An untestable probe is not evidence that the "
+                        "edge refuses it.",
+                        ("RFC 9325 section 3.1.1",)),
         ),
         references=("RFC 8996", "RFC 9325", "RFC 7465"),
     ),
@@ -443,20 +459,62 @@ CHECKS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec(
         id="srtp-policy",
-        title="SRTP required for media (planned)",
+        title="Media security posture (plain RTP, SDES-SRTP, keys over cleartext)",
         impact="active",
-        sends="nothing in this version: it needs a real authenticated call and is planned",
-        max_requests=0,
-        transports=("udp", "tcp", "tls"),
-        needs=("account", "password", "destination", "srtp"),
-        state="planned",
-        rationale=(
-            "When the profile says SRTP is required, an edge that also accepts plain RTP lets media "
-            "be intercepted. Testing it needs a real call offering only RTP/AVP, which this version "
-            "does not place."
+        sends=(
+            "up to 3 very short real calls (1 second, digital silence) to the reviewed destination "
+            "with the reviewed account and password, through the softphone driver, each hung up "
+            "correctly: (1) plain RTP/AVP over the profile's signaling, (2) a mandatory "
+            "SDES-SRTP offer (RTP/SAVP with a=crypto) over the same signaling, and (3) on a TLS "
+            "target with an approved cleartext endpoint, an SDES offer over that cleartext "
+            "signaling. The charge per call is the worst case (6 requests: INVITE, ACK, "
+            "INVITE with credentials, ACK, UPDATE, BYE) and is replaced by the requests the "
+            "call's own log shows. Calls that carry media are bounded to 1 second, and the media peer must "
+            "stay on an approved address"
         ),
-        owner_text="Planned; not run in this version and cannot be approved yet.",
-        findings=(),
+        max_requests=3 * SRTP_CALL_COST_STREAM,
+        transports=("udp", "tcp", "tls"),
+        needs=("account", "password", "destination"),
+        invites=3,
+        rationale=(
+            "Signaling over TLS protects nothing if the edge also accepts plain RTP, since the "
+            "audio can then be intercepted. SDES-SRTP puts the media key in the SDP, so it is "
+            "confidential only when that SDP travels over TLS: an edge that accepts SDES keys "
+            "over cleartext signaling exposes the keys on the wire. An edge that answers a "
+            "mandatory-SRTP offer with plain RTP/AVP has downgraded the call."
+        ),
+        owner_text=(
+            "Using the account password you delivered (kept only in memory), we place up to three "
+            "one-second calls to the destination you approved, each only to see which media "
+            "protection your edge accepts and answers with: plain audio, encrypted audio (SDES), "
+            "and encrypted audio offered over unencrypted signaling. We send digital silence, "
+            "hang up each call at once, and never retry a refused call or a rejected password."
+        ),
+        findings=(
+            FindingSpec("srtp-policy.plain-rtp-accepted",
+                        "Edge answers a plain RTP/AVP call (no SRTP offered)", "low",
+                        "Refuse offers without SRTP on endpoints that must be encrypted (Asterisk: "
+                        "media_encryption=sdes with media_encryption_optimistic=no; Kamailio/RTPengine: "
+                        "require RTP/SAVP; FreeSWITCH: rtp_secure_media=mandatory). The severity is "
+                        "medium when the profile says features.srtp is true.",
+                        ("RFC 3711", "RFC 4568 section 7.1.2", "CWE-319")),
+            FindingSpec("srtp-policy.downgrade",
+                        "Edge answers a mandatory-SRTP offer with plain RTP", "medium",
+                        "Answer an RTP/SAVP offer only with RTP/SAVP and a valid a=crypto line, or "
+                        "reject it (488). Do not answer a secure offer with RTP/AVP.",
+                        ("RFC 3711", "RFC 4568 section 7.1.2", "CWE-757")),
+            FindingSpec("srtp-policy.keys-over-cleartext",
+                        "Edge accepts SDES media keys offered over cleartext signaling", "medium",
+                        "Accept a=crypto only on TLS (or another confidential) signaling; reject or "
+                        "strip crypto offers received over UDP or TCP, or use DTLS-SRTP (RFC 5763), "
+                        "which does not put keys in the SDP.",
+                        ("RFC 4568 section 7.1.1", "RFC 4568 section 8.1", "CWE-319")),
+            FindingSpec("srtp-policy.sdes-not-accepted",
+                        "Edge refused an SDES-SRTP offer", "info",
+                        "Informational. If SRTP is expected, enable SDES on this endpoint over TLS, "
+                        "or note that the edge may use DTLS-SRTP instead (not tested here).",
+                        ("RFC 4568", "RFC 5763")),
+        ),
         references=("RFC 3711", "RFC 4568", "RFC 5763"),
     ),
 )
@@ -667,16 +725,45 @@ def cleartext_endpoints(section: dict[str, Any] | None) -> list[dict[str, Any]]:
     return list(value) if isinstance(value, list) else []
 
 
-def declared_bound(spec: CheckSpec, section: dict[str, Any] | None) -> int:
+def srtp_probes(transport: str | None, section: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The calls ``srtp-policy`` places: ``id``, ``transport``, ``port`` (None: the target's), ``srtp``.
+
+    Plain RTP and a mandatory SDES offer use the profile's signaling. On a
+    TLS target the SDES-over-cleartext question is asked once, over the first
+    owner-approved cleartext endpoint; without one it is not asked. With an
+    unknown transport (scope intake) a TLS target is assumed, the worst case.
+    """
+    base = transport or "tls"
+    probes: list[dict[str, Any]] = [
+        {"id": "plain-rtp", "transport": base, "port": None, "srtp": "off"},
+        {"id": "sdes-mandatory", "transport": base, "port": None, "srtp": "mandatory"},
+    ]
+    endpoints = cleartext_endpoints(section)
+    if base == "tls" and endpoints:
+        first = endpoints[0]
+        probes.append({"id": "sdes-over-cleartext", "transport": first["transport"],
+                       "port": first["port"], "srtp": "optional"})
+    return probes
+
+
+def srtp_call_cost(transport: str) -> int:
+    return SRTP_CALL_COST_UDP if transport == "udp" else SRTP_CALL_COST_STREAM
+
+
+def declared_bound(spec: CheckSpec, section: dict[str, Any] | None, transport: str | None = None) -> int:
     """The enforced request bound of ``spec`` for this profile section."""
     if spec.per_endpoint:
         return len(cleartext_endpoints(section))
     if spec.id == "user-enumeration" and not (isinstance(section, dict) and section.get("destination")):
         return 2  # the REGISTER pair only
+    if spec.id == "srtp-policy":
+        return sum(srtp_call_cost(item["transport"]) for item in srtp_probes(transport, section))
     return spec.max_requests
 
 
-def invites_declared(spec: CheckSpec, section: dict[str, Any] | None) -> int:
+def invites_declared(spec: CheckSpec, section: dict[str, Any] | None, transport: str | None = None) -> int:
     if spec.id == "user-enumeration" and not (isinstance(section, dict) and section.get("destination")):
         return 0
+    if spec.id == "srtp-policy":
+        return len(srtp_probes(transport, section))
     return spec.invites

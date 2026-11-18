@@ -30,7 +30,10 @@ authorize traffic to a real host.
   new CA and server certificate (ECDSA P-256, two-day validity). The server
   certificate carries the DNS SAN `sippycup-practice` and the IP SAN of the
   practice address. The CA key is deleted inside the container right after
-  signing. The CA certificate is written to `work/practice/ca.crt`.
+  signing. The CA certificate is written to `work/practice/ca.crt`. Port 5061
+  accepts TLS 1.2 only. A second TLS listener on 5071 accepts TLS 1.2 and TLS
+  1.3 (never 1.0 or 1.1), only so `checks` can exercise a real TLS 1.3
+  handshake (`make checks-gate`); the guided-call paths use 5061.
 - **Media:** plain RTP or SDES-SRTP (when the caller offers `a=crypto`), PCMU
   and PCMA, server RTP ports 20000-20019.
 - **Destinations** (`sip:NAME@127.0.0.2`):

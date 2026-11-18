@@ -55,7 +55,7 @@
               "additionalProperties": false,
               "required": ["kind", "detail"],
               "properties": {
-                "kind": {"type": "string"},
+                "kind": {"type": "string", "description": "for example status-line, header, challenge, certificate, handshake, offered and answered (srtp-policy: what the call offered and what the edge answered), untestable (a probe this toolbox cannot offer)"},
                 "detail": {"type": "string", "maxLength": 200},
                 "artifact": {"type": "string"}
               }

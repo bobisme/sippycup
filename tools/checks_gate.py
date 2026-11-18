@@ -35,6 +35,10 @@ UDP_CHECKS = [
     "unauthenticated-invite", "user-enumeration", "nonce-replay",
 ]
 TLS_CHECKS = ["tls-certificate", "tls-protocols", "cleartext-signaling"]
+SRTP_CHECKS = ["srtp-policy"]
+# practice-target/asterisk/pjsip.conf has a second TLS listener (5071) that
+# accepts TLS 1.2 and TLS 1.3 so a TLS 1.3 handshake is really exercised.
+TLS_MODERN_PORT = 5071
 
 # What Asterisk 22 with practice-target/asterisk/pjsip.conf does, per check:
 # finding ids expected (exactly), or None for "passed with no finding".
@@ -59,16 +63,20 @@ EXPECTED_TLS = {
     # Verified for sippycup-practice against the generated CA; the generated
     # leaf lives for days only, so "expiring" is the one allowed finding.
     "tls-certificate": ("any", {"tls-certificate.expiring"}),
-    # method = tlsv1_2: only TLS 1.2 completes; no NULL/anonymous suites.
-    "tls-protocols": ("finding", {"tls-protocols.no-tls13"}),
+    # 5061 has method = tlsv1_2: only TLS 1.2 completes; no NULL/anonymous
+    # suites. EXPORT, RC4, and 3DES cannot be offered by the toolbox's OpenSSL
+    # and must be reported as untestable (an info finding), never as refused.
+    "tls-protocols": ("finding", {"tls-protocols.no-tls13", "tls-protocols.untestable-probes"}),
     # The same address also answers OPTIONS on UDP and TCP 5060.
     "cleartext-signaling": ("finding", {"cleartext-signaling.answered"}),
 }
 
 
 class ChecksGate(Gate):
-    def profile_variant(self, source: str, name: str, section: dict[str, Any] | None) -> str:
+    def profile_variant(self, source: str, name: str, section: dict[str, Any] | None, port: int | None = None) -> str:
         document = yaml.safe_load((practice.state_dir(self.project) / source).read_text(encoding="utf-8"))
+        if port is not None:
+            document["target"]["port"] = port
         # Three INVITE attempts (unauthenticated-invite + the user-enumeration
         # pair) must fit the call ceiling; the practice profiles allow one.
         document["limits"]["max_calls"] = 3
@@ -177,6 +185,19 @@ class ChecksGate(Gate):
             and probes.get("NULL ciphers") == "rejected" and probes.get("anonymous ciphers") == "rejected",
             probes,
         )
+        protocols = by_id.get("tls-protocols", {})
+        untestable = sorted(label for label, outcome in probes.items() if outcome == "untestable")
+        reported = sorted((item["id"] for item in (value.get("findings") or {}).get("findings", [])
+                           if item["id"] == "tls-protocols.untestable-probes"))
+        # The toolbox's OpenSSL 3 cannot offer EXPORT, RC4, or 3DES suites: they must be
+        # reported as not testable (never "rejected") and raise the info finding.
+        self.record(
+            "TLS probes the toolbox cannot offer (EXPORT, RC4, 3DES) are 'untestable' and reported, not 'rejected'",
+            untestable == ["3DES ciphers", "EXPORT ciphers", "RC4 ciphers"]
+            and sorted(protocols.get("notTestable", [])) == untestable
+            and reported == ["tls-protocols.untestable-probes"],
+            {"untestable": untestable, "notTestable": protocols.get("notTestable"), "findings": reported},
+        )
         certificate = by_id.get("tls-certificate", {})
         self.record(
             f"certificate verified for {practice.DNS_NAME} (EC P-256, SHA-256 signature)",
@@ -185,6 +206,90 @@ class ChecksGate(Gate):
             and (certificate.get("certificate") or {}).get("signatureAlgorithm") == "ecdsa-with-SHA256",
             {key: certificate.get(key) for key in ("verified", "verifyName", "daysLeft")},
         )
+
+    def check_tls_modern(self) -> None:
+        section = {"approved": ["tls-certificate", "tls-protocols"], "max_requests": 20}
+        profile = self.profile_variant("target-profile-tls.yaml", "checks-tls13.yaml", section, port=TLS_MODERN_PORT)
+        code, value = self.run_checks(profile, "tls13")
+        document = value.get("findings") or {}
+        rows = {item["id"]: item for item in document.get("checks", [])}
+        found = {item["id"] for item in document.get("findings", []) if item["checkId"] == "tls-protocols"}
+        self.record("tls13: run completed", value.get("state") == "completed" and code in (0, 1),
+                    {"exit": code, "state": value.get("state"), "problem": value.get("problem")})
+        run_dir = self.project / str(value.get("runDirectory") or "missing")
+        detail_path = run_dir / "checks-detail.json"
+        detail = json.loads(detail_path.read_text(encoding="utf-8")) if detail_path.exists() else {"checks": []}
+        protocols = {item["id"]: item["detail"] for item in detail["checks"]}.get("tls-protocols", {})
+        accepted = {item["protocol"]: item for item in protocols.get("acceptedVersions", [])}
+        self.record(
+            f"tls13: port {TLS_MODERN_PORT} accepts TLS 1.2 and TLS 1.3 (cipher reported), rejects 1.0 and 1.1",
+            set(accepted) == {"TLS 1.2", "TLS 1.3"} and accepted["TLS 1.3"].get("negotiated") == "TLSv1.3"
+            and all(item.get("cipher") for item in accepted.values()),
+            {"accepted": accepted, "summary": rows.get("tls-protocols", {}).get("summary")},
+        )
+        self.record("tls13: no deprecated-version and no no-tls13 finding",
+                    not ({"tls-protocols.deprecated-version", "tls-protocols.no-tls13"} & found), sorted(found))
+        self.record("tls13: certificate facts from the same run are noted in the protocol detail",
+                    (protocols.get("certificate") or {}).get("verified") is True, protocols.get("certificate"))
+
+    def srtp_run(self, name: str, account: str, cleartext: bool, profile_source: str) -> tuple[int, dict[str, Any], dict[str, Any]]:
+        section: dict[str, Any] = {"approved": SRTP_CHECKS, "max_requests": 40, "account": account,
+                                   "destination": "echo"}
+        if cleartext:
+            section["cleartext_endpoints"] = [{"transport": "udp", "port": 5060}]
+        profile = self.profile_variant(profile_source, f"checks-{name}.yaml", section)
+        planned = self.run("checks", "plan", profile, "--format", "json")
+        plan = json.loads(planned.stdout or "{}")
+        self.record(f"{name}: plan is ready, network-free, and bounds the calls",
+                    planned.returncode == 0 and plan.get("ready") and plan.get("networkActivity") is False
+                    and plan.get("totalMaxRequests") == (18 if cleartext else 12), plan.get("blockingErrors"))
+        code, value = self.run_checks(profile, name, "--secret-file", "work/practice/account.password")
+        run_dir = self.project / str(value.get("runDirectory") or "missing")
+        detail_path = run_dir / "checks-detail.json"
+        detail = json.loads(detail_path.read_text(encoding="utf-8")) if detail_path.exists() else {"checks": []}
+        calls = {item["probe"]: item for item in
+                 ({c["id"]: c["detail"] for c in detail["checks"]}.get("srtp-policy", {}).get("calls", []))}
+        document = value.get("findings") or {}
+        reported = sum(item.get("requestsSent", 0) for item in document.get("checks", []))
+        self.record(f"{name}: requestsSent sum equals the result total and the calls' own counts",
+                    reported == value.get("requestsSent") == sum(item["requests"] for item in calls.values()),
+                    {"sum": reported, "total": value.get("requestsSent"),
+                     "calls": {key: item["requests"] for key, item in calls.items()}})
+        password = self.password()
+        leaked = [str(path.name) for path in run_dir.rglob("*")
+                  if path.is_file() and password.encode() in path.read_bytes()]
+        self.record(f"{name}: the practice password appears nowhere in the run directory", run_dir.is_dir() and not leaked,
+                    leaked or None)
+        return code, value, calls
+
+    def check_srtp(self) -> None:
+        # The default practice account answers anything: plain RTP and SDES, even over UDP.
+        code, value, calls = self.srtp_run("srtp-udp", practice.ACCOUNT, False, "target-profile.yaml")
+        found = {item["id"] for item in (value.get("findings") or {}).get("findings", [])}
+        self.record("srtp-udp: plain RTP accepted and SDES keys accepted over cleartext UDP signaling",
+                    found == {"srtp-policy.plain-rtp-accepted", "srtp-policy.keys-over-cleartext"} and code == 1, sorted(found))
+        wire = self.wire_requests("/" + str(Path(value["runDirectory"]) / "capture.pcap"), self.address)
+        self.record("srtp-udp: the SIP requests in the capture equal the reported requestsSent",
+                    wire["udp_sip"] == value.get("requestsSent") > 0, wire)
+        offered = {key: (item["offered"], item.get("answerProfile"), item["srtpActive"]) for key, item in calls.items()}
+        self.record("srtp-udp: findings state what was offered and answered",
+                    offered.get("plain-rtp", ("",))[0].startswith("RTP/AVP without a=crypto")
+                    and offered.get("sdes-mandatory", ("",))[0].startswith("RTP/SAVP with a=crypto")
+                    and offered["sdes-mandatory"][1] == "RTP/SAVP" and offered["sdes-mandatory"][2] is True, offered)
+        # practice-srtp demands SDES: plain RTP is refused (488); SDES works over TLS, and is
+        # also accepted over the cleartext UDP listener (the finding this check exists to raise).
+        code, value, calls = self.srtp_run("srtp-tls", f"{practice.ACCOUNT}-srtp", True, "target-profile-tls.yaml")
+        found = {item["id"] for item in (value.get("findings") or {}).get("findings", [])}
+        self.record("srtp-tls: plain RTP refused with 488; mandatory SDES accepted over TLS; SDES keys accepted over cleartext UDP",
+                    found == {"srtp-policy.keys-over-cleartext"} and code == 1
+                    and calls.get("plain-rtp", {}).get("status") == 488
+                    and calls.get("sdes-mandatory", {}).get("srtpActive") is True
+                    and calls.get("sdes-over-cleartext", {}).get("srtpActive") is True,
+                    {"findings": sorted(found), "calls": {key: (item["outcome"], item["status"], item["srtpActive"])
+                                                           for key, item in calls.items()}})
+        wire = self.wire_requests("/" + str(Path(value["runDirectory"]) / "capture.pcap"), self.address)
+        self.record("srtp-tls: the cleartext UDP requests and the two TLS connections are in the capture",
+                    wire["udp_sip"] == calls["sdes-over-cleartext"]["requests"] and wire["tcp_streams"] == 2, wire)
 
     def check_refusal(self) -> None:
         profile = self.profile_variant("target-profile.yaml", "checks-unapproved.yaml", None)
@@ -207,6 +312,8 @@ class ChecksGate(Gate):
             self.check_refusal()
             self.check_udp()
             self.check_tls()
+            self.check_tls_modern()
+            self.check_srtp()
             ok = True
         except GateFailure:
             ok = False

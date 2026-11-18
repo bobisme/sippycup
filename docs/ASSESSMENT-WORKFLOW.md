@@ -157,7 +157,8 @@ Quad supplies its scope and roles.
 Start with the owner-approved posture checks: `./bin/sippycup checks plan
 work/ENGAGEMENT/profile.yaml`, then `checks run`. They cover banners, TLS,
 cleartext signaling, unauthenticated REGISTER and INVITE, Digest quality, the
-account-existence differential, and nonce replay. Each check has a declared
+account-existence differential, nonce replay, and the SRTP policy (plain RTP,
+SDES, and keys over cleartext). Each check has a declared
 request bound, and each needs the profile's `security_checks.approved` list.
 The run directory lands in `work/ENGAGEMENT/checks/`. Its `findings.json`
 findings are candidates for step 7. See `SECURITY-CHECKS.md`.
