@@ -422,6 +422,19 @@ class ProxyGate(practice_gate.Gate):
              "captureFilter": plan.get("captureFilter")},
         )
         self.campaign_media(run_dir, result, call, "plan", "mediaNetworks", "proxy campaign")
+        capture = "/" + str(run_dir.relative_to(self.project) / "capture.pcap") if run_dir else ""
+        asserted = self.run("--practice", "--", "sippycup-assert", capture, "--expect",
+                            "/work/practice/expectations-proxy.yaml", "--format", "json", timeout=120)
+        try:
+            oracle = json.loads(asserted.stdout or "{}")
+        except ValueError:
+            oracle = {}
+        self.record(
+            "the oracle passes on the proxy campaign's own capture (media now inside it)",
+            oracle.get("verdict") == "pass",
+            {"exit": asserted.returncode, "verdict": oracle.get("verdict"), "summary": oracle.get("summary"),
+             "stderr": asserted.stderr.strip()[-200:]},
+        )
         self.check_media_network_never_signaling()
         self.check_legacy_campaign()
 
