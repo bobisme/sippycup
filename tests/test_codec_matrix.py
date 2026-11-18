@@ -387,7 +387,7 @@ class MatrixTests(unittest.TestCase):
                                                    "authorization.status": "pending"}))
         self.assertFalse(self.plan()["ready"])
 
-    def fake_run(self, verdicts, **values):
+    def fake_run(self, verdicts, progress=None, **values):
         calls = []
 
         def execute(options, deps):
@@ -407,10 +407,21 @@ class MatrixTests(unittest.TestCase):
         deps = matrix.MatrixDependencies(
             execute=execute, call_dependencies=lambda env: env, now=lambda: NOW,
             sleep=lambda seconds: None, monotonic=lambda: 0.0, environ=environ,
-            work_root=self.work, install_signal_handlers=False,
+            work_root=self.work, install_signal_handlers=False, progress=progress,
         )
         code, value = matrix.run(self.options(**values), deps)
         return code, value, calls, environ
+
+    def test_run_prints_one_progress_line_per_cell_start_and_end(self):
+        lines = []
+        code, value, calls, _environ = self.fake_run(["pass"] * 5 + ["call-media-not-acceptable"],
+                                                     progress=lines.append, username="alice",
+                                                     secret_env="LAB_PASSWORD")
+        self.assertEqual(12, len(lines))
+        self.assertTrue(lines[0].startswith("Matrix: cell 1/6 "), lines[0])
+        self.assertTrue(lines[0].endswith(": calling ..."), lines[0])
+        self.assertTrue(lines[-1].endswith(": call-media-not-acceptable"), lines[-1])
+        self.assertNotIn(SECRET, "\n".join(lines))
 
     def test_run_refuses_a_username_without_a_password_source(self):
         with self.assertRaisesRegex(matrix.MatrixError, "--username needs the account password"):

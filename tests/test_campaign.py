@@ -262,6 +262,39 @@ class CampaignPlanTests(unittest.TestCase):
         self.assertFalse(called)
 
 
+class CampaignRunSummaryTests(unittest.TestCase):
+    def test_summary_goes_to_stderr_and_names_the_journal_command(self):
+        import argparse
+        import contextlib
+        import io
+        from types import SimpleNamespace
+
+        from sippycup.campaign import _print_run_summary
+
+        with tempfile.TemporaryDirectory() as directory:
+            engagement = Path(directory) / "acme"
+            run = engagement / "runs" / "20261118T000000Z-acme-1"
+            run.mkdir(parents=True)
+            result = SimpleNamespace(state="succeeded", completed_steps=3, exit_code=0)
+            args = argparse.Namespace(error_format="human")
+            plan = {"steps": [{}, {}, {}]}
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                _print_run_summary(args, result, run, plan)
+            self.assertEqual("", stdout.getvalue())
+            self.assertIn("Campaign: SUCCEEDED (3 of 3 step(s) completed; exit 0)", stderr.getvalue())
+            self.assertNotIn("Record it:", stderr.getvalue())
+            (engagement / "engagement.json").write_text("{}")
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                _print_run_summary(args, result, run, plan)
+            self.assertIn(
+                f"Record it: ./bin/sippycup journal add {engagement} --kind action --summary "
+                "'Campaign run: succeeded' --evidence runs/20261118T000000Z-acme-1/result.json",
+                stderr.getvalue(),
+            )
+
+
 class CampaignCliTests(unittest.TestCase):
     def run_cli(self, *arguments):
         return subprocess.run(
@@ -330,6 +363,10 @@ class CampaignCliTests(unittest.TestCase):
                 str(output),
             )
             self.assertEqual(success.returncode, 0, success.stderr)
+            self.assertEqual(success.stdout, "")
+            self.assertIn(f"Wrote frozen plan: {output}", success.stderr)
+            self.assertIn("Next: ./bin/sippycup campaign run ", success.stderr)
+            self.assertIn("Network activity: none", success.stderr)
             original = output.read_bytes()
             overwrite = self.run_cli(
                 "plan",
