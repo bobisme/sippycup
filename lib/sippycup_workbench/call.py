@@ -565,6 +565,15 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def _loopback_preflight_note(host: str) -> str:
+    return (
+        f"{host} is a loopback address: the practice target answers only inside its own "
+        "namespace, so run the command as ./bin/sippycup --practice ... (without --practice "
+        "nothing listens there); with --practice, compare the port with "
+        "./bin/sippycup practice-target info."
+    )
+
+
 def _network_note(mode: str, host: str) -> str:
     loopback = ipaddress.ip_address(host).is_loopback
     if loopback:
@@ -1051,13 +1060,6 @@ def _classify_core(
     if stop_reason is not None:
         return "failed", stop_reason, EXIT_NOT_PASS, notes
     if preflight_ok is False:
-        if _is_loopback(host):
-            notes.append(
-                f"{host} is a loopback address: the practice target answers only inside its own "
-                "namespace, so run the command as ./bin/sippycup --practice ... (without --practice "
-                "nothing listens there); with --practice, compare the port with "
-                "./bin/sippycup practice-target info."
-            )
         return "failed", "preflight-failed", EXIT_NOT_PASS, notes
     if softphone is None:
         return "failed", "call-not-placed", EXIT_NOT_PASS, notes
@@ -1899,6 +1901,7 @@ def _execute(
     capture: Any = None
     preflight_sent = False
     preflight_ok: bool | None = None
+    detail = ""
     stop_reason: str | None = None
     softphone_result: dict[str, Any] | None = None
     offline_codes: dict[str, int | None] = {"report": None, "triage": None, "assert": None}
@@ -2264,6 +2267,8 @@ def _execute(
         media_networks=media_networks,
     )
     notes.insert(0, _network_note(network_mode, host))
+    if verdict == "preflight-failed" and _is_loopback(host) and not str(detail).startswith("tls_"):
+        notes.append(_loopback_preflight_note(host))
     if internal_error is not None:
         notes.append(f"Internal error stopped the run: {internal_error}")
     if stop_reason == "capture-failed":
