@@ -48,6 +48,8 @@
         "capture-died",
         "authorization-lapsed",
         "internal-error",
+        "tls-not-verified",
+        "tls-name-pinning-failed",
         "cancelled",
         "blocked"
       ]
@@ -103,7 +105,26 @@
         "media_peer": {"type": ["string", "null"]},
         "hangup": {"type": ["string", "null"]},
         "error": {"type": ["string", "null"]},
-        "cancelled": {"type": "boolean"}
+        "cancelled": {"type": "boolean"},
+        "tls_verified": {"type": ["boolean", "null"]},
+        "tls_server_name": {"type": ["string", "null"]}
+      }
+    },
+    "tls": {
+      "type": "object",
+      "description": "TLS calls only. serverName is the reviewed certificate name, or the literal address when its IP SAN was verified; every packet went only to connectsTo. trust is system (the image's bundle) or file (the reviewed caFile, whose SHA-256 is caSha256). The oracle cannot read encrypted signaling, so media is RTP decoded from the capture on the negotiated media port.",
+      "required": ["verified", "serverName", "trust", "connectsTo"],
+      "properties": {
+        "verified": {"type": "boolean"},
+        "serverName": {"type": "string"},
+        "trust": {"enum": ["system", "file"]},
+        "caFile": {"type": ["string", "null"]},
+        "caSha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "preflightVerified": {"type": "boolean"},
+        "softphoneVerified": {"type": ["boolean", "null"]},
+        "softphoneDetail": {"type": ["string", "null"]},
+        "connectsTo": {"type": "string"},
+        "media": {"type": ["object", "null"]}
       }
     },
     "triage": {"type": ["object", "null"]},

@@ -30,7 +30,10 @@ targets:                              # what a baseline will actually probe; one
     address: 203.0.113.10
     transport: tls
     port: 5061
-    tls_server_name: sbc.example.invalid   # required for tls: the name to validate
+    tls_server_name: sbc.example.invalid   # required for tls: the DNS name on the certificate (SNI and verification;
+                                          # never resolved: every packet still goes to the literal address)
+    # tls_ca_file: work/ENGAGEMENT/owner-ca.crt  # only for a PRIVATE CA: the owner's CA certificate (PEM, no key),
+                                          # stored under work/. Omit it for a public CA (system trust store).
 
 media:
   networks: [203.0.113.0/28]          # literal IPs or CIDRs that carry RTP (up to 1024 addresses for oracle expectations)

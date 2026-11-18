@@ -612,7 +612,7 @@ def _validate_case_expectations(value: Any, step: int) -> None:
         raise RuntimeError(f"step {step} setup deadline is invalid")
 
 
-OPTIONAL_STEP_KEYS = {"generated", "dial", "account"}
+OPTIONAL_STEP_KEYS = {"generated", "dial", "account", "tls"}
 _SIP_USER = re.compile(r"[A-Za-z0-9+*][A-Za-z0-9._+*-]{0,63}")
 _SIP_REALM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,252}")
 
@@ -658,6 +658,46 @@ def _validate_call_facts(
     if target in account_by_target and account_by_target[target] != account:
         raise RuntimeError(f"plan step {index} account differs from its target's account")
     account_by_target[target] = account
+
+
+def _validate_tls_facts(
+    step: dict[str, Any], index: int, tls_by_target: dict[str, Any]
+) -> None:
+    """Independently check a step's reviewed TLS server name and trust anchor.
+
+    The block holds a server name, a ``work/...`` CA file with its SHA-256,
+    or both; it never holds anything that weakens verification. Every step
+    of one target carries the same block (or none).
+    """
+    from sippycup.tls_trust import (
+        TrustError,
+        validate_ca_reference,
+        validate_server_name,
+        validate_sha256,
+    )
+
+    tls = step.get("tls")
+    if tls is not None:
+        tls = _object(tls, f"step {index} tls")
+        _exact_keys(tls, f"step {index} tls", {"serverName", "caFile", "caSha256"})
+        if step["destination"].get("transport") != "tls":
+            raise RuntimeError(f"plan step {index} tls requires transport tls")
+        try:
+            if tls["serverName"] is not None:
+                validate_server_name(tls["serverName"])
+            if (tls["caFile"] is None) != (tls["caSha256"] is None):
+                raise TrustError("caFile and caSha256 must be given together")
+            if tls["caFile"] is not None:
+                validate_ca_reference(tls["caFile"])
+                validate_sha256(tls["caSha256"])
+            if tls["serverName"] is None and tls["caFile"] is None:
+                raise TrustError("an empty tls block is not allowed")
+        except TrustError as error:
+            raise RuntimeError(f"plan step {index} tls is invalid: {error}") from error
+    target = step["target"]
+    if target in tls_by_target and tls_by_target[target] != tls:
+        raise RuntimeError(f"plan step {index} tls differs from its target's tls")
+    tls_by_target[target] = tls
 
 
 def _capture_filter(steps: list[dict[str, Any]], media: dict[str, Any]) -> str:
@@ -861,6 +901,7 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     steps = _unique_array(plan["steps"], "steps")
     calculated = {"calls": 0, "packets": 0, "bytes": 0, "durationSeconds": 0}
     account_by_target: dict[str, Any] = {}
+    tls_by_target: dict[str, Any] = {}
     for expected_index, step in enumerate(steps, 1):
         step = _object(step, f"steps[{expected_index - 1}]")
         step_keys = {
@@ -901,6 +942,7 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         }
         if tuple_set != destination_index[step["target"]]:
             raise RuntimeError(f"plan step {expected_index} destination is not frozen")
+        _validate_tls_facts(step, expected_index, tls_by_target)
         budget = _object(step["budget"], f"steps[{expected_index - 1}].budget")
         _exact_keys(budget, f"steps[{expected_index - 1}].budget", {"calls", "packets", "bytes", "durationSeconds"})
         if (

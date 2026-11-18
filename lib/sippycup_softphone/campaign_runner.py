@@ -42,6 +42,7 @@ from .driver import (
     SoftphoneResult,
     place_call,
     redact,
+    registrar_uri,
 )
 
 RESULT_VERSION = "sippycup.dev/softphone-step-result/v1"
@@ -131,6 +132,30 @@ def parse_envelope(raw: bytes) -> tuple[dict[str, Any], str | None, dict[str, An
         dial = _mapping(dial, "step.dial")
         if set(dial) != {"user"} or not isinstance(dial["user"], str) or _SIP_USER.fullmatch(dial["user"]) is None:
             raise EnvelopeError("step dial user is invalid")
+    tls = step.get("tls")
+    if tls is not None:
+        from sippycup.tls_trust import (
+            TrustError,
+            validate_ca_reference,
+            validate_server_name,
+            validate_sha256,
+        )
+
+        tls = _mapping(tls, "step.tls")
+        if set(tls) != {"serverName", "caFile", "caSha256"}:
+            raise EnvelopeError("step tls must contain exactly serverName, caFile, and caSha256")
+        if destination.get("transport") != "tls":
+            raise EnvelopeError("step tls requires transport tls")
+        try:
+            if tls["serverName"] is not None:
+                validate_server_name(tls["serverName"])
+            if (tls["caFile"] is None) != (tls["caSha256"] is None):
+                raise TrustError("caFile and caSha256 must be given together")
+            if tls["caFile"] is not None:
+                validate_ca_reference(tls["caFile"])
+                validate_sha256(tls["caSha256"])
+        except TrustError as error:
+            raise EnvelopeError(f"step tls is invalid: {error}") from error
     authorization = _mapping(context.get("authorization"), "context.authorization")
     media = _mapping(authorization.get("mediaPorts"), "context.authorization.mediaPorts")
     if any(type(media.get(key)) is not int for key in ("start", "end")):
@@ -358,6 +383,8 @@ def evaluate(
             reasons.append("unexpected_final_status")
     if any(item["rejected"] > 1 for item in attempts.values()):
         reasons.append("repeated_rejected_authentication")
+    if step["destination"]["transport"] == "tls" and result.dialed and result.tls_verified is not True:
+        reasons.append("tls_not_verified")
     return list(dict.fromkeys(reasons))
 
 
@@ -437,15 +464,24 @@ def run(
     account_facts = step.get("account")
     generated = step.get("generated")
     codecs = (CODECS[generated["factors"]["codec"]],) if generated is not None else ("PCMU",)
-    rendered = f"[{address}]" if ":" in address else address
-    transport_parameter = "" if transport == "udp" else f";transport={transport}"
+    tls = step.get("tls") or {}
+    server_name = tls.get("serverName")
+    if transport == "tls":
+        summary["tls"] = {
+            "verified": False,
+            "serverName": server_name or address,
+            "trust": "file" if tls.get("caFile") else "system",
+            "caSha256": tls.get("caSha256"),
+        }
     account = None
     if account_facts is not None:
         account = SoftphoneAccount(
             username=account_facts["username"],
             realm=account_facts.get("realm", "*"),
             registrar=(
-                f"sip:{rendered}:{port}{transport_parameter}" if account_facts["register"] else None
+                registrar_uri(address, port, transport, server_name)
+                if account_facts["register"]
+                else None
             ),
         )
     media = context["authorization"]["mediaPorts"]
@@ -470,6 +506,17 @@ def run(
     private.chmod(0o700)
     exit_code = EXIT_FAILED
     try:
+        ca_copy = None
+        if tls.get("caFile") is not None:
+            from sippycup.tls_trust import TrustError, read_verified_ca, write_private_copy
+
+            # PJSUA loads only a private copy of bytes whose digest matched
+            # the frozen plan, so the reviewed file cannot change under it.
+            try:
+                data = read_verified_ca(tls["caFile"], tls["caSha256"])
+            except TrustError as error:
+                raise SoftphoneError(f"{error}; nothing was sent") from error
+            ca_copy = write_private_copy(data, private / "trust-anchor.pem")
         play = private / "canary.wav"
         write_tone(play)
         record = (artifacts / "heard.wav") if retain else (private / "heard.wav")
@@ -495,6 +542,8 @@ def run(
             allowed_media_ports=(media["start"], media["end"]),
             pin_signaling=True,
             advertised_address=local_address(address, port),
+            tls_server_name=server_name,
+            tls_ca_file=ca_copy,
         )
         result = place_call(
             call,
@@ -530,6 +579,9 @@ def run(
             error=result.error,
             authentication=attempts,
         )
+        if transport == "tls":
+            summary["tls"]["verified"] = result.tls_verified is True
+            summary["tls"]["detail"] = result.tls_detail
         factors = factor_report(generated, result, duration)
         if factors is not None:
             summary["factors"] = factors

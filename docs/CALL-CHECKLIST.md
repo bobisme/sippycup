@@ -10,7 +10,10 @@ service owner, and `./bin/sippycup scope check` shows what is still unanswered
 (see `SCOPE-INTAKE.md`). The essentials:
 
 - Staging SIP hostname and port.
-- UDP, TCP, or TLS signaling transport.
+- UDP, TCP, or TLS signaling transport. For TLS: the name on the server
+  certificate, and whether a public or a private CA issued it (for a
+  private CA, the CA certificate itself, never a key). Sippycup verifies
+  that name while connecting only to the literal address.
 - Test username, SIP domain, and password delivery method.
 - Test extension, echo service, or voice-agent destination.
 - Signaling and media IP addresses or CIDRs.

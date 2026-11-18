@@ -11,6 +11,15 @@ and sends console commands deliberately: ``m`` to dial after the optional
 registration succeeds, ``dq`` to learn the negotiated media peer, ``h`` to
 hang up, and ``q`` to quit. Standard output is a pseudo-terminal so PJSUA's
 C library line-buffers it and state changes arrive while the call runs.
+
+TLS always verifies the server: ``--tls-verify-server`` with the reviewed CA
+file, or the system bundle when none is given. Without a server name PJSIP
+verifies the literal address against the certificate's IP SAN. With a
+reviewed server name PJSIP must dial that name (it verifies, and sends as SNI,
+the host it dialed), so PJSUA runs in a private user and mount namespace
+whose ``/etc/hosts`` holds exactly one line, ``LITERAL NAME``, and whose
+``/etc/nsswitch.conf`` says ``hosts: files``: the name can only become the
+literal address, and no DNS query can be sent for it or for any other name.
 """
 
 from __future__ import annotations
@@ -53,6 +62,14 @@ _DURATION_EXCEEDED = re.compile(r"Duration \(\d+ seconds\) has been exceeded")
 _MEDIA = re.compile(r"#\d+ audio (\S+) @(\d+)kHz, (\w+), peer=(\S+)")
 _RESPONSE = re.compile(r"Incoming Response msg (\d{3})/INVITE")
 _RTP_TOTAL = re.compile(r"total (\d+)pkt")
+_TLS_VERIFICATION = re.compile(
+    r"TLS cert verification result of (\[[^\]]+\]|[^\s:]+):(\d+) : ([^\r\n]*)"
+)
+NAME_PIN_SCRIPT = (
+    'mount --bind "$1" /etc/hosts && mount --bind "$2" /etc/nsswitch.conf '
+    '&& shift 2 && exec "$@"'
+)
+NAME_PIN_TIMEOUT_SECONDS = 5.0
 _AUTH_HEADER = re.compile(
     r"(?im)^([ \t]*(?:proxy-)?authorization[ \t]*:[ \t]*)[^\r\n]*"
 )
@@ -101,6 +118,12 @@ class SoftphoneCall:
     pin_signaling: bool = True
     bound_address: str | None = None
     advertised_address: str | None = None
+    # TLS only. The reviewed certificate name (SNI and verification), never
+    # resolved through DNS; and the PEM trust anchor PJSUA loads. ``None``
+    # means the literal address is verified against the IP SAN and the
+    # system bundle is the trust store. Verification cannot be disabled.
+    tls_server_name: str | None = None
+    tls_ca_file: Path | None = None
 
 
 @dataclass
@@ -127,6 +150,11 @@ class SoftphoneResult:
     cancelled: bool = False
     exit_code: int | None = None
     commands_sent: list[str] = field(default_factory=list)
+    # TLS facts as PJSUA reported them; ``None`` for UDP and TCP.
+    tls_verified: bool | None = None
+    tls_server_name: str | None = None
+    tls_trust: str | None = None
+    tls_detail: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -140,20 +168,79 @@ class SoftphoneResult:
         return value
 
 
-def destination_uri(destination: str, host: str, port: int, transport: str) -> str:
-    """Return the SIP URI dialed for a literal-address destination."""
+def _server_name(value: str | None, transport: str) -> str | None:
+    if value is None:
+        return None
+    if transport != "tls":
+        raise SoftphoneError("a TLS server name requires the tls transport")
+    from sippycup.tls_trust import TrustError, validate_server_name
+
+    try:
+        return validate_server_name(value)
+    except TrustError as error:
+        raise SoftphoneError(str(error)) from error
+
+
+def signaling_host(host: str, transport: str, server_name: str | None = None) -> str:
+    """The host part PJSUA dials: the reviewed TLS name, else the literal."""
+    address = _literal_address(host)
+    name = _server_name(server_name, transport)
+    if name is not None:
+        return name
+    return f"[{address}]" if ":" in address else address
+
+
+def registrar_uri(host: str, port: int, transport: str, server_name: str | None = None) -> str:
+    """The registrar URI for the approved target (the reviewed name over TLS)."""
+    rendered = signaling_host(host, transport, server_name)
+    suffix = "" if transport == "udp" else f";transport={transport}"
+    return f"sip:{rendered}:{port}{suffix}"
+
+
+def destination_uri(
+    destination: str,
+    host: str,
+    port: int,
+    transport: str,
+    server_name: str | None = None,
+) -> str:
+    """Return the SIP URI dialed for a literal-address destination.
+
+    With a reviewed TLS server name the URI names that host; the driver pins
+    the name to the literal address, so the connection still goes only there.
+    """
     if _DESTINATION.fullmatch(destination or "") is None:
         raise SoftphoneError(
             "destination must be 1-64 characters of letters, digits, and . _ + * -"
         )
-    address = _literal_address(host)
+    _literal_address(host)
     if type(port) is not int or not 1 <= port <= 65535:
         raise SoftphoneError("port must be an integer from 1 to 65535")
     if transport not in TRANSPORTS:
         raise SoftphoneError("transport must be udp, tcp, or tls")
-    rendered = f"[{address}]" if ":" in address else address
+    rendered = signaling_host(host, transport, server_name)
     suffix = "" if transport == "udp" else f";transport={transport}"
     return f"sip:{destination}@{rendered}:{port}{suffix}"
+
+
+def tls_ca_list(call: SoftphoneCall) -> str:
+    """The CA list PJSUA loads: the reviewed file or the system bundle."""
+    from sippycup.tls_trust import SYSTEM_CA_BUNDLE
+
+    return str(call.tls_ca_file) if call.tls_ca_file is not None else SYSTEM_CA_BUNDLE
+
+
+def tls_trust(call: SoftphoneCall) -> str | None:
+    if call.transport != "tls":
+        return None
+    return "file" if call.tls_ca_file is not None else "system"
+
+
+def tls_expected_name(call: SoftphoneCall) -> str | None:
+    """The name PJSIP verifies: the reviewed name, else the literal address."""
+    if call.transport != "tls":
+        return None
+    return call.tls_server_name or _literal_address(call.host)
 
 
 def _literal_address(host: str) -> str:
@@ -172,7 +259,13 @@ def _token(value: Any, label: str) -> str:
 
 
 def _validate(call: SoftphoneCall, password: str | None) -> str:
-    uri = destination_uri(call.destination, call.host, call.port, call.transport)
+    uri = destination_uri(
+        call.destination, call.host, call.port, call.transport, call.tls_server_name
+    )
+    if call.tls_ca_file is not None and call.transport != "tls":
+        raise SoftphoneError("a TLS CA file requires the tls transport")
+    if call.transport == "tls":
+        _token(tls_ca_list(call), "TLS CA file")
     if type(call.duration_seconds) is not int or not 1 <= call.duration_seconds <= MAX_DURATION_SECONDS:
         raise SoftphoneError(f"duration must be an integer from 1 to {MAX_DURATION_SECONDS}")
     for label, value in (
@@ -218,6 +311,14 @@ def _validate(call: SoftphoneCall, password: str | None) -> str:
     for label, value in (("registrar", account.registrar), ("identity", account.identity)):
         if value is not None and _URI.fullmatch(value) is None:
             raise SoftphoneError(f"{label} must be a SIP URI without whitespace")
+    if call.tls_server_name is not None and account.registrar is not None and (
+        account.registrar
+        != registrar_uri(call.host, call.port, call.transport, call.tls_server_name)
+    ):
+        # A registrar at the literal would be verified against the IP SAN,
+        # and one at any other host cannot be reached in the pinned
+        # namespace: only the reviewed name is accepted.
+        raise SoftphoneError("with a TLS server name the registrar must be that name")
     if password is not None:
         if not isinstance(password, str) or not password:
             raise SoftphoneError("password must be a non-empty string")
@@ -237,7 +338,7 @@ def build_config(call: SoftphoneCall, *, password: str | None = None, log_file: 
     """
     _validate(call, password)
     address = _literal_address(call.host)
-    rendered = f"[{address}]" if ":" in address else address
+    rendered = signaling_host(call.host, call.transport, call.tls_server_name)
     transport_parameter = "" if call.transport == "udp" else f";transport={call.transport}"
     lines = [
         "--null-audio",
@@ -263,7 +364,18 @@ def build_config(call: SoftphoneCall, *, password: str | None = None, log_file: 
     elif call.transport == "tcp":
         lines.append("--no-udp")
     else:
-        lines.extend(["--use-tls", "--no-udp", "--no-tcp"])
+        # Always verified: the certificate must chain to the CA list and name
+        # the dialed host (the reviewed name, or the literal's IP SAN). There
+        # is deliberately no option that removes these two lines.
+        lines.extend(
+            [
+                "--use-tls",
+                "--no-udp",
+                "--no-tcp",
+                "--tls-verify-server",
+                f"--tls-ca-file={tls_ca_list(call)}",
+            ]
+        )
     if ":" in address:
         lines.append("--ipv6")
     if call.bound_address is not None:
@@ -474,6 +586,89 @@ class _Console:
             return "\n".join(self._lines) + ("\n" if self._lines else "")
 
 
+def name_pinned_argv(
+    hosts: Path, nsswitch: Path, argv: Sequence[str], *, unshare: str = "unshare"
+) -> list[str]:
+    """Run ``argv`` in a private user+mount namespace with a pinned host map.
+
+    Inside, ``/etc/hosts`` is ``hosts`` and ``/etc/nsswitch.conf`` is
+    ``nsswitch`` (``hosts: files``), both bind-mounted from the driver's
+    private directory. No other process sees them, and no resolver step is
+    left that could send a DNS query. The network namespace is unchanged.
+    """
+    return [
+        unshare, "--user", "--map-root-user", "--mount", "--",
+        "/bin/sh", "-c", NAME_PIN_SCRIPT, "sh", str(hosts), str(nsswitch), *argv,
+    ]
+
+
+def write_name_pin(directory: Path, address: str, name: str) -> tuple[Path, Path]:
+    """Write the one-line host map and the files-only switch file."""
+    hosts = directory / "hosts"
+    nsswitch = directory / "nsswitch.conf"
+    _write_private(hosts, f"{_literal_address(address)} {name}\n")
+    _write_private(nsswitch, "hosts: files\n")
+    for path in (hosts, nsswitch):
+        path.chmod(0o644)
+    return hosts, nsswitch
+
+
+def probe_name_pin(
+    hosts: Path,
+    nsswitch: Path,
+    address: str,
+    name: str,
+    *,
+    unshare: str,
+    environment: Mapping[str, str] | None,
+) -> str | None:
+    """Prove the pinned namespace maps ``name`` to exactly ``address``.
+
+    ``getent`` reads only the pinned files, so it sends nothing. Returns an
+    error code, or ``None`` when the mapping is exactly one line.
+    """
+    try:
+        completed = subprocess.run(
+            name_pinned_argv(hosts, nsswitch, ["getent", "ahosts", name], unshare=unshare),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(environment) if environment is not None else None,
+            timeout=NAME_PIN_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "tls_name_pinning_unavailable"
+    if completed.returncode != 0:
+        return "tls_name_pinning_unavailable"
+    answers = {
+        line.split()[0]
+        for line in completed.stdout.decode("utf-8", "replace").splitlines()
+        if line.strip()
+    }
+    if answers != {_literal_address(address)}:
+        return "tls_name_pinning_mismatch"
+    return None
+
+
+def tls_verification(text: str, expected: str) -> tuple[bool | None, str | None]:
+    """Judge PJSUA's ``TLS cert verification result`` lines for ``expected``.
+
+    Verified only when at least one line for the expected host reads OK and
+    no line reports a failure; ``None`` when PJSUA printed no result.
+    """
+    verified: bool | None = None
+    detail: str | None = None
+    for match in _TLS_VERIFICATION.finditer(text):
+        host = match.group(1).strip("[]")
+        message = match.group(3).strip()
+        if host != expected or message != "OK":
+            return False, f"{match.group(1)}:{match.group(2)}: {message}"
+        verified = True if verified is None else verified
+        detail = f"{match.group(1)}:{match.group(2)}: OK"
+    return verified, detail
+
+
 def _stop_process(process: subprocess.Popen[bytes], grace: float = 2.0) -> None:
     if process.poll() is not None:
         return
@@ -501,6 +696,7 @@ def place_call(
     clock: Callable[[], float] = time.monotonic,
     poll_interval: float = 0.02,
     kill_with_parent: bool = False,
+    unshare: str | None = None,
 ) -> SoftphoneResult:
     """Place exactly one call and return what PJSUA reported.
 
@@ -514,6 +710,10 @@ def place_call(
     """
     uri = _validate(call, password)
     result = SoftphoneResult(destination_uri=uri)
+    if call.transport == "tls":
+        result.tls_verified = False
+        result.tls_server_name = tls_expected_name(call)
+        result.tls_trust = tls_trust(call)
     secrets = [password] if password else []
     private = Path(tempfile.mkdtemp(prefix="sippycup-softphone-", dir=_private_root(private_root)))
     private.chmod(0o700)
@@ -528,11 +728,25 @@ def place_call(
         result.timeline.append({"state": state, "at": round(clock() - started, 3)})
 
     try:
+        argv = [pjsua, "--config-file", str(config_path)]
+        if call.tls_server_name is not None:
+            # Pin the reviewed name to the literal before PJSUA exists; refuse
+            # (nothing started, nothing sent) unless the mapping is proven.
+            tool = unshare or shutil.which("unshare") or "unshare"
+            hosts, nsswitch = write_name_pin(private, call.host, call.tls_server_name)
+            problem = probe_name_pin(
+                hosts, nsswitch, call.host, call.tls_server_name,
+                unshare=tool, environment=environment,
+            )
+            if problem is not None:
+                result.error = problem
+                return result
+            argv = name_pinned_argv(hosts, nsswitch, argv, unshare=tool)
         _write_private(config_path, build_config(call, password=password, log_file=raw_log))
         master, slave = pty.openpty()
         try:
             process = subprocess.Popen(
-                [pjsua, "--config-file", str(config_path)],
+                argv,
                 stdin=subprocess.PIPE,
                 stdout=slave,
                 stderr=slave,
@@ -756,6 +970,18 @@ def place_call(
             result.error = "media_peer_outside_scope"
         if result.final_status is None and result.disconnect_status is not None and not result.answered:
             result.final_status = result.disconnect_status
+        if call.transport == "tls":
+            verified, detail = tls_verification(
+                raw_text + "\n" + console_text, tls_expected_name(call) or ""
+            )
+            result.tls_verified = verified is True
+            result.tls_detail = detail
+            if verified is False:
+                # PJSIP closed the connection before sending any request on
+                # it; the call or registration failed because of this.
+                result.error = "tls_verification_failed"
+            elif verified is None and result.error is None and (result.answered or result.registered):
+                result.error = "tls_verification_not_observed"
         _persist(call.log_file, redact(raw_text, secrets))
         if call.console_file is not None:
             _persist(call.console_file, redact(console_text, secrets))

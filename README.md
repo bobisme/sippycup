@@ -247,7 +247,12 @@ certificate by default; use `--tls-ca /work/PATH` to add a trust anchor,
 literal address, and only as an explicit choice `--tls-unverified`, which is
 always reported as UNVERIFIED. Exit codes: 0 pass, 1 a response that missed
 the expectation, 2 usage, 3 no response, 4 refused/unreachable/unresolvable,
-5 TLS failure. See `docs/CLI.md`.
+5 TLS failure. See `docs/CLI.md`. Profiles (`target.tls_server_name`,
+`target.tls_ca_file`) and campaign manifests (`signaling.tlsServerName`,
+`signaling.tlsCaFile`) carry the reviewed name and CA, so guided calls and
+campaigns verify a certificate that names a DNS name while every packet
+still goes to the literal address; the name is never resolved. Profiles and
+campaigns have no unverified mode.
 
 Generate an offline report:
 

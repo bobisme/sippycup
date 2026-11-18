@@ -18,13 +18,34 @@ def options_step(step: dict, address: str, port: int, transport: str) -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
     from sippycup import options
 
+    from sippycup.tls_trust import TrustError, read_verified_ca
+
     expectations = step.get("expectations") or {}
     expected = expectations.get("finalStatus")
     budget = step["budget"]
     max_requests = 2 if budget["packets"] >= 4 else 1
     timeout = min(5.0, float(budget["durationSeconds"]))
+    tls = step.get("tls")
+    tls_options = {}
+    if tls is not None:
+        # The reviewed server name is SNI, the verified name, and the SIP
+        # domain; the CA bytes are loaded only after their digest matched.
+        try:
+            ca_data = (
+                read_verified_ca(tls["caFile"], tls["caSha256"])
+                if tls["caFile"] is not None
+                else None
+            )
+        except TrustError as error:
+            print(f"campaign-sipp-runner: {error}; nothing was sent", file=sys.stderr)
+            return 2
+        tls_options = {
+            "tls_server_name": tls["serverName"],
+            "request_host": tls["serverName"],
+            "tls_ca_data": ca_data,
+        }
     result = options.send_options(
-        address, port, transport, timeout=timeout, max_requests=max_requests
+        address, port, transport, timeout=timeout, max_requests=max_requests, **tls_options
     )
     met = options.meets_expectation(result, expect_status=expected)
     summary = result.to_dict()
@@ -53,6 +74,13 @@ def main() -> int:
     timeout = f"{step['budget']['durationSeconds']}s"
     if step["type"] == "options":
         return options_step(step, address, port, transport)
+    if "tls" in step:
+        print(
+            "campaign-sipp-runner: SIPp does not verify TLS certificates; a step with "
+            "a reviewed TLS server name or CA belongs to the softphone runner",
+            file=sys.stderr,
+        )
+        return 2
     else:
         transport_flag = {"udp": "u1", "tcp": "t1", "tls": "l1"}[transport]
         command = [

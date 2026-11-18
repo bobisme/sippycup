@@ -52,7 +52,9 @@ STATE_FILES = {
     "ca": "ca.crt",
     "server_certificate": "server.crt",
     "profile": "target-profile.yaml",
+    "profile_tls": "target-profile-tls.yaml",
     "campaign": "campaign.yaml",
+    "campaign_tls": "campaign-tls.yaml",
     "expectations": "expectations.yaml",
     "uac": "uac.cfg",
     "uac_tls": "uac-tls.cfg",
@@ -329,12 +331,22 @@ def prepare(
         "APPROVAL_ID": APPROVAL_ID,
         "VALID_FROM": _timestamp(valid_from),
         "VALID_UNTIL": _timestamp(valid_until),
+        "DNS_NAME": DNS_NAME,
     }
     write_private(
         state / "target-profile.yaml",
         render(_template(project, "target-profile.template.yaml"), values),
     )
+    # The TLS variants pin the same literal address and add the reviewed
+    # server name sippycup-practice and the per-`up` CA as the trust anchor.
+    write_private(
+        state / "target-profile-tls.yaml",
+        render(_template(project, "target-profile-tls.template.yaml"), values),
+    )
     write_private(state / "campaign.yaml", render(_template(project, "campaign.yaml"), values))
+    write_private(
+        state / "campaign-tls.yaml", render(_template(project, "campaign-tls.yaml"), values)
+    )
     write_private(
         state / "expectations.yaml",
         render(_template(project, "expectations.yaml"), values),
@@ -419,7 +431,10 @@ def render_facts_human(facts: dict[str, Any]) -> str:
         f"Password file:  {files['password']} (mode 0600; never printed)",
         f"CA certificate: {files['ca']}",
         f"Target profile: {files['profile']} (valid until {facts['profile_valid_until_utc']})",
+        f"TLS profile:    {files['profile_tls']} (server name {facts['dns_name']}, "
+        f"CA {files['ca']}; connects only to {facts['address']})",
         f"Campaign:       {files['campaign']}",
+        f"TLS campaign:   {files['campaign_tls']} (plan again after every up: the CA digest is frozen)",
         f"Expectations:   {files['expectations']}",
         f"Softphone:      {files['uac']}, {files['uac_tls']}, {files['uac_srtp']}",
         f"Caller audio:   {files['phrase']}",

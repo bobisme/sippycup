@@ -1,0 +1,40 @@
+# Template only. `./bin/sippycup practice-target up` renders it into
+# work/practice/target-profile-tls.yaml next to the UDP profile, with the same
+# four-hour validity window. The placeholders below are not valid values, so
+# this checked-in file can never pass `rehearse`.
+#
+# TLS with a reviewed server name on a pinned literal address: every packet
+# goes to target.host (the loopback practice address); the name
+# sippycup-practice is used only for SNI, certificate verification, and the
+# SIP domain, and is never resolved through DNS. The trust anchor is the CA
+# that `up` generated for this run (work/practice/ca.crt).
+schema_version: sippycup.dev/target-profile/v1
+name: sippycup-local-practice-tls
+target:
+  host: '@ADDRESS@'
+  port: 5061
+  transport: tls
+  tls_server_name: '@DNS_NAME@'
+  tls_ca_file: work/practice/ca.crt
+  approved_addresses:
+    - '@ADDRESS@'
+authorization:
+  status: approved
+  approved_by: sippycup practice-target up (local loopback practice only)
+  approval_id: '@APPROVAL_ID@'
+  valid_from: '@VALID_FROM@'
+  valid_until: '@VALID_UNTIL@'
+limits:
+  max_calls: 1
+  max_concurrency: 1
+  max_calls_per_second: 1
+  max_duration_seconds: 60
+capture:
+  interface: lo
+  output: work/practice/call-tls.pcap
+features:
+  ice: false
+  turn: false
+  srtp: false
+  dtls_srtp: false
+  webrtc: false

@@ -28,7 +28,14 @@ _TOP_LEVEL_FIELDS = {
     "features",
 }
 _SECTION_FIELDS = {
-    "target": {"host", "port", "transport", "approved_addresses"},
+    "target": {
+        "host",
+        "port",
+        "transport",
+        "approved_addresses",
+        "tls_server_name",
+        "tls_ca_file",
+    },
     "authorization": {
         "status",
         "approved_by",
@@ -200,7 +207,56 @@ def host_is_approved_literal(document: dict[str, Any]) -> bool:
         return False
 
 
-def rehearse(document: dict[str, Any], *, now: datetime | None = None) -> Rehearsal:
+def tls_facts(
+    target: dict[str, Any], errors: list[str], *, work_root: Path | None = None
+) -> dict[str, Any] | None:
+    """Validate the reviewed TLS server name and trust anchor of a target.
+
+    Returns the facts for a TLS target (``None`` otherwise) and appends every
+    problem to ``errors``. Nothing here resolves the name: it is used only
+    for SNI, certificate verification, and the SIP domain, while every packet
+    still goes to the literal ``target.host``.
+    """
+    from sippycup.tls_trust import TrustError, read_ca, validate_ca_reference, validate_server_name
+
+    transport = target.get("transport")
+    name = target.get("tls_server_name")
+    ca_file = target.get("tls_ca_file")
+    if transport != "tls":
+        if name is not None or ca_file is not None:
+            errors.append("target.tls_server_name and target.tls_ca_file require transport tls")
+        return None
+    facts: dict[str, Any] = {
+        "verification": "required",
+        "server_name": None,
+        "verify_name": None,
+        "trust": "system",
+        "ca_file": None,
+        "ca_sha256": None,
+        "connects_to": target.get("host"),
+    }
+    if name is not None:
+        try:
+            facts["server_name"] = validate_server_name(name)
+        except TrustError as exc:
+            errors.append(f"target.tls_server_name: {exc}")
+    if ca_file is not None:
+        try:
+            facts["ca_file"] = validate_ca_reference(ca_file)
+            facts["ca_sha256"] = read_ca(facts["ca_file"], work_root)[1]
+            facts["trust"] = "file"
+        except TrustError as exc:
+            errors.append(f"target.tls_ca_file: {exc}")
+    facts["verify_name"] = facts["server_name"] or target.get("host")
+    return facts
+
+
+def rehearse(
+    document: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    work_root: Path | None = None,
+) -> Rehearsal:
     errors: list[str] = []
     warnings: list[str] = []
     facts: dict[str, Any] = {}
@@ -245,6 +301,8 @@ def rehearse(document: dict[str, Any], *, now: datetime | None = None) -> Rehear
     transport = target.get("transport")
     if transport not in _TRANSPORTS:
         errors.append("target.transport must be udp, tcp, or tls")
+
+    tls = tls_facts(target, errors, work_root=work_root)
 
     approved_addresses = target.get("approved_addresses")
     if not isinstance(approved_addresses, list):
@@ -352,6 +410,7 @@ def rehearse(document: dict[str, Any], *, now: datetime | None = None) -> Rehear
                 "transport": transport,
                 "approved_addresses": approved_addresses,
             },
+            **({"tls": tls} if tls is not None else {}),
             "authorization": {
                 "status": status,
                 "approved_by": authorization.get("approved_by"),

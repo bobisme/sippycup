@@ -127,6 +127,56 @@ to exactly the same plan bytes as before they existed (golden digests in
 `tests/test_softphone_runner.py`). Matrix compilation copies the template
 case's `dial` into every generated case.
 
+## TLS server name and trust anchor
+
+A TLS target can name the certificate it must present while every packet
+still goes to its literal address:
+
+```yaml
+targets:
+  - name: edge-tls
+    address: 192.0.2.10
+    signaling:
+      transport: tls
+      port: 5061
+      tlsServerName: sbc.voice.example-corp.net   # SNI and certificate name
+      tlsCaFile: work/ENGAGEMENT/owner-ca.crt      # optional private CA (PEM)
+```
+
+`tlsServerName` uses the same strict grammar as the profile field (lowercase
+LDH, at most 253 characters, not an IP, no wildcard, no reserved or
+placeholder name). `tlsCaFile` must be a `work/...` path to a regular PEM CA
+certificate without a private key; without it the system trust store is
+used. Both are valid only with transport `tls`; any other `signaling` key is
+rejected, and there is no key that disables verification. Without a name,
+the certificate must carry the literal address as an IP SAN.
+
+`campaign plan` reads the CA file and freezes it into every step of the
+target as `tls: {serverName, caFile, caSha256}` and adds an assumption that
+states what is verified and that the name is never resolved. The manifest
+lock recompiles with the frozen digest, so editing the name or digest in a
+plan fails the lock, and `runtime.py` revalidates the block independently
+(exact keys, transport `tls`, grammar, digest shape, the same block on every
+step of a target). Before execution creates a run directory or starts
+capture, it re-reads every frozen CA file and refuses, with nothing sent,
+when a SHA-256 differs from the plan (`TLS CA file F changed since it was
+reviewed ...; refusing to execute, nothing was sent`). Plan again after a
+reviewed CA changes. Manifests without these fields compile to the same
+plan bytes as before (golden digests in `tests/test_softphone_runner.py`).
+
+The campaign preflight and `options` steps send the name as SNI and in the
+Request-URI and verify it with the reviewed CA bytes loaded from memory.
+`preflight.json` entries for TLS targets add
+`tls: {verified, serverName, trust, caSha256}`. A TLS `call` step always runs
+in `campaign-softphone-runner`, never SIPp, which does not verify
+certificates; `campaign-sipp-runner` refuses a non-`options` step that
+carries `tls`. The softphone runner verifies the CA bytes against the frozen
+digest again, gives PJSUA a private copy, and dials the literal address with
+the same namespace pinning as the guided call (see `docs/GUIDED-CALL.md`).
+Its result line adds `tls: {verified, serverName, trust, caSha256, detail}`
+and fails a TLS call with `tls_not_verified` unless PJSUA verified the
+expected name.
+
 ## Determinism and review
 
 For the same manifest bytes, DNS answers, and reductions, JSON output is byte
@@ -760,19 +810,21 @@ The softphone runner dials only the first frozen address of a multi-address
 target, accepts media only from the step's frozen addresses within the
 authorized RTP range (a separate media server address is refused, because
 the capture filter and watchdog would not see it), sends no DTMF, SRTP, hold,
-or re-INVITE, does not set ptime, and over TLS keeps PJSUA's default of not
-verifying the server certificate. A server that answers a correct response with a
+or re-INVITE, and does not set ptime. A server that answers a correct response with a
 genuinely stale nonce is not retried (one attempt per transaction is the
 lockout rule), so that call fails. PJSUA's local RTP port is not forced into
 the authorized media range; only the remote port is checked. Digest
 authentication itself is exercised only against a real registrar, not by the
-loopback self-test. TLS preflight and TLS
-`options` steps verify the certificate against the frozen literal address and
-the image's system trust store, so they fail unless the certificate chains to
-a system CA and carries that IP as a subject alternative name. There is no
-unverified mode for campaigns. The OPTIONS function already accepts a TLS
-server name and an extra CA file; profiles and plans cannot carry a reviewed
-TLS server name yet, so a target whose certificate names only a DNS name
-cannot be preflighted by a campaign. Use the launcher preflight with
-`--tls-server-name` and `--tls-ca` to check such a target by hand. Campaign execution
-is local and sequential—there is no distributed controller.
+loopback self-test. Every TLS connection a campaign makes (preflight,
+`options` steps, and softphone calls) verifies the certificate, against the
+reviewed `tlsServerName` or else the literal address as an IP SAN, and the
+reviewed `tlsCaFile` or else the system trust store. There is no unverified
+mode for campaigns. The traffic watchdog counts calls by the `INVITE ` text
+in captured packets, so it cannot count calls over TLS; packet, byte, rate,
+and duration ceilings still apply, and the runners place exactly one call per
+step. The name is pinned only for PJSUA's resolver (a private hosts file in a
+user and mount namespace); a TLS target with a name therefore needs
+unprivileged user namespaces in the toolbox container (the default for
+rootless Podman), and the softphone runner refuses the call otherwise.
+Campaign execution is local and sequential—there is no distributed
+controller.
