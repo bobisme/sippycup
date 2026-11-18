@@ -46,7 +46,14 @@ authorize traffic to a real host.
   | `tone` | `601` | Answers, plays the `media/canary-v1` callee-to-caller canary three times, hangs up |
   | `busy` | `486` | Rejects before answer with `486 Busy Here` |
   | `decline` | `603` | Rejects before answer with `603 Decline` |
-  | anything else (`notfound`) | | `404 Not Found` after authentication; the drill dials `nobody-home` |
+  | `nobody-home` (`notfound`) | | Not in the dial plan on purpose: `404 Not Found` after authentication (the drill's `notfound` scenario) |
+
+  The practice profiles list these destinations, the aliases, the fault
+  destinations below, and `nobody-home` as `target.approved_destinations`.
+  `call` and `matrix` refuse any other `--dial` (for example the typo
+  `ecoh`) with exit 2 before anything is sent, exactly as a profile from
+  `scope compile` does on an engagement (`GUIDED-CALL.md`, "Approved
+  destinations"). Try it once: it is the refusal you will see for a typo.
 
   Destinations that misbehave on purpose (rehearsed by
   `./bin/sippycup practice-target drill`; see "Rehearse failures"):
@@ -64,7 +71,7 @@ authorize traffic to a real host.
   | `earlymedia` | 3 s of early media, then answers and echoes | `183 Session Progress` with SDP and RTP before the `200 OK` |
   | account `practice-srtp` | Same password; demands SDES-SRTP | `488 Not Acceptable Here` for the guided call's plain-RTP offer; dial any destination as this user |
   | `dtmf` | `602` | Answers with a steady 425 Hz tone, collects up to 32 RFC 4733 digits (4 s after the last digit), and sends the same digits back as RFC 4733 events |
-  | anything else | | `404 Not Found` after authentication |
+  | `nobody-home` | | `404 Not Found` after authentication (any other name gets 404 from the server too, but the practice profiles refuse to dial it) |
 
 - **Unauthenticated requests:** every INVITE and REGISTER without valid
   Digest credentials is challenged with `401 Unauthorized`, whether it claims

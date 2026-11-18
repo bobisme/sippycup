@@ -14,7 +14,7 @@ from sippycup_torture.exit_gate import run_exit_gate, validate_review
 from .journal import JournalError, _load_metadata, verify
 from .profile import ProfileError, load_profile, rehearse
 from .scope import SCOPE_FILE, inspect as inspect_scope
-from .scope_derive import derivative_state
+from .scope_derive import compiled_profiles, derivative_state
 
 
 ADVISOR_VERSION = "sippycup.dev/engagement-status/v1"
@@ -210,18 +210,98 @@ def _call_facts(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], bool]
     return facts, actions, practice_passed
 
 
-def _first_dial(root: Path, now: datetime | None) -> str | None:
-    """The first destination user in the scope whose expected behaviour is not reject."""
+def suggested_dial(
+    scope_document: dict[str, Any] | None,
+    profile_document: dict[str, Any] | None = None,
+    target_name: str | None = None,
+) -> str | None:
+    """The destination to suggest for a call with one profile, or ``None``.
+
+    The first destination in the scope that is on ``target_name`` (default:
+    the scope's first target, the one ``target-profile.yaml`` carries), is not
+    expected to reject, and, when the profile carries
+    ``target.approved_destinations``, is on that list. A suggestion is never a
+    destination the profile would refuse.
+    """
+    from .profile import approved_destinations
+
+    document = scope_document if isinstance(scope_document, dict) else {}
+    targets = [item for item in document.get("targets") or [] if isinstance(item, dict)]
+    if target_name is None and targets:
+        target_name = targets[0].get("name")
+    approved: tuple[str, ...] | None = None
+    if isinstance(profile_document, dict):
+        try:
+            approved = approved_destinations(profile_document)
+        except ProfileError:
+            approved = ()
+    for item in document.get("destinations") or []:
+        if not (isinstance(item, dict) and item.get("expect") != "reject"
+                and isinstance(item.get("user"), (str, int))):
+            continue
+        on_target = item.get("target")
+        if on_target is None and len(targets) == 1:
+            on_target = target_name
+        if targets and on_target != target_name:
+            continue
+        user = str(item["user"])
+        if approved is not None and user not in approved:
+            continue
+        if re.fullmatch(r"[A-Za-z0-9+*._-]{1,64}", user):
+            return user
+    return None
+
+
+def _first_dial(
+    root: Path, now: datetime | None, profile_document: dict[str, Any] | None = None
+) -> str | None:
+    """The destination to suggest for the first target's profile (see suggested_dial)."""
     scope_file = root / SCOPE_FILE
     if not scope_file.is_file() or scope_file.is_symlink():
         return None
-    document = inspect_scope(scope_file, now=now).document or {}
-    for item in document.get("destinations") or []:
-        if isinstance(item, dict) and item.get("expect") != "reject" and isinstance(item.get("user"), (str, int)):
-            user = str(item["user"])
-            if re.fullmatch(r"[A-Za-z0-9+*._-]{1,64}", user):
-                return user
-    return None
+    return suggested_dial(inspect_scope(scope_file, now=now).document, profile_document)
+
+
+def _other_profiles(
+    root: Path, now: datetime | None
+) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
+    """Rehearse every further target's compiled profile (network-free)."""
+    facts: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    actions: list[dict[str, Any]] = []
+    for item in compiled_profiles(root):
+        if item["first"]:
+            continue
+        path = root / item["path"]
+        entry: dict[str, Any] = {
+            "path": str(path), "target": item["target"], "state": item["state"],
+            "present": path.is_file() and not path.is_symlink(), "ready": False, "errors": [],
+        }
+        if entry["present"]:
+            try:
+                rehearsal = rehearse(load_profile(path), now=now)
+                entry.update(
+                    ready=rehearsal.ready,
+                    errors=list(rehearsal.errors),
+                    transport=(rehearsal.facts.get("target") or {}).get("transport"),
+                    approvedDestinations=rehearsal.facts.get("approved_destinations"),
+                )
+            except ProfileError as exc:
+                entry["errors"] = [str(exc)]
+            if not entry["ready"]:
+                blockers.append(
+                    f"target profile {item['path']} (target {item['target']}) rehearsal is blocked"
+                )
+                actions.append(
+                    _action(
+                        f"rehearse-target-profile-{item['target']}",
+                        f"Rehearse the profile of target {item['target']}",
+                        "; ".join(entry["errors"]) or "Rehearsal parses scope and expiration without network traffic.",
+                        argv=["./bin/sippycup", "rehearse", str(path)],
+                    )
+                )
+        facts.append(entry)
+    return facts, blockers, actions
 
 
 def _scope_facts(
@@ -490,6 +570,15 @@ def assess(
         except ProfileError as exc:
             blockers.append(f"target profile cannot be read: {exc}")
 
+    if profile_path is None:
+        # One compiled profile per further target (scope compile): each must
+        # rehearse too; staleness is reported with the scope derivatives.
+        others, other_blockers, other_actions = _other_profiles(root, now)
+        if others:
+            facts["profile"]["otherProfiles"] = others
+        blockers.extend(other_blockers)
+        actions.extend(other_actions)
+
     gate = run_exit_gate()
     facts["torture"]["technicalGate"] = gate["status"]
     if gate["status"] != "pass":
@@ -561,7 +650,11 @@ def assess(
             )
         )
     if facts["profile"]["ready"] and call_facts["count"] == 0:
-        dial = _first_dial(root, now)
+        try:
+            selected_document = load_profile(selected_profile)
+        except ProfileError:
+            selected_document = None
+        dial = _first_dial(root, now, selected_document)
         if dial is not None:
             actions.append(
                 _action(

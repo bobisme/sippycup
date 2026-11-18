@@ -33,6 +33,16 @@ _TOP_LEVEL_FIELDS = {
     "media",
 }
 MEDIA_FIELDS = {"codecs", "networks", "port_range"}
+# Optional target.approved_destinations: the dial strings the owner approved
+# for this target (the scope's destinations[].user). The same characters the
+# scope accepts (scope.DEST_USER_PATTERN), at most MAX_APPROVED_DESTINATIONS.
+DESTINATION_PATTERN = re.compile(r"^[A-Za-z0-9._+*#-]{1,64}$")
+MAX_APPROVED_DESTINATIONS = 64
+DESTINATIONS_UNRESTRICTED = (
+    "this profile has no target.approved_destinations, so it does not restrict which "
+    "destination is dialed: check every --dial against the owner's written approval yourself "
+    "(a profile written by `scope compile` carries the approved list)"
+)
 _SECTION_FIELDS = {
     "target": {
         "host",
@@ -41,6 +51,7 @@ _SECTION_FIELDS = {
         "approved_addresses",
         "tls_server_name",
         "tls_ca_file",
+        "approved_destinations",
     },
     "authorization": {
         "status",
@@ -257,6 +268,75 @@ def tls_facts(
     return facts
 
 
+def approved_destinations(
+    document: dict[str, Any], errors: list[str] | None = None
+) -> tuple[str, ...] | None:
+    """The owner-approved dial strings (``target.approved_destinations``).
+
+    ``None`` when the profile does not carry the field: such a profile (hand
+    made, or compiled before the field existed) does not restrict the
+    destination. An empty list approves no destination at all. Problems are
+    appended to ``errors`` (or raised as :class:`ProfileError` when ``errors``
+    is ``None``); a malformed list never reads as "unrestricted".
+    """
+    target = document.get("target")
+    if not isinstance(target, dict) or "approved_destinations" not in target:
+        return None
+    value = target["approved_destinations"]
+    problems: list[str] = []
+    result: list[str] = []
+    if not isinstance(value, list):
+        problems.append("target.approved_destinations must be a list of dial strings")
+    elif len(value) > MAX_APPROVED_DESTINATIONS:
+        problems.append(
+            f"target.approved_destinations lists {len(value)} destinations, more than "
+            f"{MAX_APPROVED_DESTINATIONS}"
+        )
+    else:
+        for item in value:
+            if not isinstance(item, str):
+                problems.append(
+                    f"target.approved_destinations must contain only strings, not {item!r} "
+                    "(quote a number: '1001')"
+                )
+            elif DESTINATION_PATTERN.fullmatch(item) is None:
+                problems.append(
+                    f"target.approved_destinations: {item!r} is not 1-64 characters of "
+                    "letters, digits, and . _ + * # -"
+                )
+            elif item in result:
+                problems.append(f"target.approved_destinations lists {item} twice")
+            else:
+                result.append(item)
+    if problems:
+        if errors is None:
+            raise ProfileError("; ".join(problems))
+        errors.extend(problems)
+        return ()
+    return tuple(result)
+
+
+def destination_refusal(document: dict[str, Any], destination: str) -> str | None:
+    """Why ``destination`` may not be dialed with this profile (``None``: it may).
+
+    Exact, case-sensitive match against ``target.approved_destinations``. A
+    profile without the field does not restrict the destination.
+    """
+    try:
+        approved = approved_destinations(document)
+    except ProfileError:
+        # rehearse reports the malformed list; nothing is approved meanwhile.
+        approved = ()
+    if approved is None or destination in approved:
+        return None
+    listed = ", ".join(approved) if approved else "none"
+    return (
+        f"destination {destination!r} is not one of the destinations the owner approved for "
+        f"this target (approved: {listed}); check the spelling, or ask the owner, record the new "
+        "destination under destinations in scope.yaml, and run scope compile"
+    )
+
+
 def approved_codecs(
     document: dict[str, Any], errors: list[str] | None = None
 ) -> tuple[str, ...] | None:
@@ -432,6 +512,10 @@ def rehearse(
     if not approved_addresses:
         errors.append("at least one literal approved address is required")
 
+    destinations = approved_destinations(document, errors)
+    if destinations is None:
+        warnings.append(DESTINATIONS_UNRESTRICTED)
+
     try:
         valid_from = _parse_time(authorization.get("valid_from"), "authorization.valid_from")
         valid_until = _parse_time(authorization.get("valid_until"), "authorization.valid_until")
@@ -517,6 +601,18 @@ def rehearse(
         from sippycup_checks.catalog import validate_section
 
         errors.extend(validate_section(security_checks, target))
+        check_destination = (
+            security_checks.get("destination") if isinstance(security_checks, dict) else None
+        )
+        if (
+            destinations is not None
+            and isinstance(check_destination, str)
+            and check_destination not in destinations
+        ):
+            errors.append(
+                f"security_checks.destination {check_destination!r} is not one of "
+                "target.approved_destinations"
+            )
         if isinstance(security_checks, dict):
             facts["security_checks"] = {
                 "approved": list(security_checks.get("approved") or []),
@@ -540,6 +636,8 @@ def rehearse(
                 "transport": transport,
                 "approved_addresses": approved_addresses,
             },
+            # None: the profile does not restrict the destination.
+            "approved_destinations": None if destinations is None else list(destinations),
             **({"tls": tls} if tls is not None else {}),
             "authorization": {
                 "status": status,

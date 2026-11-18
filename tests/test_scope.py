@@ -489,12 +489,16 @@ class CompileTests(ScopeTestCase):
         self.write_scope(complete_scope())
         result = self.compile()
         self.assertEqual(result.exit_code, 0, result.as_dict())
-        self.assertEqual({item["artifact"] for item in result.generated}, set(FILENAMES))
-        for name in (*FILENAMES.values(), SIDECAR_FILE):
+        # The fixture has two targets: the second gets its own profile.
+        second = "target-profile-edge-tls.yaml"
+        self.assertEqual(
+            {item["artifact"] for item in result.generated}, {*FILENAMES, "profile:edge-tls"}
+        )
+        for name in (*FILENAMES.values(), second, SIDECAR_FILE):
             self.assertEqual(stat.S_IMODE((self.root / name).stat().st_mode), 0o600, name)
         self.assertEqual(
             sorted(path.name for path in self.root.iterdir()),
-            sorted([*FILENAMES.values(), SIDECAR_FILE, "scope.yaml"]),
+            sorted([*FILENAMES.values(), second, SIDECAR_FILE, "scope.yaml"]),
         )
         profile = load_profile(self.root / "target-profile.yaml")
         rehearsal = rehearse(profile, now=NOW)
@@ -716,7 +720,8 @@ class CompileTests(ScopeTestCase):
     def test_second_target_note_and_media_cidr_note(self) -> None:
         self.write_scope(complete_scope())
         notes = " ".join(self.compile().notes)
-        self.assertIn("first target", notes)
+        self.assertIn("one target profile per target: target-profile.yaml (edge, udp port 5060); "
+                      "target-profile-edge-tls.yaml (edge-tls, tls port 5061)", notes)
         self.assertIn("10.20.31.0/28 (16 addresses) are in the profile's media.networks", notes)
 
 
@@ -739,7 +744,7 @@ class StalenessTests(ScopeTestCase):
         for name, entry in sidecar["derivatives"].items():
             self.assertEqual(
                 entry["sha256"],
-                hashlib.sha256((self.root / FILENAMES[name]).read_bytes()).hexdigest(),
+                hashlib.sha256((self.root / entry["path"]).read_bytes()).hexdigest(),
             )
             self.assertEqual(entry["scopeSha256"], sidecar["scope"]["sha256"])
         self.assertIn("generated_at", sidecar)

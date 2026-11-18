@@ -179,6 +179,9 @@ def _profile_facts(path: Path, repo: Path, now: datetime) -> dict[str, Any]:
         # Owner-approved media networks and the far end's RTP ports: media only.
         mediaNetworks=list(rehearsal.facts.get("media_networks") or []),
         mediaPorts=rehearsal.facts.get("media_ports"),
+        # The dial strings this profile accepts; None: it does not restrict them.
+        approvedDestinations=rehearsal.facts.get("approved_destinations"),
+        document=document,
     )
     if not facts["literalHost"] and "target.host must be one of the literal approved_addresses" not in facts["errors"]:
         facts["errors"].append("target.host must itself be one of the literal approved_addresses")
@@ -277,8 +280,51 @@ def _target_summary(profile: dict[str, Any], scope: dict[str, Any]) -> dict[str,
             "present": bool(required and account.get("username")),
         },
         "destinations": destinations,
-        "dial": next((item["user"] for item in destinations if item["expect"] != "reject"), None),
+        "approvedDestinations": profile.get("approvedDestinations") if profile.get("present") else None,
+        # Never a destination the profile would refuse, or one on another target.
+        "dial": _suggested_dial(document, profile.get("document")),
     }
+
+
+def _suggested_dial(scope_document: Any, profile_document: Any, target_name: str | None = None) -> str | None:
+    from sippycup_workbench.advisor import suggested_dial
+
+    return suggested_dial(scope_document, profile_document, target_name)
+
+
+def _compiled_profiles(root: Path, repo: Path, now: datetime, scope: dict[str, Any],
+                       first: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every profile an action can use: the first target's, then one per further target.
+
+    Each entry says which file it is, which scope target it carries, whether
+    it is current against scope.yaml, whether it passes rehearse, and which
+    destination the cockpit would dial with it. Reads only local files.
+    """
+    from sippycup_workbench.scope_derive import compiled_profiles
+
+    def entry(facts: dict[str, Any], target: str | None, state: str | None, is_first: bool) -> dict[str, Any]:
+        document_target = facts.get("target") or {}
+        return {
+            "path": facts["path"], "target": target, "first": is_first, "state": state,
+            "present": facts["present"], "ready": facts["ready"], "errors": list(facts.get("errors") or [])[:8],
+            "host": document_target.get("host"), "port": document_target.get("port"),
+            "transport": document_target.get("transport"),
+            "approvedDestinations": facts.get("approvedDestinations"),
+            "dial": _suggested_dial(scope.get("document"), facts.get("document"), None if is_first else target),
+        }
+
+    try:
+        recorded = compiled_profiles(root)
+    except Exception:  # the cockpit must still render
+        recorded = []
+    result = []
+    main = next((item for item in recorded if item["first"]), None)
+    if first.get("present") or main:
+        result.append(entry(first, main["target"] if main else None, main["state"] if main else None, True))
+    for item in recorded:
+        if not item["first"]:
+            result.append(entry(_profile_facts(root / item["path"], repo, now), item["target"], item["state"], False))
+    return result
 
 
 def _practice_facts(repo: Path, now: datetime) -> dict[str, Any]:
@@ -682,6 +728,7 @@ def build_model(
         "profile": {key: value for key, value in profile.items() if key not in {"document", "target", "authorization"}},
         "authorization": authorization,
         "target": _target_summary(profile, scope),
+        "profiles": _compiled_profiles(root, repo_path, instant, scope, profile) if engagement_facts["exists"] else [],
         "readiness": {
             "image": image or {"checked": False, "present": None, "stale": None,
                                "detail": "image not checked (no runtime query was made)"},

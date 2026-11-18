@@ -77,6 +77,16 @@ FAULT_ACCOUNTS = {
     "practice-srtp": "same password; demands SDES-SRTP, so a plain-RTP offer gets 488 (dial any destination)",
 }
 DESTINATIONS.update(FAULT_DESTINATIONS)
+# What the practice profiles approve for --dial (target.approved_destinations
+# in examples/practice/target-profile*.template.yaml; a unit test keeps the
+# templates equal to this). The dial plan's numeric aliases are included, and
+# so is MISSING_DESTINATION, which the dial plan deliberately lacks: dialing it
+# is the drill's 404 `call-not-found` scenario, the case of a destination the
+# owner approved but did not provision. Anything else (a typo such as `ecoh`)
+# is refused by `call` and `matrix` before a packet is sent.
+DESTINATION_ALIASES = ("600", "601", "602", "486", "603")
+MISSING_DESTINATION = "nobody-home"
+PROFILE_DESTINATIONS = (*DESTINATIONS, *DESTINATION_ALIASES, MISSING_DESTINATION)
 UNAUTHENTICATED_POLICY = (
     "Every INVITE and REGISTER without valid Digest credentials is challenged "
     "with 401 Unauthorized; OPTIONS is answered 200 OK without credentials; "
@@ -645,7 +655,10 @@ def render_facts_human(facts: dict[str, Any]) -> str:
     ]
     for name, destination in facts["destinations"].items():
         lines.append(f"  {destination['uri']:<26} {destination['behavior']}")
-    lines.append(f"  {'sip:<anything else>@' + facts['address']:<26} 404 Not Found after authentication (notfound)")
+    lines.append(f"  {'sip:' + MISSING_DESTINATION + '@' + facts['address']:<26} 404 Not Found after authentication "
+                 "(notfound: not in the dial plan on purpose)")
+    lines.append("  The practice profiles approve only these (and the aliases) for --dial; a typo such as "
+                 "`ecoh` is refused before anything is sent.")
     for name, behavior in facts.get("fault_accounts", {}).items():
         lines.append(f"  account {name:<18} {behavior}")
     lines.append("  Rehearse every failure verdict: ./bin/sippycup practice-target drill")

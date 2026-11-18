@@ -19,7 +19,9 @@ already carries the service owner's approval.
    window, and `target.host` is itself one of the literal
    `approved_addresses`. The validity window must also cover the latest
    possible end of the call. The same gate runs again immediately before
-   the first packet and before the call.
+   the first packet and before the call. When the profile lists
+   `target.approved_destinations`, `--dial` must be one of them (see
+   "Approved destinations" below).
 2. **Capture.** In a private container network namespace, where rootless
    capture works without sudo, it starts `tcpdump` with a filter that names
    only the approved addresses: the signaling port plus UDP for RTP, for
@@ -64,7 +66,7 @@ already carries the service owner's approval.
 
 | Option | Meaning |
 |---|---|
-| `--dial DESTINATION` | User part dialed at the profile's target. Required. |
+| `--dial DESTINATION` | User part dialed at the profile's target. Required. Must be one of the profile's `target.approved_destinations` when the profile has that list; anything else is refused (exit 2) before anything starts. |
 | `--duration SECONDS` | Call time after answer. Default 10. Clamped to `limits.max_duration_seconds`. |
 | `--answer-timeout SECONDS` | Hang up (CANCEL) if the call is not answered in time. Default 30, maximum 120. |
 | `--play FILE` | A 16-bit PCM WAV beneath `work/`, such as the agreed canary phrase. Default: a generated two-tone WAV with no recorded voice. |
@@ -183,6 +185,54 @@ human output prints it as `Media scope: peer ... admitted by the approved
 media network ...`. The call matrix (each cell is a guided call) copies it
 into each cell as `mediaAdmittedBy`/`mediaNetwork`, and `srtp-policy` rows
 carry the same two fields.
+
+## Approved destinations
+
+The owner approves which destinations may be dialed. `scope compile` writes
+them into the profile as `target.approved_destinations` (the `user` of each
+destination the scope lists for that target; see `SCOPE-INTAKE.md`,
+"Approved destinations"). `rehearse` prints the list:
+
+```text
+Destinations: echo, dtmf (the only values call and matrix accept for --dial with this profile)
+```
+
+`call`, `call --dry-run`, and `matrix plan|run` compare `--dial` with the
+list, exactly and with the same upper and lower case. A value that is not on
+it is refused with exit 2. No capture, preflight, registration, or call is
+started, no run directory is made, and no packet is sent:
+
+```text
+$ ./bin/sippycup call work/ENGAGEMENT/target-profile.yaml --dial ecoh --username 1001 --secret-file work/ENGAGEMENT/account.password
+Guided call: BLOCKED
+BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml, and run scope compile
+Nothing was started and no packets were sent.
+Network activity: none
+```
+
+Correct the spelling. For a destination that is not on the list, ask the
+owner, add it to `destinations` in `scope.yaml`, and run `scope compile`. Do
+not edit the profile.
+
+A profile without `target.approved_destinations` (made by hand, or compiled
+by an older version) still works, and the destination is then NOT checked.
+Each command says so:
+
+- `rehearse` prints a `WARN:` line and
+  `Destinations: NOT RESTRICTED by this profile (no target.approved_destinations); call and matrix will dial whatever --dial names`;
+- the dry run prints `approved dial:   NOT RESTRICTED: ...`;
+- the call result prints `Destination:  echo (NOT CHECKED: this profile has no target.approved_destinations, ...)`.
+
+With such a profile, compare every `--dial` with the owner's written
+approval yourself. `result.json` records `destination` (`dialed`,
+`approved`, `restricted`, `onApprovedList`), and `diagnose` uses the run's
+recorded profile to say, for a `call-not-found`, whether the destination was
+on the approved list.
+
+The practice profiles (`work/practice/target-profile*.yaml`) list every
+practice destination, the numeric aliases, and `nobody-home`, which the
+practice dial plan does not have on purpose: it is the drill's 404 scenario,
+an approved destination that the platform does not know.
 
 ## DTMF
 
@@ -418,8 +468,10 @@ which also ends the call.
 ```
 
 This runs from the checkout without a container. It prints the same steps
-as `one-call`, the softphone parameters, and the capture filter, and it sends
-no packets. Exit status is 0 when ready and 2 when blocked.
+as `one-call`, the softphone parameters (with `approved dial:`, the
+destinations the profile accepts), and the capture filter, and it sends
+no packets. Exit status is 0 when ready and 2 when blocked; a `--dial` that
+the profile does not approve is blocked here too.
 
 ## Recording the run
 

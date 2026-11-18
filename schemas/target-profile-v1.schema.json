@@ -34,6 +34,21 @@
           "type": "array",
           "uniqueItems": true,
           "items": {"type": "string"}
+        },
+        "tls_server_name": {
+          "type": "string",
+          "description": "tls only: the reviewed DNS name on the server certificate (SNI and verification; never resolved)."
+        },
+        "tls_ca_file": {
+          "type": "string",
+          "description": "tls only: a work/... PEM file with the owner's private CA certificate."
+        },
+        "approved_destinations": {
+          "type": "array",
+          "description": "Optional. The dial strings the owner approved for this target (the scope's destinations[].user); `scope compile` writes it. When present, call and matrix refuse any other --dial before anything is sent; an empty list approves no destination. When absent, the profile does not restrict the destination.",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9._+*#-]{1,64}$"}
         }
       }
     },
@@ -91,6 +106,10 @@
         "dtls_srtp": {"type": "boolean"},
         "webrtc": {"type": "boolean"}
       }
+    },
+    "security_checks": {
+      "type": "object",
+      "description": "Optional. The owner-approved security posture checks (approved, max_requests, account, destination, cleartext_endpoints); see docs/SECURITY-CHECKS.md. rehearse validates it against the reviewed catalog, and refuses a destination that is not in target.approved_destinations when the profile carries that list."
     },
     "media": {
       "type": "object",
