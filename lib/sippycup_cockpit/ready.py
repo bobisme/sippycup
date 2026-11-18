@@ -307,6 +307,21 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
         return Check("window", "Approval window", WARN,
                      lines + [f"less than the required {_duration(required)} ({need}) remains"],
                      f"finish before {_both(end, zone)}, or ask the owner to extend the window")
+    # bn-3vxl: is the frozen campaign plan held to this window?
+    if plan and not plan.get("error"):
+        replan = (f"move {eng}/plan.json aside, then {LAUNCHER} scope compile {eng} and "
+                  f"{LAUNCHER} campaign plan {eng}/campaign.yaml --output {eng}/plan.json")
+        approval = plan.get("approval") or {}
+        if not plan.get("windowBound"):
+            return Check("window", "Approval window", WARN,
+                         lines + ["the frozen campaign plan is NOT bound to an approval window of its own: "
+                                  "campaign run would rely only on scope.yaml beside the manifest"], replan)
+        plan_end = _parse(approval.get("validUntil"))
+        if plan_end is None or plan_end.replace(microsecond=0) != end.replace(microsecond=0):
+            return Check("window", "Approval window", WARN,
+                         lines + [f"the frozen campaign plan is bound to a different window end "
+                                  f"({approval.get('validUntil')}) than the profile"], replan)
+        lines.append("the frozen campaign plan is bound to this window (checked before every step)")
     return Check("window", "Approval window", GO, lines + [f"at least {_duration(required)} left ({need})"])
 
 

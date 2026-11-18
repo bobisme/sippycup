@@ -22,6 +22,7 @@ from typing import Any
 
 import yaml
 
+from sippycup.approval import ApprovalError, canonical_window
 from sippycup.campaign import ManifestError, compile_plan
 from sippycup_oracle.cli import ExpectationsError, load_expectations
 
@@ -449,6 +450,23 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
     authorization: dict[str, Any] = {"networks": networks}
     if media_networks:
         authorization["mediaNetworks"] = media_networks
+    # The approval window (bn-3vxl): campaign plan freezes it and campaign run
+    # sends nothing outside it. The manifest is generated only for an approved
+    # scope with a complete window, so these answers exist.
+    auth = doc.get("authorization") or {}
+    try:
+        valid_from, valid_until = canonical_window(
+            auth.get("valid_from"), auth.get("valid_until"), "authorization"
+        )
+    except ApprovalError as exc:
+        return [("authorization.valid_until", str(exc))]
+    approval: dict[str, Any] = {}
+    if isinstance(auth.get("approval_id"), str) and auth["approval_id"].strip():
+        approval["id"] = auth["approval_id"].strip()
+    if valid_from is not None:
+        approval["validFrom"] = valid_from
+    approval["validUntil"] = valid_until
+    authorization["approval"] = approval
     authorization |= {
         "signalingPorts": list(doc["signaling"]["ports"]),
         "mediaPorts": {"start": media["start"], "end": media["end"]},

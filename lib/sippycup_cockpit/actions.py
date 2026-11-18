@@ -585,6 +585,18 @@ def _bounded_lines(model: dict[str, Any], action: dict[str, Any], repo: Path, no
             lines.append(f"  Destinations (literal): {', '.join(plan.get('destinations') or []) or 'none'}")
             if plan.get("mediaNetworks"):
                 lines.append(f"  Media only (never signaling; captured): {', '.join(plan['mediaNetworks'])}")
+            approval = plan.get("approval") or {}
+            if plan.get("windowBound"):
+                lines.append(
+                    "  Approval window: "
+                    + (f"from {approval.get('validFrom')} " if approval.get("validFrom") else "")
+                    + f"until {approval.get('validUntil')} (checked before every step)"
+                )
+            else:
+                lines.append(
+                    "  WARNING: this plan is NOT bound to an approval window; run scope compile "
+                    "and campaign plan again to bind it"
+                )
             lines.append(f"  Planned totals: {json.dumps(plan.get('plannedTotals'), sort_keys=True)}")
             lines.append(f"  Hard maxima: {json.dumps(plan.get('hardMaxima'), sort_keys=True)}")
         return lines

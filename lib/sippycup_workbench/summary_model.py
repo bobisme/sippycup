@@ -112,6 +112,14 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
         "summary": "The offline packet oracle reported failed assertions for an answered call.",
         "recommendation": "Review the failing assertions in the run's assertion output before drawing a conclusion; reproduce independently.",
     },
+    # bn-3vxl: the campaign re-checks the approval window before every step
+    # and stopped itself. A safety stop, not a result about the target.
+    "campaign-window-ended": {
+        "severity": "info",
+        "title": "Safety stop: the approval no longer covered the next campaign step",
+        "summary": "Sippycup stopped a campaign before its next step because the approval window had ended, was too short for that step, or the approval was withdrawn. Steps not yet started were not sent. This is a safety stop, not a target failure.",
+        "recommendation": "Agree a new written window with the service owner, record it in the scope, and run the remaining steps from a newly planned campaign inside that window.",
+    },
     "campaign-stopped": {
         "severity": "info",
         "title": "A campaign stopped before completing every step",
@@ -128,7 +136,7 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
 
 
 # Verdicts where Sippycup itself stopped a run to stay inside the scope.
-SAFETY_STOPS = frozenset({"media-outside-scope", "signaling-outside-scope"})
+SAFETY_STOPS = frozenset({"media-outside-scope", "signaling-outside-scope", "authorization_lapsed"})
 
 
 class Unreadable(Exception):
@@ -512,6 +520,9 @@ def _is_network(value: Any) -> bool:
 
 def _manifest_source(document: dict[str, Any], ref: str) -> Source:
     auth = _dict(document.get("authorization"))
+    # A manifest's authorization.approval window is deliberately not a window
+    # source here: it carries no status, so it would count as "approved" and
+    # could hide a revoked scope or profile in the approval-not-active check.
     source = Source(
         kind="campaign-manifest",
         ref=ref,
@@ -1251,6 +1262,7 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
     capture_bytes = _capture_size(run)
     completed = _int(result.get("completedSteps"))
     capture_record = _dict(result.get("capture"))
+    approval_window = _dict(result.get("approvalWindow"))
     watchdog = _dict(capture_record.get("watchdog"))
     model["details"] = {
         "cases": cases,
@@ -1262,6 +1274,9 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
         "plannedTotals": {k: v for k, v in _dict(plan.get("plannedTotals")).items() if _int(v) is not None},
         "hardMaxima": hard,
         "notExercised": not_exercised,
+        # Whether the run was held to an approval window (False: the plan
+        # carried none; None: a run recorded before the field existed).
+        "windowBound": approval_window.get("bound") if isinstance(approval_window.get("bound"), bool) else None,
         # What the campaign's capture watchdog counted (result.json capture):
         # every captured packet, and how many were media (RTP/RTCP).
         "capture": None
@@ -1638,6 +1653,13 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
             reason = details.get("stopReason") or run.get("state")
             if reason in {"capture_process_died", "capture_failed"}:
                 found.append(_observation("capture-incomplete", run))
+            elif "authorization_lapsed" in {reason, run.get("state")}:
+                planned, done = details.get("plannedSteps"), details.get("completedSteps")
+                found.append(_observation(
+                    "campaign-window-ended", run,
+                    f"{done} of {planned} steps completed before the stop."
+                    if isinstance(planned, int) and isinstance(done, int) else None,
+                ))
             else:
                 found.append(_observation("campaign-stopped", run, f"Stop reason: {reason}."))
     return found
@@ -2232,6 +2254,8 @@ def _limitations(runs: list[dict[str, Any]], sources: list[Source], warnings: li
                         }
                     )
         if run["kind"] == "campaign":
+            if run["details"].get("windowBound") is False:
+                items.append({"code": "campaign-window-unbound", "text": f"Campaign {run['id']} ran from a plan that carries no approval window, so Sippycup did not enforce a window during that run."})
             for case in run["details"].get("cases", []):
                 if case["outcome"] == "not-run":
                     items.append({"code": "step-not-run", "text": f"Campaign {run['id']} step {case['step']} ({case['case']}) was never run."})

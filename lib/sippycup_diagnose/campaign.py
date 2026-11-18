@@ -83,6 +83,40 @@ def diagnose_campaign(path: Path, arguments) -> tuple:
         d.step("Draw the campaign's capture as a ladder.", command("ladder", work_relative(path.resolve())))
         return d, red
 
+    if state == "authorization_lapsed" or terminal.get("reason") == "authorization_lapsed":
+        # bn-3vxl: our own approval-window stop, never a platform failure.
+        window = result.get("approvalWindow") if isinstance(result.get("approvalWindow"), dict) else {}
+        halt = window.get("stop") if isinstance(window.get("stop"), dict) else {}
+        detail = halt.get("detail") or terminal.get("detail") or "the approval no longer covered the next step"
+        before = halt.get("step") or terminal.get("notStartedStep")
+        where = f"before step {before}" if before else "before the first step"
+        remaining = (total or 0) - (completed or 0)
+        d.stage("safety stop", "the owner's approval no longer covered the next step")
+        d.outcome(
+            f"Sippycup stopped this campaign itself {where}: {detail}. "
+            f"{completed if completed is not None else '?'} of {total if total is not None else '?'} step(s) completed"
+            + (f"; {remaining} were not sent." if remaining > 0 else ".")
+        )
+        if window.get("validUntil"):
+            d.evidence("approval window", f"valid until {window.get('validUntil')}"
+                       + (f", from {window.get('validFrom')}" if window.get("validFrom") else "")
+                       + (f"; stopped at {halt.get('at')}" if halt.get("at") else ""))
+        d.attribute(OUR, HIGH, [
+            "This is a safety stop on our side, not a platform failure: the campaign re-checks the "
+            "approval window before every step and starts no step that could end after it.",
+            "The steps that completed before the stop are valid results; nothing about the platform "
+            "follows from the stop itself.",
+        ])
+        if remaining > 0:
+            d.gap(f"{remaining} step(s) were never sent")
+        d.stop_and_ask(
+            "Stop: only the owner can renew the approval. Ask the owner for a new written window, "
+            "record it in scope.yaml, run scope compile, then campaign plan again. Do not edit "
+            "the window in the manifest or the plan yourself."
+        )
+        d.step("Draw what the capture recorded before the stop.", command("ladder", work_relative(path.resolve())))
+        return d, red
+
     if terminal.get("event") == "campaign.cancelled":
         d.outcome(f"The campaign was interrupted ({terminal.get('signal')}) after {completed} completed step(s).")
         d.stage("none", "interrupted by the operator")

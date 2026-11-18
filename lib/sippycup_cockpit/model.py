@@ -645,12 +645,18 @@ def _plan_facts(path: Path) -> dict[str, Any] | None:
     if not isinstance(plan, dict):
         return {"error": "plan.json is not an object"}
     authorization = plan.get("authorization") if isinstance(plan.get("authorization"), dict) else {}
+    approval = authorization.get("approval")
     return {
         "name": (plan.get("metadata") or {}).get("name") if isinstance(plan.get("metadata"), dict) else None,
         "steps": len(plan.get("steps") or []) if isinstance(plan.get("steps"), list) else None,
         "plannedTotals": plan.get("plannedTotals"),
         "hardMaxima": authorization.get("hardMaxima"),
         "credentialRefs": authorization.get("credentialRefs") or [],
+        # The approval window frozen into the plan; windowBound False means
+        # campaign run will not enforce one (an older or hand-written plan).
+        "windowBound": isinstance(approval, dict) and isinstance(approval.get("validUntil"), str),
+        "approval": {key: approval.get(key) for key in ("id", "validFrom", "validUntil")}
+        if isinstance(approval, dict) else None,
         "mediaNetworks": [item for item in authorization.get("mediaNetworks") or [] if isinstance(item, str)]
         if isinstance(authorization.get("mediaNetworks"), list) else [],
         "destinations": [

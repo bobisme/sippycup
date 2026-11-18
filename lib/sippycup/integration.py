@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from sippycup import approval as approval_rules
 from sippycup import capture_scope, options
 from sippycup.campaign import ManifestError, verify_frozen_plan
 from sippycup.runtime import RunResult, RuntimeError, run_plan, validate_plan
@@ -29,6 +30,10 @@ PROVIDER_TIMEOUT_SECONDS = 2.0
 
 class _FinishExecution(Exception):
     """Internal non-error control flow used so cleanup can update the result."""
+
+
+class AuthorizationLapsed(RuntimeError):
+    """The approval does not cover this run; raised before anything exists."""
 
 
 class CaptureWatchdog:
@@ -217,7 +222,8 @@ def _utc() -> str:
 
 
 def create_run_directory(root: Path, campaign: str) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
+    # A run root this call creates is private like the run directories in it.
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     for _ in range(8):
         path = root / f"{stamp}-{campaign}-{random.token_hex(4)}"
@@ -617,6 +623,22 @@ def _stop_group(process: subprocess.Popen[bytes], grace: float = 2.0) -> None:
         time.sleep(0.01)
 
 
+def _make_private(run_dir: Path) -> None:
+    """Run artifacts are evidence: directories 0700 and files 0600."""
+    for directory, _names, files in os.walk(run_dir):
+        try:
+            os.chmod(directory, 0o700)
+        except OSError:
+            pass
+        for name in files:
+            path = os.path.join(directory, name)
+            try:
+                if not os.path.islink(path):
+                    os.chmod(path, 0o600)
+            except OSError:
+                pass
+
+
 def execute_campaign(
     plan: dict[str, Any],
     *,
@@ -630,6 +652,52 @@ def execute_campaign(
     preflight: Preflight = sip_options_preflight,
     allow_test_runner: bool = False,
     secret_env_names: Sequence[str] = (),
+    manifest_path: Path | None = None,
+    clock: approval_rules.Clock | None = None,
+) -> tuple[RunResult, Path]:
+    """Run a frozen plan with capture, watchdogs, and the approval-window gate.
+
+    ``manifest_path`` lets the gate also read a scope file beside the
+    manifest; ``clock`` (UTC ``datetime``) is injectable for tests.
+    """
+    # Everything a run writes, including what tcpdump and the runners create,
+    # is private (0700 directories, 0600 files) like call and checks runs.
+    old_umask = os.umask(0o077)
+    try:
+        return _execute_campaign(
+            plan,
+            manifest_bytes=manifest_bytes,
+            run_root=run_root,
+            interface=interface,
+            runner=runner,
+            secret_values=secret_values,
+            capture_command=capture_command,
+            report_command=report_command,
+            preflight=preflight,
+            allow_test_runner=allow_test_runner,
+            secret_env_names=secret_env_names,
+            manifest_path=manifest_path,
+            clock=clock,
+        )
+    finally:
+        os.umask(old_umask)
+
+
+def _execute_campaign(
+    plan: dict[str, Any],
+    *,
+    manifest_bytes: bytes,
+    run_root: Path,
+    interface: str,
+    runner: Sequence[str] | None,
+    secret_values: Mapping[str, str] | None,
+    capture_command: Sequence[str] | None,
+    report_command: Sequence[str] | None,
+    preflight: Preflight,
+    allow_test_runner: bool,
+    secret_env_names: Sequence[str],
+    manifest_path: Path | None,
+    clock: approval_rules.Clock | None,
 ) -> tuple[RunResult, Path]:
     # Authorization rebind is deliberately the first operation: no directory,
     # process, resolver, or packet exists before both checks succeed.
@@ -638,6 +706,26 @@ def execute_campaign(
         verify_frozen_plan(plan, manifest_bytes)
     except ManifestError as error:
         raise RuntimeError(str(error)) from error
+    # The approval window (bn-3vxl), also before anything exists: the run must
+    # be inside it with room for the preflights and the first step.
+    gate = approval_rules.WindowGate(plan, manifest_path=manifest_path, clock=clock)
+    preflight_seconds = options.DEFAULT_TIMEOUT_SECONDS * len(_used_destinations(plan))
+    first_step = plan["steps"][0]
+    refusal = gate.refusal(
+        preflight_seconds + first_step["budget"]["durationSeconds"],
+        "the preflight and the first step",
+    )
+    if refusal is not None:
+        raise AuthorizationLapsed(refusal.message)
+
+    def step_gate(step: dict[str, Any]) -> tuple[str, str] | None:
+        refusal = gate.refusal(
+            step["budget"]["durationSeconds"], f"step {step['index']} ({step['case']})"
+        )
+        if refusal is None:
+            return None
+        gate.record_stop(refusal, before="step", step=step["index"])
+        return approval_rules.LAPSED, refusal.message
     trust_anchors = verified_trust_anchors(plan)
     tls_by_target = target_tls(plan)
     if runner is not None and not allow_test_runner:
@@ -802,12 +890,33 @@ def execute_campaign(
         def traffic_stop_reason() -> str | None:
             if capture is not None and capture.poll() is not None:
                 return "capture_process_died"
+            if gate.past_end():
+                # Backstop for a step that is already running: admission
+                # never starts a step that could end after the window, so
+                # this fires only when the clock moved.
+                gate.record_stop(
+                    approval_rules.Refusal(
+                        "expired", "the approval window ended while a step was running"
+                    ),
+                    before="window-end",
+                )
+                return approval_rules.LAPSED
             return watchdog.violation() if watchdog is not None else None
 
+        remaining_preflights = len(_used_destinations(plan))
         for destination in _used_destinations(plan):
             if cancel_signal is not None:
                 code = 130 if cancel_signal == signal.SIGINT else 143
                 result = RunResult(code, "cancelled", 0)
+                raise _FinishExecution
+            refusal = gate.refusal(
+                options.DEFAULT_TIMEOUT_SECONDS * remaining_preflights, "the preflight"
+            )
+            remaining_preflights -= 1
+            if refusal is not None:
+                gate.record_stop(refusal, before="preflight")
+                _write_json(run_dir / "preflight.json", preflight_results)
+                result = RunResult(1, approval_rules.LAPSED, 0)
                 raise _FinishExecution
             tls = tls_by_target.get(destination["target"])
             if tls is None:
@@ -940,6 +1049,7 @@ def execute_campaign(
             external_stop=traffic_stop_reason,
             runner_for=lambda step: runner_commands[step_runner_names[step["index"]]],
             output_limit_for=output_limit_for,
+            step_gate=step_gate,
         )
     except _FinishExecution:
         pass
@@ -1019,6 +1129,9 @@ def execute_campaign(
                     "filterSource": capture_filter_source,
                     "watchdog": watchdog.counts() if watchdog is not None else None,
                 },
+                # The approval window this run was held to (bound: false for a
+                # plan without one) and, when it stopped the run, why.
+                "approvalWindow": gate.facts(),
             },
         )
         _write_json(
@@ -1029,5 +1142,7 @@ def execute_campaign(
             signal.signal(signum, handler)
         from sippycup.evidence import write_evidence_manifest
 
+        _make_private(run_dir)
         write_evidence_manifest(run_dir)
+        _make_private(run_dir)
     return result, run_dir
