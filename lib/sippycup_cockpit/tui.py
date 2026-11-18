@@ -179,7 +179,12 @@ class CursesUI:
                 self.put(rows - 2, 0, question[: cols - 1], curses.A_BOLD)
                 self.put(rows - 1, 0, "> " + typed[-(cols - 4):])
                 self.screen.refresh()
-                key = self.screen.get_wch()
+                try:
+                    key = self.screen.get_wch()
+                except curses.error:
+                    # The dashboard loop sets a one-second input timeout for
+                    # its countdown; here no key yet just means keep waiting.
+                    continue
                 if key == "\x1b":
                     return None
                 if key in ("\n", "\r") or key == curses.KEY_ENTER:

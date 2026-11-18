@@ -221,6 +221,25 @@ class CockpitTerminalTests(unittest.TestCase):
         self.assertNotIn("Traceback", terminal.output)
         self.assertTrue(terminal.restored(), "terminal modes were not restored")
 
+    def test_curses_confirmation_prompt_waits_longer_than_the_refresh_timeout(self) -> None:
+        # The dashboard refreshes every second; a confirmation prompt left
+        # open longer than that used to crash with "_curses.error: no input".
+        if not self._curses_available():
+            self.skipTest("terminfo for xterm-256color is not available")
+        terminal = self.start(term="xterm-256color")
+        terminal.expect(r"Stages")
+        terminal.send("\r")
+        terminal.expect(r"Esc cancels")
+        time.sleep(2.5)
+        terminal.read(0.2)
+        self.assertIsNone(terminal.process.poll(), terminal.output[-2000:])
+        terminal.send("\x1b")
+        time.sleep(0.5)
+        terminal.send("q")
+        self.assertEqual(0, terminal.wait())
+        self.assertNotIn("Traceback", terminal.output)
+        self.assertTrue(terminal.restored(), "terminal modes were not restored")
+
     def test_curses_restores_the_terminal_on_sigterm(self) -> None:
         if not self._curses_available():
             self.skipTest("terminfo for xterm-256color is not available")
