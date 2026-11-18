@@ -144,6 +144,10 @@ SPEC: dict[str, Any] = {
     "evidence": {"retention_days": None, "disclosure": None},
     # Optional owner-approved posture checks (see docs/SECURITY-CHECKS.md).
     "security_checks": {"approved": None, "max_requests": None},
+    # Optional platform, production-safety, and application-surface answers
+    # (question sheet part 2). Their nested fields are checked by scope_app.
+    "platform": None,
+    "application": None,
 }
 
 _SECRET_WORDS = {
@@ -320,10 +324,13 @@ evidence:
 # security_checks:
 #   approved: [banner-disclosure, options-methods]
 #   max_requests: 2
+# Optional (question sheet part 2): the whole platform, production safety, and
+# web/API surfaces. Copy the platform and application sections from
+# examples/scope/platform-scope.yaml, or start with `scope init DIR --platform`.
 """
 
 
-def create_scope(engagement: str | Path, *, name: str | None = None) -> Path:
+def create_scope(engagement: str | Path, *, name: str | None = None, platform: bool = False) -> Path:
     root = Path(engagement)
     destination = root / SCOPE_FILE
     if root.is_symlink():
@@ -348,6 +355,10 @@ def create_scope(engagement: str | Path, *, name: str | None = None) -> Path:
         raise ScopeError(f"cannot create scope file: {exc}") from exc
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
         output.write(default_scope(chosen))
+        if platform:
+            from .scope_app import TEMPLATE
+
+            output.write(TEMPLATE)
         output.flush()
         os.fsync(output.fileno())
     destination.chmod(0o600)
@@ -523,6 +534,10 @@ def inspect(
         )
     _secret_scan(document, "", fatal)
     _unknown_scan(document, fatal)
+    from .scope_app import unknown_scan as _app_unknown_scan
+
+    _app_unknown_scan(document, lambda path: fatal.append(Finding(
+        "scope.unknown_field", "error", "unknown", path, "unknown field; the scope schema does not allow it")))
     if fatal:
         report.fatal = True
         report.findings.extend(fatal)
@@ -1079,6 +1094,11 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
     evidence = v.section("evidence")
     v.integer(evidence, "retention_days", "evidence.retention_days", "evidence retention", (), maximum=3650)
     v.string(evidence, "disclosure", "evidence.disclosure", "disclosure expectation", (), enum=DISCLOSURES)
+
+    # optional platform, production-safety, and application-surface answers
+    from .scope_app import validate_sections
+
+    validate_sections(v, document, limits=limits)
 
     # ceilings that cannot hold even one call
     if len(limits) == len(LIMIT_FIELDS) and targets and classes is not None:

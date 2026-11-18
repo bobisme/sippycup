@@ -66,6 +66,7 @@ class CompileResult:
     notes: list[str] = field(default_factory=list)
     profile_status: str | None = None
     generated_at: str | None = None
+    application: dict[str, str] | None = None
 
     @property
     def exit_code(self) -> int:
@@ -89,6 +90,7 @@ class CompileResult:
             "refused": [item.as_dict() for item in self.refused],
             "invalidScope": [item.as_dict() for item in self.report.findings] if self.report.fatal else [],
             "notes": self.notes,
+            "applicationSurfaces": self.application,
             "networkActivity": False,
         }
 
@@ -602,6 +604,12 @@ def compile_scope(
             Finding(code, "error", "inconsistent", FILENAMES[artifact], f"{FILENAMES[artifact]} {why}; "
                     "re-run with --force to overwrite it")
         )
+    from . import scope_app_derive
+
+    app_data, app_skips, app_refusals = scope_app_derive.precheck(root, report, force)
+    if app_skips:
+        result.skipped[scope_app_derive.ARTIFACT] = app_skips
+    result.refused.extend(app_refusals)
     if sidecar_problem:
         result.notes.append(sidecar_problem)
     if result.refused:
@@ -646,6 +654,8 @@ def compile_scope(
         replace=sidecar_path.exists(),
     )
     result.generated_at = generated_at
+    result.application, app_notes = scope_app_derive.finish(root, report, app_data, _write_atomic)
+    result.notes.extend(app_notes)
     if PROFILE in builders and len(doc["targets"]) > 1:
         result.notes.append(
             "the target profile carries only the first target; the campaign manifest carries all of them"

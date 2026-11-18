@@ -215,6 +215,10 @@ def render_questions(report: Report | None = None) -> str:
         if question.details is not None:
             lines.extend(question.details())
         lines.append("")
+    from .scope_app import render_part
+
+    part_two = render_part(report if marked else None)
     if marked:
         lines.append("Legend: [x] answered, [ ] unanswered, [n/a] not applicable. Values are not shown.")
+    lines.extend(part_two)
     return "\n".join(lines).rstrip() + "\n"

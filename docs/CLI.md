@@ -224,6 +224,20 @@ certificate name `sippycup-proxy`), media from `127.0.0.2`. `--media-cidr`
 as the range `127.0.0.2/31` (a media-only `media.networks` entry). See
 `PRACTICE-TARGET.md`.
 
+## Scope intake output
+
+`./bin/sippycup scope init DIR --platform` also writes the empty `platform`
+and `application` sections. `scope questions` prints two parts: the SIP
+service, then "Part 2: the whole platform" (questions P1 to P18 and A1 to A6).
+For a scope file with those sections, `scope check` prints their open answers
+as `WARN` lines (exit 0 when the SIP part is clean), `scope compile` prints
+`Wrote application-surfaces: PATH (sha256 ...) [record only; nothing is sent]`
+and its JSON carries `applicationSurfaces`, the cockpit prints `Platform` and
+`Web surfaces` lines, `status --format json` carries `facts.scope.platform`,
+and `ready` prints the line `Production safety answers`. A scope file without
+the sections produces the same output as before, except for part 2 of the
+question sheet. See `SCOPE-INTAKE.md`, "Platform and application answers".
+
 ## Bash completion
 
 Source the completion from a checkout:

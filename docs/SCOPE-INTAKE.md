@@ -36,6 +36,8 @@ approved profile.
 | `contact` | `name`, `channel`, `can_stop_test` |
 | `evidence` | `retention_days`, `disclosure` (`private`, `coordinated`, `public-after-remediation`) |
 | `security_checks` | optional: `approved` (check ids from `./bin/sippycup checks list`), `max_requests`; also add `security-checks` to `test_scope.allowed_classes` (see "The one exception" below) |
+| `platform` | optional: `name`, `components`, `out_of_scope`, `environment`, `third_parties`, `dialing`, `operations`, `addressing` (see "Platform and application answers" below) |
+| `application` | optional: `surfaces`, `identities`, `object_classes`, `route_inventory` (same section) |
 
 Per-target TLS server names, dial destinations with expected behavior, the
 account identity and credential reference, and expected media protection and
@@ -69,6 +71,9 @@ overwrite an existing file. The directory must already exist. `scope init`
 works whether or not the directory already has a journal, and `journal init`
 works in an existing directory that has no journal yet, so either order is fine.
 `--name` sets the engagement name (default: a slug of the directory name).
+`--platform` also writes the empty `platform` and `application` sections
+(question sheet part 2); use it when the test covers a whole product, not one
+SIP service.
 
 ## `scope questions [ENGAGEMENT_DIR]`
 
@@ -82,10 +87,20 @@ conditions, symmetric RTP for clients behind NAT, test classes and exclusions,
 the live contact, and evidence retention and disclosure. It also asks for the
 source address your tests will come from.
 
+The sheet has two parts. Part 1 is the SIP service (the numbered questions
+above). Part 2, "the whole platform", has questions P1 to P18 and A1 to A6 in
+plain words, each with a "Why we ask" line: what is in and out of scope,
+production and real customers, the other companies involved, where test calls
+go, the limits on a live system, names versus addresses, and the web, API, and
+browser-calling surfaces. Part 2 is always printed, so the owner sees it even
+when the scope file does not record it yet.
+
 Without a directory the output is generic and contains nothing from any
 engagement. With a directory, each question is marked `answered`,
 `unanswered`, or `not-applicable`; values are never echoed. If the scope file
-is invalid, nothing is marked and the sheet says so.
+is invalid, nothing is marked and the sheet says so. A part 2 question can
+also be `pending` or `unknown` (see below); it is `not-applicable` only when
+the owner's own answer rules it out.
 
 ## `scope check ENGAGEMENT_DIR`
 
@@ -117,6 +132,9 @@ artifacts it blocks.
 | `scope.class_excluded`, `scope.no_baseline_class` | Test classes contradict the exclusions or allow no baseline case |
 | `scope.contact_cannot_stop` | The live contact cannot stop the test |
 | `scope.ceiling_low_rate`, `scope.network_too_broad`, `scope.media_not_enumerable` | Warnings |
+| `scope.pstn_destination_unconfirmed`, `scope.carrier_answer_conflict`, `scope.destination_never_dial`, `scope.limit_exceeds_production` | Platform answers that hold the profile and the campaign (see "Platform and application answers") |
+| `scope.reach_unknown_destination`, `scope.surface_address_mismatch`, `scope.surface_component_conflict`, `scope.tls_ca_conflict` | Two platform or application answers contradict each other |
+| `scope.production_safety_open`, `scope.third_party_unresolved`, `scope.destination_reach_open`, `scope.surface_not_ready`, `scope.address_shared`, `scope.address_changing`, `scope.platform_open` | Warnings: open platform or application answers |
 
 ## `scope compile ENGAGEMENT_DIR`
 
@@ -248,6 +266,154 @@ against the first target, and the summed request bounds against
 `scope compile` then copies the list into the profile, with the account
 username, the first destination's user, and (for a TLS first target) the
 approved cleartext signaling ports. See `SECURITY-CHECKS.md`.
+
+## Platform and application answers
+
+Use these two optional sections when the owner wants the whole product
+tested: a phone platform with a web site, an admin console, an API, real
+customers, carriers, and outside hosting. A scope file without them is valid
+and behaves exactly as before. Start a new file with
+`./bin/sippycup scope init DIR --platform`, or copy the two sections from
+[`examples/scope/platform-scope.yaml`](../examples/scope/platform-scope.yaml),
+which annotates every field with its question number.
+
+**No live application runner exists.** These sections are a record. No
+Sippycup command sends HTTP or WebSocket traffic to a surface recorded here,
+and `scope compile` does not create a `web-security` profile from them.
+
+### Open answers: `pending` and `unknown`
+
+Any answer in these two sections may be the word `pending` (you asked and are
+waiting for the owner) or `unknown` (the owner does not know yet). Both are
+OPEN, the same as an empty answer. Nothing is inferred from an open answer.
+An open answer is shown as open, never as not-applicable: a question is
+`not-applicable` only when the owner's own answer rules it out (for example
+the web questions when the admin console, the customer web app, the API, and
+browser calling are all recorded as `out-of-scope`).
+
+### Fields
+
+| Field | Question | Answer |
+|---|---|---|
+| `platform.name` | P1 | the product name |
+| `platform.components.*` | P1 | `in-scope`, `out-of-scope`, `pending`, or `unknown` for each of `sip_edge`, `media_servers`, `admin_console`, `customer_web_app`, `api`, `websocket_webrtc`, `provisioning`, `voicemail`, `ivr`, `conference`, `recording` |
+| `platform.out_of_scope` | P2 | a list of plain words; `[none]` when nothing is out of scope |
+| `platform.environment.kind` | P3 | `production`, `staging`, `dedicated-test` |
+| `platform.environment.real_customers` | P4 | `true` or `false` |
+| `platform.environment.test_tenant` | P5 | the test tenant's label; `none` when there is none |
+| `platform.environment.never_touch` | P6 | data that must never be opened or changed; `[none]` only when the system holds no real data |
+| `platform.third_parties.{hosting,cdn_waf,pstn_carrier,sms,email}` | P7 to P10 | `provider`, `permission` (`out-of-path`: confirmed not involved in what is tested; `permitted`; `pending`; `unknown`), `reference` (where the permission is written; required for `permitted`) |
+| `platform.dialing.reach` | P11 | each `destinations[].name` mapped to `on-net` (stays on the platform) or `pstn` (reaches the public phone network) |
+| `platform.dialing.never_dial`, `never_dial_prefixes` | P12 | exact numbers and optional prefixes, always in quotes (`"112"`); `[none]` when there are none |
+| `platform.dialing.toll` | P13 | `no-cost`, `accepted`, `refused` |
+| `platform.operations.allowed_hours` | P14 | plain words with a timezone |
+| `platform.operations.max_concurrent_calls`, `max_requests_per_second` | P15 | whole numbers |
+| `platform.operations.blocking` | P16 | the alarms and automatic blocks a test may trigger, and who can undo a block |
+| `platform.operations.emergency_contact` (`name`, `channel`), `stop_signal` | P17 | who to call when something breaks, and the owner's stop signal |
+| `platform.addressing[]` | P18 | `name` (a public DNS name), `addresses` (the literal IPs behind it), `shared` (with other customers), `changing` (behind a load balancer or delivery network whose addresses change) |
+| `application.surfaces[]` | A1 to A3 | `name`, `kind` (`browser`, `api`, `websocket`), `status` (`in-scope`, `out-of-scope`, `pending`, `unknown`), `base_url` (`https://`, or `wss://` for a websocket), `connect_address` (literal IP), `connect_port`, `tls_server_name`, `tls_ca` (`public`, `private`), optional `tls_ca_file` (`work/...`), `allowed_origins` (websocket) |
+| `application.identities[]` | A4 | `id`, `role`, `tenant`, `credential_ref` (the NAME of the secret, never its value) |
+| `application.object_classes` | A5 | kinds of stored files, for example `[voicemail, recording]` |
+| `application.route_inventory` | A6 | `kind` (`openapi`, `har`, `route-list`, `none`), optional `file` (`work/...`; recorded, never read) |
+
+Names and addresses. A public DNS name is an identity only: `base_url`,
+`tls_server_name`, and `addressing[].name` are never looked up. A destination
+is a literal IP address the owner wrote down. A hostname in
+`connect_address` or `addressing[].addresses` is an error; write `pending`
+until the owner gives the address.
+
+A HAR file records a real browser session and can hold session cookies. Ask
+the owner to remove them before sending it, and keep the file under `work/`.
+
+### The severity rule
+
+`scope check` treats the two sections by one rule:
+
+1. **A wrong answer is an error**, as everywhere else in the file: an unknown
+   field, anything that looks like a secret (both make the whole file
+   invalid), a malformed value, a hostname where a literal address belongs,
+   or two recorded answers that contradict each other. The scope is then not
+   clean, so the profile stays `pending` until you correct the answer or
+   write `pending`. Each such finding names its field.
+2. **An open answer is never an error.** Missing, `pending`, and `unknown`
+   answers in these sections do NOT block the SIP/RTP part of an engagement
+   that is otherwise complete: `scope check` exits 0, and the profile, the
+   campaign manifest, and the expectations are generated as before. An open
+   answer is a WARNING when it gates something:
+   - `scope.surface_not_ready`: a surface that is `in-scope` lacks its
+     address, port, TLS name, CA answer, or (websocket) origins, or the
+     hosting provider or CDN/web firewall has not been resolved, or
+     production-safety answers are open. That surface is recorded as
+     `pending`, not `approved`. Only that surface is held.
+   - `scope.third_party_unresolved`: a company whose permission the owner
+     cannot give alone is not yet `out-of-path` or `permitted` (with a
+     reference). Hosting gates everything hosted there, including the SIP
+     edge; the CDN/web firewall, SMS, and email providers gate the web
+     surfaces; the carrier gates any call that may leave the platform.
+   - `scope.production_safety_open`: the scope says `production` (or does
+     not say, which is treated as production) and one of P4, P6, P7, P11,
+     P12, P14, P15, P16, P17 is open. For example: production with real
+     customers but no never-touch list, or no emergency contact and stop
+     signal.
+   - `scope.destination_reach_open`: it is not recorded whether a
+     destination stays on the platform.
+   - `scope.address_shared`, `scope.address_changing`: an address used by a
+     SIP target or an in-scope surface is shared with other customers, or
+     changes.
+   - `scope.platform_open`: one summary line with the numbers of all open
+     questions.
+3. **Four contradictions are about SIP traffic itself and are errors that
+   hold the profile and the campaign**, because a call could do harm that no
+   later step can undo:
+   - `scope.pstn_destination_unconfirmed`: a destination is recorded as
+     `pstn`, but `third_parties.pstn_carrier.permission` is not `permitted`
+     or `dialing.toll` is not `no-cost` or `accepted`. No call may leave the
+     platform until the owner answers both, or the destination is removed.
+   - `scope.carrier_answer_conflict`: the carrier is `out-of-path`, yet a
+     destination is `pstn`.
+   - `scope.destination_never_dial`: a `destinations[].user` equals a
+     `never_dial` number or starts with a `never_dial_prefixes` entry.
+   - `scope.limit_exceeds_production`: `limits.concurrent_calls` is above
+     `operations.max_concurrent_calls`.
+
+Limits of this check. The never-dial list and the reach answers are checked
+against `destinations[]` in the scope file. They are not enforced at run time:
+`call --dial` and `matrix` do not read them, so dial only destinations that
+are in the scope. `allowed_hours` is plain text for the operator; the
+approval window in `authorization` is what the tools enforce.
+
+### `application-surfaces.yaml`
+
+When the scope has a `platform` or `application` section, `scope compile`
+also writes `application-surfaces.yaml` (mode 0600) beside the other
+derivatives. It is a record for review:
+
+- every surface with its state: `approved` (in scope, every answer it needs
+  is given, and the scope's authorization is approved and in its window),
+  `pending` (in scope, with the list of what is open), `undecided` (the owner
+  has not said whether it is in scope), or `out-of-scope`;
+- the platform answers, the third parties with `resolved` or `open`, the
+  dialing answers, the production limits, the names and addresses, the test
+  identities (reference names only), and the open questions;
+- the same approval reference and window as the scope (`authorization`), and
+  the scope file's SHA-256 (`generatedFrom`).
+
+Every value is copied from the scope file. The record contains no path,
+method, header, or body, and an open answer is written as `pending`,
+`unknown`, or `unanswered`. It states that no live application runner exists.
+It is not validated against the `web-security` profile contract
+([WEB-SECURITY.md](WEB-SECURITY.md)): that contract also needs an adapter, a
+check list, hard ceilings, a window of at most 24 hours, and credential source
+references, which the scope file does not record.
+
+The record does not change the compile exit code: open answers leave it 0
+when the SIP part is clean. It is skipped (with the reasons) while an error
+exists in the two sections. Compile does not overwrite a record that was
+edited by hand or that it did not write (`scope.derivative_modified`,
+`scope.derivative_unmanaged`; `--force` overwrites). The record carries its
+own content hash and is not listed in `scope-derivatives.json`; the cockpit
+shows it as `current`, `stale` (the scope changed since), `edited`, or
+`not-compiled`. A stale record does not block a SIP run.
 
 ### Staleness and hand edits
 

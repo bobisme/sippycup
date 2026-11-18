@@ -718,6 +718,11 @@ def assess(engagement: Path, *, host: Host, image: str, margin_minutes: int = DE
         checks.append(tls)
     network, source = check_network(host, model, mode, probe)
     checks.append(network)
+    from .platform_scope import check_platform
+
+    platform = check_platform(model)
+    if platform is not None:
+        checks.append(platform)
     blocking = [item for item in checks if item.status == NOGO]
     warnings = [item for item in checks if item.status == WARN]
     verdict = "NO-GO" if blocking else "GO"

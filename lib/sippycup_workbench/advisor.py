@@ -266,6 +266,12 @@ def _scope_facts(
             "derivatives": derivatives,
         }
     )
+    from .scope_app import status_summary
+
+    platform_summary, platform_warnings = status_summary(report)
+    if platform_summary is not None:
+        facts["platform"] = platform_summary
+        warnings.extend(platform_warnings)
     if not report.ok:
         blockers.append(
             f"scope intake is incomplete or inconsistent ({len(report.errors)} errors)"

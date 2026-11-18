@@ -45,6 +45,17 @@ container), so the dashboard comes from files alone.
   `pending`, `revoked`, `missing`) with a live countdown and the approval id.
 - **Scope**: `missing`, `incomplete` (with the unanswered owner questions,
   never their values), `inconsistent`, `stale` derivatives, or `complete`.
+- **Platform** and **Web surfaces** (only when the scope file has a
+  `platform` or `application` section): the environment, how many of the 24
+  platform questions are open and exactly which (number, group, state, and
+  the question, never the answer), the open production-safety answers, each
+  web surface with `ready`, `pending`, `undecided`, or `out-of-scope`, and
+  the state of the `application-surfaces.yaml` record. `[??]` means open
+  answers; they do not hold the SIP stages. `[!!]` means an answer holds the
+  SIP profile (for example a destination that reaches the public phone
+  network without the carrier's permission). The line always says that
+  nothing is sent to web surfaces. Stage 3 gains the step
+  `platform and web answers recorded (N open; they do not hold the SIP tests)`.
 - **Target**: host, port, transport, whether the host is a literal approved
   address, whether an account is needed, and the destinations.
 - **Image**: whether the toolbox image exists and whether it is older than
@@ -194,6 +205,7 @@ warning, the command or manual step that fixes it:
 | Engagement record | the journal hash chain verifies | no engagement or a broken journal (`journal verify`) |
 | Scope compiled and current | scope.yaml is complete, consistent, and compiled | stale, incomplete, or not compiled (`scope compile`, `scope check`) |
 | Profile passes rehearse | `rehearse` would accept it | any `rehearse` error (fix scope.yaml, compile) |
+| Production safety answers (only when the scope has a `platform` section) | every production-safety answer is recorded, or the scope says `staging` or `dedicated-test`; open answers on production (or with no environment answer) are a WARNING that lists the open questions, and so is a confirmed destination that reaches the public phone network | a destination reaches the public phone network without the carrier's permission and a toll answer, a destination is on the never-dial list, or `limits.concurrent_calls` is above the owner's production maximum (`scope check`) |
 | Approval window | it started, and more than `--margin` minutes (default 60) plus a frozen campaign plan's duration remain; shown in local time and UTC with the time remaining (less is a warning) | not open yet (wait until the printed time), expired, or not approved |
 | Clock synchronised | `timedatectl` (or `chronyc tracking`) says synchronised; no time server is contacted | the host says it is not synchronised (`timedatectl set-ntp true`); unknown is a warning |
 | Toolbox image | present and its build record matches this checkout | missing or built from other code (`make build IMAGE=...`) |
