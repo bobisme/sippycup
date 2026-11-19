@@ -1,0 +1,108 @@
+# WORKED EXAMPLE for the practice target (`./bin/sippycup practice-target up`).
+# Every value here is a fact that `practice-target up` / `info` prints, or a
+# number that an owner would normally give you. Nothing here is a secret.
+#
+# Use it like this (docs/FIRST-ENGAGEMENT.md, section 1):
+#   ./bin/sippycup scope init work/acme
+#   cp examples/scope/practice-scope.yaml work/acme/scope.yaml
+#   chmod 600 work/acme/scope.yaml
+# then edit the window (the only required edit):
+#   `valid_from` and `valid_until` below must contain the current time.
+#   Use UTC with a trailing Z. `date -u +%Y-%m-%dT%H:%M:%SZ` prints now;
+#   `date -u -d '+4 hours' +%Y-%m-%dT%H:%M:%SZ` prints a window end.
+#   (The file ships with a window in the past on purpose, so that
+#   `scope check` stops you until you set it.)
+# You may also change `name` (lowercase letters, digits and "-").
+# Then `./bin/sippycup scope check work/acme` must print
+# `Scope: COMPLETE and CONSISTENT`.
+#
+# For a real owner every one of these answers comes from the owner's written
+# reply to `scope questions`. For the practice target the "owner" is you.
+schema_version: sippycup.dev/scope/v1
+name: practice-rehearsal
+
+authorization:
+  status: approved
+  approval_id: LOCAL-PRACTICE-ONLY       # the owner's ticket or e-mail id; any text for the practice target
+  approved_by: practice target (you)
+  valid_from: 2026-01-01T00:00:00Z       # EDIT: now (UTC)
+  valid_until: 2026-01-01T04:00:00Z      # EDIT: now plus 4 hours (UTC)
+
+signaling:
+  networks: [127.0.0.2]                  # the practice address (`info`: Address)
+  ports: [5060, 5061]
+  transports: [udp, tls]
+
+targets:
+  - name: practice
+    address: 127.0.0.2
+    transport: udp
+    port: 5060
+  - name: tls                           # its profile is target-profile-tls.yaml
+    address: 127.0.0.2
+    transport: tls
+    port: 5061
+    tls_server_name: sippycup-practice   # `info`: DNS SAN. Never resolved: packets go to the literal address.
+    tls_ca_file: work/practice/ca.crt    # written by `practice-target up`; a NEW file after every `up`,
+                                         # so run `scope compile` again after each `up`
+
+media:
+  networks: [127.0.0.2]                  # the practice media address (same as signaling here)
+  port_range: {start: 20000, end: 20019} # `info`: RTP ports
+  protection: [rtp, sdes-srtp]
+  codecs: [PCMU, PCMA]
+  dtmf: rfc4733
+  symmetric_rtp: true
+
+client:
+  source_addresses: [127.0.0.1]          # `info`: caller source
+
+account:
+  required: true
+  username: practice                     # `info`: Account user
+  realm: sippycup-practice               # `info`: realm
+  credential_ref: practice-password      # a NAME for the secret, never the password. Format: lowercase
+                                         # letters, digits and "-", starting with a letter (no "_", no upper case)
+  credential_delivery: other             # secret-manager | encrypted-message | in-person | phone-call | other
+
+destinations:                            # `target:` is required because there are two targets
+  - name: echo
+    target: practice
+    user: echo
+    expect: echo
+  - name: dtmf
+    target: practice
+    user: dtmf
+    expect: echo
+  - name: echo-tls
+    target: tls
+    user: echo
+    expect: echo
+
+limits:                                  # generous for practice; a real owner gives these numbers
+  calls: 40
+  concurrent_calls: 2
+  calls_per_second: 1
+  packets_per_second: 200
+  packets: 200000
+  bytes: 50000000
+  call_duration_seconds: 60
+  total_duration_seconds: 3600
+
+stop_conditions:
+  consecutive_failures: 3
+  unexpected_response: true
+  packet_loss_percent: 20
+
+test_scope:
+  allowed_classes: [options, call]
+  exclusions: [none]
+
+contact:
+  name: you
+  channel: this terminal
+  can_stop_test: true
+
+evidence:
+  retention_days: 7
+  disclosure: private

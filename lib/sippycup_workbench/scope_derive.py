@@ -817,14 +817,15 @@ def compile_scope(
     result.generated_at = generated_at
     result.application, app_notes = scope_app_derive.finish(root, report, app_data, _write_atomic)
     result.notes.extend(app_notes)
-    by_name = {item["name"]: item for item in doc["targets"]}
+    targets_raw = [item for item in doc.get("targets") or [] if isinstance(item, dict)]
+    by_name = {item["name"]: item for item in targets_raw if "name" in item}
     written_profiles = [
         f"{Path(item['path']).name} ({item['target']}, {by_name[item['target']]['transport']} "
         f"port {by_name[item['target']]['port']})"
         for item in result.generated
         if "target" in item
     ]
-    if len(doc["targets"]) > 1 and written_profiles:
+    if len(targets_raw) > 1 and written_profiles:
         result.notes.append(
             "one target profile per target: " + "; ".join(written_profiles) + ". Pass the profile "
             "of the target you are testing to rehearse, call, and matrix; each approves only the "

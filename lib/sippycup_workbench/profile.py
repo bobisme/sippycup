@@ -171,6 +171,13 @@ def write_profile(path: str | Path, profile: dict[str, Any], *, force: bool) -> 
 def load_profile(path: str | Path) -> dict[str, Any]:
     try:
         document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        where = Path(path)
+        hint = ""
+        if (where.parent / "scope.yaml").is_file():
+            hint = (f"; {where.parent / 'scope.yaml'} exists, so the profile is not compiled yet: run "
+                    f"./bin/sippycup scope compile {where.parent} (scope check first if compile refuses)")
+        raise ProfileError(f"cannot read profile: {where} does not exist{hint}") from exc
     except (OSError, yaml.YAMLError) as exc:
         raise ProfileError(f"cannot read profile: {exc}") from exc
     if not isinstance(document, dict):
@@ -507,8 +514,6 @@ def rehearse(
     approved_by = authorization.get("approved_by")
     if not isinstance(approved_by, str) or not approved_by.strip():
         errors.append("authorization.approved_by must be a non-empty string")
-    if status != "approved":
-        errors.append(f"authorization is {status or 'missing'}, not approved")
     if not approved_addresses:
         errors.append("at least one literal approved address is required")
 
@@ -534,6 +539,10 @@ def rehearse(
             "send nothing; ask the owner for a new written window, record it in scope.yaml, "
             "and run scope compile"
         )
+    if status != "approved":
+        # After the window problems: a scope whose window is over or not open
+        # yet is compiled as pending, and the window is the cause to fix first.
+        errors.append(f"authorization is {status or 'missing'}, not approved")
     if status == "approved" and valid_until is None:
         errors.append("approved profiles require authorization.valid_until")
     if valid_from and valid_until and valid_from >= valid_until:

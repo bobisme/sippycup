@@ -82,10 +82,34 @@ def _create_engagement(repo: Path, stdin: TextIO, stdout: TextIO, runner) -> Pat
     return repo / directory
 
 
+def _similar_engagements(path: Path) -> list[str]:
+    """Names beside a missing engagement directory that differ by a slip of the keyboard."""
+    import difflib
+
+    try:
+        names = [item.name for item in sorted(path.parent.iterdir())[:200]
+                 if item.is_dir() and not item.is_symlink() and (item / "engagement.json").is_file()]
+    except OSError:
+        return []
+    return difflib.get_close_matches(path.name, names, n=3, cutoff=0.75)
+
+
 def resolve_engagement(args, repo: Path, stdin: TextIO, stdout: TextIO, runner, interactive: bool) -> Path | None:
     if args.engagement:
         path = Path(args.engagement)
-        return path if path.is_absolute() else (Path.cwd() / path)
+        path = path if path.is_absolute() else (Path.cwd() / path)
+        if not path.exists():
+            similar = _similar_engagements(path)
+            if similar:
+                shown = Path(args.engagement).parent
+                stdout.write(f"[!!] {args.engagement} does not exist. Nothing was created.\n")
+                stdout.write("A similarly named engagement exists: "
+                             + ", ".join(str(shown / name) for name in similar) + "\n")
+                stdout.write(f"If you meant that one: ./bin/sippycup go {shown / similar[0]}\n")
+                stdout.write(f"If you really want a new engagement: ./bin/sippycup journal init "
+                             f"{args.engagement} --title TITLE --owner OWNER\n")
+                return None
+        return path
     candidates = find_engagements(repo)
     if len(candidates) == 1:
         return candidates[0]

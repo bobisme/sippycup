@@ -1023,7 +1023,7 @@ def h_scope_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
 
     d.step("Print the question sheet for the owner.", command("scope", "questions"))
     d.step(
-        "See the unredacted media address (operator copy; do not paste it into the owner report).",
+        "See the unredacted media address (operator copy). Give it to the owner in your own message when you ask; do not paste this page into the owner report, which redacts addresses that are not approved.",
         run.cmd_diagnose("--show-addresses"),
     )
     d.step("Draw the ladder to see the SDP that named the address.", run.cmd_ladder())
@@ -1058,7 +1058,7 @@ def h_signaling_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
 
     d.step("Print the question sheet for the owner.", command("scope", "questions"))
     d.step(
-        "See the unredacted address (operator copy; do not paste it into the owner report).",
+        "See the unredacted address (operator copy). Give it to the owner in your own message when you ask; do not paste this page into the owner report, which redacts addresses that are not approved.",
         run.cmd_diagnose("--show-addresses"),
     )
     d.step("Draw the ladder to see the response that carried the route.", run.cmd_ladder())

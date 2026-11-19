@@ -750,6 +750,7 @@ def dry_run_plan(
         "one_call_plan": plan,
         "softphone": _softphone_parameters(options, document, duration, limit),
         "capture_filter": scope,
+        "capture_interface": str(document.get("capture", {}).get("interface", "any")),
         "executor": "./bin/sippycup call runs these steps in one isolated container",
         "network_activity": False,
     }
@@ -2495,13 +2496,20 @@ def render_human(value: dict[str, Any]) -> str:
         lines.append(f"Guided call plan: {'READY' if value['ready'] else 'BLOCKED'}")
         for error in plan["blocking_errors"]:
             lines.append(f"BLOCK: {error}")
-        for index, step in enumerate(plan["steps"], 1):
-            marker = "NETWORK" if step["network_active"] else "OFFLINE"
-            lines.append(f"{index}. [{marker}] {step['name']}")
-            if "argv" in step:
-                lines.append(f"   {shlex.join(step['argv'])}")
-            if "instruction" in step:
-                lines.append(f"   {step['instruction']}")
+        softphone = value["softphone"]
+        host_port = softphone["destination_uri"].split("@", 1)[-1]
+        lines.append("What call does by itself (type nothing else):")
+        lines.append(
+            f"1. [NETWORK] capture on interface {value.get('capture_interface', 'any')}, "
+            "limited to the approved addresses (filter below)"
+        )
+        lines.append(f"2. [NETWORK] one SIP OPTIONS preflight to {host_port} ({softphone['transport']})")
+        lines.append(
+            f"3. [NETWORK] one call to {softphone['destination_uri']}, "
+            "then hang up (parameters below)"
+        )
+        lines.append("4. [OFFLINE] stop the capture; report, triage and expectation checks on it")
+        lines.append("5. [OFFLINE] write the evidence manifest and the run result")
         softphone = value["softphone"]
         lines.append("Softphone parameters:")
         lines.append(f"  destination:     {softphone['destination_uri']}")

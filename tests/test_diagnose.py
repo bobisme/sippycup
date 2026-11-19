@@ -321,6 +321,10 @@ class DiagnoseCallTests(unittest.TestCase):
         self.assertNotIn("203.0.113.200", json.dumps(data))
         shown = self.fx.diagnose("--show-addresses")
         self.assertIn("203.0.113.200:20000", json.dumps(shown))
+        # Wave 8: the operator must be told to give the address to the owner, not that it is secret from them.
+        steps = json.dumps(data["nextSteps"]) if "nextSteps" in data else json.dumps(data)
+        self.assertIn("Give it to the owner in your own message", steps)
+        self.assertNotIn("do not paste it into the owner report", steps)
 
     def test_authorization_lapsed_says_only_the_owner_can_renew(self) -> None:
         self.fx.call("authorization-lapsed")

@@ -21,12 +21,13 @@ import argparse
 import dataclasses
 import json
 import os
+import shlex
 import signal
 import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, MutableMapping, Sequence
 
 from sippycup.integration import create_run_directory
@@ -540,6 +541,34 @@ def _cell_text(cell: dict[str, Any]) -> str:
     return f"{cell.get('verdict')}" + (f" {seconds:.3f}s" if isinstance(seconds, (int, float)) else "")
 
 
+def _journal_command(value: dict[str, Any]) -> list[str] | None:
+    """The journal line that links the matrix record and every cell's run (one entry, all runs).
+
+    None when the matrix directory is not ``ENGAGEMENT/matrix/STAMP`` (a custom
+    ``--matrix-root``): the evidence must sit beneath the engagement directory.
+    """
+    matrix_dir = PurePosixPath(str(value.get("matrixDirectory") or ""))
+    if matrix_dir.parent.name != "matrix" or str(matrix_dir.parent.parent) in {"", "."}:
+        return None
+    engagement = matrix_dir.parent.parent
+    evidence = [f"{matrix_dir.relative_to(engagement).as_posix()}/matrix.json"]
+    for cell in value["cells"]:
+        if cell.get("status") != "run" or not cell.get("runDirectory"):
+            continue
+        run = PurePosixPath(str(cell["runDirectory"]))
+        try:
+            relative = run.relative_to(engagement).as_posix()
+        except ValueError:
+            continue
+        evidence.extend([f"{relative}/result.json", f"{relative}/evidence-manifest.json"])
+    summary = (f"Call matrix ({value['destination']}): {value['state']}, {value['callsPlaced']} of "
+               f"{value['totalCalls']} call(s) placed, {value['passed']} passed")
+    argv = ["./bin/sippycup", "journal", "add", str(engagement), "--kind", "action", "--summary", summary]
+    for item in evidence:
+        argv.extend(["--evidence", item])
+    return argv
+
+
 def render_grid(value: dict[str, Any]) -> list[str]:
     """Rows are transport x SRTP; columns are codecs; each cell a verdict and setup time."""
     codecs = value["codecs"]
@@ -612,6 +641,9 @@ def render_human(value: dict[str, Any]) -> str:
         if value.get("stopReason"):
             lines.append(f"STOPPED: {value['stopReason']}; the remaining cells were not run.")
         lines.append(f"Matrix record: {value['matrixDirectory']}/matrix.json")
+        command = _journal_command(value)
+        if command:
+            lines.append(f"Record it: {shlex.join(command)}")
     else:
         lines.append("This command sent no packets.")
     lines.append(f"Network activity: {value['networkActivity']}")

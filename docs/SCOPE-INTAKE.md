@@ -49,7 +49,9 @@ three derivatives below do. The codecs become the profile's optional
 ### Secrets
 
 The file holds credential REFERENCE names only: `credential_ref` is the opaque
-name of a secret in your approved external secret source, and
+name of a secret in your approved external secret source (spell it with
+lowercase letters, digits and `-`, starting with a letter, at most 63
+characters: `acme-password`, not `ACME_PASSWORD`), and
 `credential_delivery` records how the owner will deliver it. Any field named
 like a password, token, secret, pre-shared key, or private key, and any value
 shaped like one (inline `password=...`, PEM blocks, URL or SIP user:password

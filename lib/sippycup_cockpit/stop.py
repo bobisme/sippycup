@@ -435,6 +435,14 @@ def journal_line(report: Report, engagement: str | None) -> str:
                        "--summary", summary])
 
 
+def default_engagement(repo: Path) -> str | None:
+    """``work/NAME`` when exactly one engagement exists under work/, else None."""
+    from .probes import find_engagements
+
+    found = find_engagements(repo)
+    return f"work/{found[0].name}" if len(found) == 1 else None
+
+
 def render(report: Report, engagement: str | None) -> list[str]:
     lines = []
     if report.dry_run:
@@ -462,11 +470,17 @@ def render(report: Report, engagement: str | None) -> list[str]:
         lines.append(f"Note: {note}")
     if not report.dry_run:
         if report.silence.get("proved"):
-            lines.append("Silence: PROVED. No container of this checkout is running and no sender process is left.")
+            lines.append("Silence: PROVED. No Sippycup sender container or sender process of this checkout is left.")
+            if any("the practice target" in item for item in report.untouched):
+                lines.append("The practice target is still up: it is a server and sends nothing on its own "
+                             "(take it down with ./bin/sippycup practice-target down).")
         else:
             lines.append("Silence: NOT PROVED. Still running:")
             lines.extend(f"  - {item}" for item in report.silence.get("remaining") or ["(unknown)"])
         lines.append("Record it: " + journal_line(report, engagement))
+        if engagement is None:
+            lines.append("  (work/NAME is a placeholder: put your engagement directory there, "
+                         "or run stop again with --engagement DIR)")
     lines.append("work/ evidence is never touched. Run directories of stopped commands record state 'cancelled'.")
     return lines
 
@@ -503,6 +517,8 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
     host = host or Host(repo, _runtime())
     image = os.environ.get("SIPPYCUP_IMAGE", "localhost/sippycup:latest")
     practice_container = os.environ.get("SIPPYCUP_PRACTICE_CONTAINER", "sippycup-practice")
+    if args.engagement is None:
+        args.engagement = default_engagement(repo)
     report = stop(host, checkout=str(repo), image=image, practice_container=practice_container,
                   include_practice=args.include_practice, grace=args.grace, dry_run=args.dry_run)
     if args.format == "json":

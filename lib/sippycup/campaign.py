@@ -1897,6 +1897,13 @@ def main(argv: list[str] | None = None) -> int:
         _emit_error(args, "invalid_manifest", str(error))
         return 2
     refused, warnings = plan_window_check(plan)
+    if refused is None:
+        # The scope file beside the manifest is the live approval record: a
+        # manifest that `scope compile` left behind (it skips the campaign when
+        # the scope has an error, such as an ended window) must not be planned.
+        gate = approval_rules.WindowGate(plan, manifest_path=args.manifest).refusal()
+        if gate is not None and gate.kind != "not-open":
+            refused = f"{gate.message}. No plan was written and nothing was sent."
     if refused is not None:
         _emit_error(args, approval_rules.LAPSED, f"refusing to plan: {refused}")
         return 2

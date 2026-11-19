@@ -464,10 +464,15 @@ def build_actions(
         unavailable = built if isinstance(built, str) else None
         if unavailable and spec.instruction:
             unavailable = "manual step"
-        collected.append(_action_dict(
+        item = _action_dict(
             spec.identifier, spec.stage, spec.title, spec.why, network=spec.network, argv=argv,
             unavailable=unavailable, source="cockpit", spec=spec,
-            instruction=spec.instruction(model) if spec.instruction else None))
+            instruction=spec.instruction(model) if spec.instruction else None)
+        if spec.secret == "call" and argv and "--username" in argv and "--secret-file" not in argv:
+            # The cockpit asks for the password source itself; pasted into a shell
+            # the command is refused ("--username needs the account password").
+            item["secretHint"] = f"--secret-file {_eng(model)}/account.password"
+        collected.append(item)
     collected.extend(_profile_actions(model))
     collected.extend(_runs_actions(model))
     root = model["engagement"]["path"]

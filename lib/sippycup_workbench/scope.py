@@ -44,6 +44,10 @@ EXPECTATIONS = "expectations"
 ARTIFACTS = (PROFILE, CAMPAIGN, EXPECTATIONS)
 
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+CREDENTIAL_REF_HINT = (
+    " (write lowercase letters, digits and '-', starting with a letter, at most 63 characters, "
+    "with no '_' or upper case: for example practice-password)"
+)
 TARGET_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 HOSTNAME_PATTERN = re.compile(
     r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -292,7 +296,7 @@ account:
   required: null         # true | false
   username: null
   realm: null
-  credential_ref: null   # NAME of the secret, never the password
+  credential_ref: null   # NAME of the secret, never the password. Format: lowercase letters, digits and "-", starting with a letter (e.g. acme-password; no "_", no upper case)
   credential_delivery: null   # secret-manager | encrypted-message | in-person | phone-call | other
 destinations: []         # name, target, user, expect (echo | agent | reject)
 limits:
@@ -350,7 +354,12 @@ def create_scope(engagement: str | Path, *, name: str | None = None, platform: b
             0o600,
         )
     except FileExistsError as exc:
-        raise ScopeError(f"scope file already exists: {destination}") from exc
+        extra = (
+            "; --platform only applies to a new file: copy the platform: and application: sections "
+            "from examples/scope/platform-scope.yaml into it by hand"
+            if platform else ""
+        )
+        raise ScopeError(f"scope file already exists: {destination} (nothing was changed){extra}") from exc
     except OSError as exc:
         raise ScopeError(f"cannot create scope file: {exc}") from exc
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
@@ -510,9 +519,17 @@ def inspect(
         document = yaml.load(raw.decode("utf-8"), Loader=_UniqueLoader)
     except (UnicodeDecodeError, yaml.YAMLError) as exc:
         first = str(exc).splitlines()[0] if str(exc) else "invalid YAML"
+        place = ""
+        mark = getattr(exc, "problem_mark", None)
+        if mark is not None:
+            place = f" at line {mark.line + 1}, column {mark.column + 1}"
+            problem = getattr(exc, "problem", None)
+            context = getattr(exc, "context", None)
+            if problem:
+                first = f"{context}: {problem}" if context else str(problem)
         report.fatal = True
         report.findings.append(
-            Finding("scope.unreadable", "error", "invalid", "", f"invalid YAML: {first}")
+            Finding("scope.unreadable", "error", "invalid", "", f"invalid YAML{place}: {first}")
         )
         return report
     if not isinstance(document, dict):
@@ -611,6 +628,7 @@ class _Validator:
         pattern: re.Pattern[str] | None = None,
         enum: tuple[str, ...] | None = None,
         maximum: int = 200,
+        format_hint: str = "",
     ) -> str | None:
         value = container.get(key)
         if not present(value):
@@ -629,7 +647,8 @@ class _Validator:
             )
             return None
         if pattern is not None and pattern.fullmatch(value) is None:
-            self.add("scope.malformed", "malformed", path, f"{what} has an unsupported format", blocks)
+            self.add("scope.malformed", "malformed", path,
+                     f"{what} has an unsupported format{format_hint}", blocks)
             return None
         return value
 
@@ -985,7 +1004,7 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
                   "account required but no credential reference name is recorded", (CAMPAIGN,))
         else:
             v.string(account, "credential_ref", "account.credential_ref", "credential reference name",
-                     (CAMPAIGN,), pattern=NAME_PATTERN)
+                     (CAMPAIGN,), pattern=NAME_PATTERN, format_hint=CREDENTIAL_REF_HINT)
         v.string(account, "credential_delivery", "account.credential_delivery",
                  "how the password will be delivered", (CAMPAIGN,), enum=CREDENTIAL_DELIVERIES)
 
@@ -1173,13 +1192,22 @@ def normalized_targets(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def normalized_destinations(document: dict[str, Any]) -> list[dict[str, Any]]:
-    """Destinations with their target resolved (a lone target is implied)."""
-    targets = document.get("targets") or []
+    """Destinations with their target resolved (a lone target is implied).
+
+    An entry that lacks a name, user, or expected behavior (or is not a
+    mapping) is left out: ``scope check`` reports it, and compile must say the
+    same thing instead of failing on the missing key.
+    """
+    targets = [item for item in document.get("targets") or [] if isinstance(item, dict)]
     result = []
     for item in document.get("destinations") or []:
+        if not isinstance(item, dict):
+            continue
+        if not all(isinstance(item.get(key), str) for key in ("name", "user", "expect")):
+            continue
         target = item.get("target")
         if target is None and len(targets) == 1:
-            target = targets[0]["name"]
+            target = targets[0].get("name")
         result.append(
             {"name": item["name"], "target": target, "user": item["user"], "expect": item["expect"]}
         )
