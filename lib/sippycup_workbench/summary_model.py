@@ -451,9 +451,9 @@ def _scope_source(document: dict[str, Any], ref: str) -> Source:
     )
     for target in _list(document.get("targets")):
         target = _dict(target)
-        if _is_ip(target.get("address")):
+        if _is_ip(target.get("address")) and str(target["address"]) not in source.networks:
             source.networks.append(str(target["address"]))
-        if isinstance(target.get("tls_server_name"), str):
+        if isinstance(target.get("tls_server_name"), str) and target["tls_server_name"] not in source.server_names:
             source.server_names.append(target["tls_server_name"])
     port_range = _dict(media.get("port_range"))
     if _int(port_range.get("start")) and _int(port_range.get("end")):

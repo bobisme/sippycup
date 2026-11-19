@@ -90,6 +90,25 @@ class CockpitTextTests(unittest.TestCase):
         self.assertIn("the cockpit asks for the password source itself", text)
 
 
+class ReportAddressListTests(unittest.TestCase):
+    """Finding 17: the scope row listed 127.0.0.2 twice."""
+
+    def test_a_target_address_already_in_the_signaling_networks_is_listed_once(self) -> None:
+        from sippycup_workbench.summary_model import _scope_source
+
+        document = {
+            "signaling": {"networks": ["127.0.0.2"], "ports": [5060, 5061], "transports": ["udp", "tls"]},
+            "targets": [
+                {"name": "a", "address": "127.0.0.2", "tls_server_name": "x.test"},
+                {"name": "b", "address": "127.0.0.2", "tls_server_name": "x.test"},
+                {"name": "c", "address": "127.0.0.9"},
+            ],
+        }
+        source = _scope_source(document, "scope.yaml")
+        self.assertEqual(["127.0.0.2", "127.0.0.9"], source.networks)
+        self.assertEqual(["x.test"], source.server_names)
+
+
 class ReportGrammarTests(unittest.TestCase):
     """Finding 17: '1 run were recorded'."""
 
