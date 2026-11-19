@@ -185,6 +185,7 @@ class ReadyProfilesTests(MultiProfileCase):
         authorizes = "\n".join(result["authorizes"])
         self.assertIn("Destinations   echo, dtmf (the only --dial values accepted)", authorizes)
         self.assertIn(f"Other profile  {SECOND}: target edge-tls 127.0.0.2 port 5061/tls; destinations 7001", authorizes)
+        self.assertIn("Shared calls   max_calls=2 is one total for this profile and every other profile", authorizes)
         rendered = "\n".join(ready.render(result, None))
         self.assertIn(f"Profile {SECOND}"[:26], rendered)
 
@@ -248,6 +249,78 @@ class ReadyProfilesTests(MultiProfileCase):
         write_go(self.root, now=NOW + timedelta(seconds=1))
         self.assertTrue(ready.gate_facts(self.root, True, NOW + timedelta(seconds=2))["current"],
                         "a single-profile engagement is unchanged")
+
+
+class SharedCallCeilingTests(MultiProfileCase):
+    """bn-28vz: the scope's limits.calls is one total across its compiled profiles."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        document = yaml.safe_load(two_target_scope())
+        # Both targets approve `echo`, so one matrix can dial it through both profiles.
+        document["destinations"].append({"name": "echo-tls", "target": "edge-tls", "user": "echo", "expect": "echo"})
+        document["media"]["codecs"] = ["PCMU", "PCMA"]
+        self.compile(yaml.safe_dump(document, sort_keys=False), force=True)
+
+    def plan(self, codecs: tuple[str, ...]) -> dict:
+        from sippycup_workbench import matrix
+
+        options = matrix.MatrixOptions(
+            profiles=(self.root / "target-profile.yaml", self.root / SECOND), destination="echo", codecs=codecs,
+        )
+        return matrix.build_plan(options, now=NOW, work_root=self.repo / "work")
+
+    def test_a_grid_within_the_scope_limit_is_ready(self) -> None:
+        for name in ("target-profile.yaml", SECOND):
+            self.assertEqual(load_profile(self.root / name)["limits"]["max_calls"], 2)
+        value = self.plan(("PCMU",))
+        self.assertTrue(value["ready"], value["blockingErrors"])
+        self.assertEqual(value["sharedCeilings"][0]["calls"], 2)
+        self.assertEqual(value["sharedCeilings"][0]["max_calls"], 2)
+
+    def test_siblings_cannot_each_use_the_whole_limit(self) -> None:
+        from sippycup_workbench import matrix
+
+        value = self.plan(("PCMU", "PCMA"))
+        self.assertEqual(value["totalCalls"], 4)
+        self.assertFalse(value["ready"])
+        # Each profile alone stays within max_calls 2; only the shared count refuses it.
+        self.assertFalse(any("through this profile" in item for item in value["blockingErrors"]))
+        text = " ".join(value["blockingErrors"])
+        self.assertIn("the matrix places 4 calls under approval", text)
+        self.assertIn("more than its limits.max_calls 2", text)
+        self.assertIn("2 through work/eng/target-profile.yaml, 2 through work/eng/" + SECOND, text)
+        self.assertIn("limits.calls in scope.yaml", text)
+        rendered = matrix.render_human(value)
+        self.assertIn("Call matrix plan: BLOCKED", rendered)
+        self.assertIn("This command sent no packets.", rendered)
+
+    def test_run_refuses_before_any_call(self) -> None:
+        from sippycup_workbench import matrix
+
+        placed: list = []
+        deps = matrix.MatrixDependencies(
+            execute=lambda *args: placed.append(args) or (0, {}), now=lambda: NOW,
+            work_root=self.repo / "work", install_signal_handlers=False,
+        )
+        options = matrix.MatrixOptions(
+            profiles=(self.root / "target-profile.yaml", self.root / SECOND), destination="echo",
+            codecs=("PCMU", "PCMA"),
+        )
+        code, value = matrix.run(options, deps)
+        self.assertEqual(code, matrix.EXIT_REFUSED)
+        self.assertEqual(value["state"], "blocked")
+        self.assertEqual(placed, [])
+
+    def test_a_single_profile_is_counted_alone(self) -> None:
+        from sippycup_workbench import matrix
+
+        options = matrix.MatrixOptions(
+            profiles=(self.root / "target-profile.yaml",), destination="echo", codecs=("PCMU", "PCMA"),
+        )
+        value = matrix.build_plan(options, now=NOW, work_root=self.repo / "work")
+        self.assertTrue(value["ready"], value["blockingErrors"])
+        self.assertNotIn("sharedCeilings", value)
 
 
 class DiagnoseDestinationTests(unittest.TestCase):

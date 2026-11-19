@@ -753,6 +753,10 @@ def authorizes(model: dict[str, Any], document: dict[str, Any] | None, zone: Any
     transports = sorted({target.get("transport")} | set((plan.get("authorization") or {}).get("transports") or []))
     lines.append(f"Transports     {', '.join(str(item) for item in transports if item)}")
     lines.append("Limits         " + ", ".join(f"{key}={value}" for key, value in sorted(limits.items())))
+    if other_profiles(model):
+        lines.append(f"Shared calls   max_calls={limits.get('max_calls')} is one total for this profile and "
+                     "every other profile above (one approval), not a ceiling per profile; a matrix "
+                     "over several of them counts their calls together")
     if plan.get("hardMaxima"):
         lines.append("Campaign max   " + ", ".join(f"{key}={value}" for key, value in sorted(plan["hardMaxima"].items())))
     checks = model["profile"].get("securityChecks") or []

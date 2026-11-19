@@ -271,7 +271,19 @@ def build_plan(
             )["approved_destinations"],
             "srtp_approved": (document.get("features") or {}).get("srtp") is True,
         }
-    return {
+    shared = _shared_ceilings(transports, by_transport, per_profile, shown)
+    for item in shared:
+        if item["calls"] > item["max_calls"]:
+            counted = ", ".join(f"{calls} through {path}" for path, calls in item["profiles"].items())
+            blocking.append(
+                f"the matrix places {item['calls']} calls under approval {item['approval_id']}, "
+                f"more than its limits.max_calls {item['max_calls']} ({counted}); the profiles of one "
+                "approval (one scope) share one call ceiling, it is not a ceiling per profile; "
+                f"narrow --transports, --codecs, or --srtp to {item['max_calls']} calls or fewer in "
+                "total, or ask the owner to approve more calls (limits.calls in scope.yaml) and run "
+                "scope compile"
+            )
+    value: dict[str, Any] = {
         "apiVersion": MATRIX_VERSION,
         "state": "planned",
         "ready": not blocking,
@@ -289,6 +301,53 @@ def build_plan(
         "blockingErrors": blocking,
         "networkActivity": "none",
     }
+    if shared:
+        value["sharedCeilings"] = shared
+    return value
+
+
+def _shared_ceilings(
+    transports: Sequence[str],
+    by_transport: dict[str, dict[str, Any]],
+    per_profile: dict[str, int],
+    shown: Callable[[Path], str],
+) -> list[dict[str, Any]]:
+    """The call ceiling of every approval that two or more of the given profiles share (bn-28vz).
+
+    ``scope compile`` writes one profile per target, each with the same
+    ``authorization.approval_id`` and the scope's ``limits.calls`` as
+    ``limits.max_calls``. That number is the owner's total, so the calls placed
+    through all of those profiles are counted together against the smallest
+    ``max_calls`` among them. A profile without an approval id, or the only
+    profile of its approval, is counted alone, as before.
+    """
+    groups: dict[str, list[str]] = {}
+    for transport in transports:
+        document = by_transport[transport]["document"]
+        approval = (document.get("authorization") or {}).get("approval_id")
+        if isinstance(approval, str) and approval.strip():
+            groups.setdefault(approval, []).append(transport)
+    shared: list[dict[str, Any]] = []
+    for approval, members in groups.items():
+        if len(members) < 2:
+            continue
+        ceilings = [
+            limits["max_calls"]
+            for limits in (by_transport[item]["document"].get("limits") or {} for item in members)
+            if isinstance(limits, dict) and type(limits.get("max_calls")) is int
+        ]
+        if not ceilings:
+            continue
+        counted = {shown(by_transport[item]["path"]): per_profile[shown(by_transport[item]["path"])] for item in members}
+        shared.append(
+            {
+                "approval_id": approval,
+                "max_calls": min(ceilings),
+                "calls": sum(counted.values()),
+                "profiles": counted,
+            }
+        )
+    return shared
 
 
 def _profile_transports(paths: Sequence[Path]) -> list[dict[str, str]]:
@@ -524,6 +583,11 @@ def render_human(value: dict[str, Any]) -> str:
                 f"which destination is dialed; check {value['destination']} against the owner's "
                 "written approval yourself"
             )
+    for item in value.get("sharedCeilings") or ():
+        lines.append(
+            f"  Shared ceiling: approval {item['approval_id']} allows {item['max_calls']} call(s) in "
+            f"total across {', '.join(item['profiles'])}; this grid places {item['calls']}."
+        )
     lines.append(
         f"  Each cell is one guided call ({value['callSeconds']}s, offering only its codec), "
         f"strictly in order, at least {value['spacingSeconds']:.1f}s apart."

@@ -58,11 +58,35 @@ TCP is allowed when approved, and the plan prints the
 
 The plan is blocked (exit 2, nothing sent) when the grid has more calls than
 `--max-calls` (default 6, at most 48), when it places more calls through a
-profile than that profile's `limits.max_calls`, or when any profile fails the
+profile than that profile's `limits.max_calls`, when the profiles that share
+one `authorization.approval_id` (the profiles `scope compile` writes for the
+targets of one scope) together get more calls than the smallest
+`limits.max_calls` among them, or when any profile fails the
 guided call's gate (approval, validity window, a literal approved
 `target.host`, and an authorization that lasts for the whole planned grid).
 Calls start at least 1 s apart, and further apart when a profile's
 `limits.max_calls_per_second` asks for it.
+
+The scope's `limits.calls` is the owner's total, and `scope compile` copies it
+into every target profile as `limits.max_calls`. It is not a ceiling per
+profile: a grid over the UDP and TLS profiles of a scope with `calls: 6` may
+place 6 calls in total, not 6 through each. The plan prints a
+`Shared ceiling:` line for such profiles, and a larger grid is refused, for
+example with `limits.calls: 3`:
+
+```text
+Call matrix plan: BLOCKED - 4 call(s) to echo (--max-calls 6)
+BLOCK: the matrix places 4 calls under approval QUAD-APPROVAL-7Q2X, more than its limits.max_calls 3 (2 through work/eng/target-profile.yaml, 2 through work/eng/target-profile-edge-tls.yaml); the profiles of one approval (one scope) share one call ceiling, it is not a ceiling per profile; narrow --transports, --codecs, or --srtp to 3 calls or fewer in total, or ask the owner to approve more calls (limits.calls in scope.yaml) and run scope compile
+  udp: work/eng/target-profile.yaml (2 call(s); limits.max_calls 3, approved codecs PCMU, PCMA, SRTP not approved)
+  tls: work/eng/target-profile-edge-tls.yaml (2 call(s); limits.max_calls 3, approved codecs PCMU, PCMA, SRTP not approved)
+  Shared ceiling: approval QUAD-APPROVAL-7Q2X allows 3 call(s) in total across work/eng/target-profile.yaml, work/eng/target-profile-edge-tls.yaml; this grid places 4.
+  ...
+This command sent no packets.
+Network activity: none
+```
+
+The count covers one `matrix run`. Separate `call` and `matrix run`
+invocations are not added up (see finding 6 in `SAFETY-AUDIT.md`).
 
 ## Running
 
@@ -123,7 +147,10 @@ uses hand-made copies of the one-call profiles.
 
 The practice Asterisk endpoints allow only PCMU and PCMA. A run over copies
 of the practice profiles with `limits.max_calls: 6`, `features.srtp: true`,
-and `media.codecs: [PCMU, PCMA, G722]`:
+and `media.codecs: [PCMU, PCMA, G722]` (recorded before bn-28vz; both copies
+keep the practice approval id, so the same grid now needs
+`limits.max_calls: 12` in each, and the output also has a `Shared ceiling:`
+line):
 
 ```text
 $ ./bin/sippycup --practice matrix run work/codec-matrix/udp.yaml work/codec-matrix/tls.yaml \
