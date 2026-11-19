@@ -6,14 +6,13 @@
 #   ./bin/sippycup scope init work/acme
 #   cp examples/scope/practice-scope.yaml work/acme/scope.yaml
 #   chmod 600 work/acme/scope.yaml
-# then edit exactly three things:
-#   1. `name` below, if you want another name (lowercase letters, digits, "-").
-#   2. `valid_from` and `valid_until`: the window must contain the current time.
-#      Use UTC with a trailing Z. `date -u +%Y-%m-%dT%H:%M:%SZ` prints now;
-#      `date -u -d '+4 hours' +%Y-%m-%dT%H:%M:%SZ` prints a window end.
-#      (The file ships with a window in the past on purpose, so that
-#      `scope check` stops you until you set it.)
-#   3. Nothing else is needed for the UDP profile.
+# then edit the window (the only required edit):
+#   `valid_from` and `valid_until` below must contain the current time.
+#   Use UTC with a trailing Z. `date -u +%Y-%m-%dT%H:%M:%SZ` prints now;
+#   `date -u -d '+4 hours' +%Y-%m-%dT%H:%M:%SZ` prints a window end.
+#   (The file ships with a window in the past on purpose, so that
+#   `scope check` stops you until you set it.)
+# You may also change `name` (lowercase letters, digits and "-").
 # Then `./bin/sippycup scope check work/acme` must print
 # `Scope: COMPLETE and CONSISTENT`.
 #

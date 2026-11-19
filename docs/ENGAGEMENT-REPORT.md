@@ -29,6 +29,10 @@ files:
 It never replaces an earlier report silently. When `DIR/report/` already
 holds a report, the new one goes to `DIR/report-STAMP/` (the generation time,
 for example `report-20261118T040000Z`, with `-2`, `-3` appended if needed).
+`DIR/report/` then holds an older report. Every `summary` prints
+`Send to the owner: PATH` for the report it just wrote and, when others
+exist, `EARLIER report(s), do not send: ...`; send the path from your last
+`summary`. Nothing in the earlier directories is changed or deleted.
 `--force` replaces the report files in the existing directory instead. An
 explicit `--output PATH` must be a new or empty directory unless you pass
 `--force`. Files are written to a private staging directory and renamed into

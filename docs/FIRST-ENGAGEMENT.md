@@ -23,8 +23,11 @@ make build
 ./bin/sippycup doctor
 ./bin/sippycup journal init work/acme --title "ACME voice test" --owner "ACME voice team"
 ./bin/sippycup scope init work/acme
-./bin/sippycup scope questions work/acme > work/acme/questions-for-owner.md
+(umask 077; ./bin/sippycup scope questions work/acme > work/acme/questions-for-owner.md)
 ```
+
+The `umask` keeps the file private like the other engagement files (a plain
+`>` creates it readable by everyone on the machine).
 
 - When it is right: `doctor` prints `Doctor: ready`. `scope init` prints
   `Created pending scope file: work/acme/scope.yaml` and
@@ -34,8 +37,34 @@ make build
   the destinations, the account, and, for the proxy shape, the media network
   and the media port range.
 
-On the practice target, `./bin/sippycup practice-target info` prints the same
-facts that an owner would give you. Fill `scope.yaml` by hand from them.
+### Practice target: the scope file is already written for you
+
+`./bin/sippycup practice-target info` prints the address, ports, account and
+realm, but not a window, limits, contact or the other answers an owner would
+give. For the practice target, copy the worked example over the pending
+`scope.yaml` that `scope init` made, and set the window (the `date -u -d`
+form below is GNU `date`, as on this Linux host):
+
+```sh
+./bin/sippycup practice-target up
+cp examples/scope/practice-scope.yaml work/acme/scope.yaml
+chmod 600 work/acme/scope.yaml
+date -u +%Y-%m-%dT%H:%M:%SZ                    # now: paste into valid_from
+date -u -d '+4 hours' +%Y-%m-%dT%H:%M:%SZ      # paste into valid_until
+```
+
+Edit `valid_from` and `valid_until` in `work/acme/scope.yaml` (UTC, trailing
+`Z`; the window must contain the current time). The file ships with a window
+in the past on purpose: until you set it, `scope check` stops with
+`scope.window_expired`. Nothing else needs to change. Its `credential_ref` is
+`practice-password`.
+
+**The `credential_ref` format:** lowercase letters, digits and `-`, starting
+with a letter, at most 63 characters. `PRACTICE_PASSWORD`, `practice_password`
+and `practice.password` are refused with `credential reference name has an
+unsupported format`. It is only a name for the password (it is the name you
+pass to `campaign run --secret-env`); the password itself never goes in
+`scope.yaml`.
 
 ### When the owner wants the whole platform tested
 
@@ -77,6 +106,10 @@ Write the owner's answers into `work/acme/scope.yaml`, then:
 ./bin/sippycup rehearse work/acme/target-profile.yaml
 ```
 
+- If `scope check` or `scope compile` prints an `ERROR`, it names the field
+  (for example `[destinations[0].expect]`) and, for a YAML mistake, the line
+  and column. Fix that line and run `scope check` again. `scope compile`
+  reports exactly what `scope check` reports; it never prints a traceback.
 - When it is right, the output contains:
   - `Scope: COMPLETE and CONSISTENT`;
   - after compile, the derived `target-profile.yaml`, `campaign.yaml`, and
@@ -139,8 +172,30 @@ campaign, put it in an environment variable:
 IFS= read -r ACME_PASSWORD < work/acme/account.password; export ACME_PASSWORD
 ```
 
-and pass `--secret-env REF=ACME_PASSWORD`. REF is the credential reference in
-`campaign.yaml`, and `campaign plan` prints it.
+and pass `--secret-env practice-password=ACME_PASSWORD`. The part before `=`
+is the credential reference: the `credential_ref` from `scope.yaml`
+(`practice-password` in the practice example; lowercase, see section 1), and
+`campaign plan` prints it. The part after `=` is the name of the environment
+variable.
+
+**On the practice target you do not type a password.** `practice-target up`
+makes a random one and writes it to `work/practice/account.password`; it is
+never printed. Copy it into your engagement directory instead of typing:
+
+```sh
+(umask 077; cp work/practice/account.password work/acme/account.password)
+ls -l work/acme/account.password      # expect -rw-------
+```
+
+`ready work/acme` with no password option uses `work/acme/account.password`
+when that file exists. `call` and `ready` read the file; neither prints it.
+
+**After `practice-target down` and `up` the copy is stale.** `up` makes a new
+password every time and `down` deletes the old one. Copy it again (the same
+`cp`) before the next `call`. A stale copy gives
+`Guided call: REGISTRATION-FAILED` (401). Copy the password again and place
+the call once more. This applies to the practice target only: on a real
+owner's account `REGISTRATION-FAILED` means stop (see "Stop conditions").
 
 ## 3. First traffic: preflight, then one call (LIVE)
 
@@ -159,9 +214,22 @@ production system, and lists the open questions. Read it and decide with the
 owner; it does not turn a GO into a NO-GO.
 
 Continue only on `VERDICT: GO`. On `NO-GO`, each blocking line has a `fix:`
-line; do it and run `ready` again. Run the `Journal:` line it prints. The
+line; do it and run `ready` again. A `[WARN] Credentials` line means no
+password source was given, so none was checked (the summary block says so too);
+give `--secret-file` or put the file at `work/acme/account.password` and run
+`ready` again. Run the `Journal:` line it prints. The
 cockpit refuses LIVE actions until a GO exists for the current profile. See
 [COCKPIT.md](COCKPIT.md).
+
+When the approval window has ended or has not opened yet, `ready`, `rehearse`
+and `call` say so first (`EXPIRED`, `not open yet`). Fix the window in
+`scope.yaml`: ask the owner for a new written window (see "Stop conditions"),
+record it, and run `scope compile`.
+
+The "last 4 characters of the approval id" prompt appears only in the cockpit
+(`./bin/sippycup go`), before it starts a LIVE action. `call`, `matrix run`
+and `campaign run` typed in a shell do not ask: the gates are the profile,
+its window, and `--dial` (see "Approved destinations").
 
 With more than one target, `ready` has one `Profile target-profile-NAME`
 line for each other profile (present, current against `scope.yaml`, passes
@@ -200,9 +268,13 @@ Record it: ./bin/sippycup journal add work/acme --kind action --summary '...' --
 ```
 
 Run the `Record it:` line exactly as printed. A call takes about 15 s and
-prints nothing until it ends.
+prints nothing until it ends. `call --dry-run` lists what `call` does by
+itself (capture, one OPTIONS preflight, one call, offline report); it is not a
+procedure for you to follow by hand.
 
-When a run does not pass, it prints a `Diagnose:` line. Run it:
+When a run does not pass, it prints a `Diagnose:` line. Run it. In the
+example, `RUN` is a placeholder for the run directory name that the call
+printed (a name like `20261119T203804Z-practice-ab12cd34`):
 
 ```sh
 ./bin/sippycup diagnose work/acme/calls/RUN
@@ -283,8 +355,8 @@ Add this to the scope: `security_checks.approved` (ids from
 ## 7. Look at the evidence (offline)
 
 ```sh
-./bin/sippycup ladder work/acme/calls/RUN
-./bin/sippycup explain call.VERDICT
+./bin/sippycup ladder work/acme/calls/RUN       # RUN: a run directory name under calls/
+./bin/sippycup explain call.VERDICT             # VERDICT: a verdict from a run, for example call.registration-failed
 ./bin/sippycup go work/acme            # cockpit: every unrecorded run is an action
 ./bin/sippycup journal verify work/acme
 ```
@@ -306,15 +378,23 @@ ID=$(podman image inspect --format '{{.Id}}' localhost/sippycup:latest)
 ```
 
 - When it is right:
-  - `summary` prints `Engagement report: work/acme/report`,
+  - `summary` prints `Engagement report: DIRECTORY`, a
+    `Send to the owner: DIRECTORY/engagement-report.html` line,
     `Integrity exceptions: 0`, and a journal entry. `--forbid-file` makes
     sure that the password is in no output.
+  - The first report goes to `work/acme/report`. Every later `summary` goes to
+    a new `work/acme/report-STAMP` and never replaces an earlier report, so
+    `report/` then holds an OLDER report. When an older one exists, `summary`
+    prints `EARLIER report(s), do not send: ...`. Send only the directory on
+    the `Engagement report:` line of your last `summary`.
   - `pack verify` prints `- Verdict: **pass**`.
 - `export-ci` refuses while privacy findings are open. Read them with
   `evidence lint` (it prints JSON). If you accept them, add
   `--allow-privacy-findings`.
 - **Send to the owner:**
-  - `work/acme/report/engagement-report.html` (or `.md`);
+  - the `Send to the owner:` file that your last `summary` printed (the
+    newest `report` or `report-STAMP` directory; `engagement-report.html`, or
+    `.md`);
   - the `.tar` packs.
 
   Make one pack for each run that you hand over. Do not send capture files
@@ -365,15 +445,15 @@ Each row is an error or verdict seen in this walk-through:
 
 | You see | Cause | Do |
 |---|---|---|
-| `Guided call: REGISTRATION-FAILED` (401) | wrong password | Stop. Check the password file with the owner. Do not retry. |
+| `Guided call: REGISTRATION-FAILED` (401) | wrong password. On the practice target: the copy in your engagement directory is from before the last `practice-target up` | Stop. Check the password file with the owner. Do not retry. Practice only: copy `work/practice/account.password` again (section 2). |
 | `Guided call: BLOCKED` / `BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf)` (exit 2) | typo in `--dial` (`ecoh`), or a destination that is not in the scope | Nothing was sent. Use a destination from the `approved:` list. For a new one, ask the owner, add it to `destinations` in `scope.yaml`, and run `scope compile`. |
 | `Guided call: CALL-NOT-FOUND` (404) | the destination is in the scope, but the platform has no such user; or the profile has no destination list (`rehearse` prints `Destinations: NOT RESTRICTED`) and `--dial` has a typo | Run the `Diagnose:` line: it says whether the destination was on the approved list. Ask the owner for the exact destination. Do not guess. |
 | `Guided call: PREFLIGHT-FAILED` ... `Hostname mismatch ... [TLS UNVERIFIED]` | wrong `tls_server_name` | Use the certificate name that the owner gave. |
 | `PREFLIGHT-FAILED` ... `unable to get local issuer certificate` | wrong or stale `tls_ca_file` | Get the owner's CA again. |
-| `PREFLIGHT-FAILED` `no_response: timeout`, target on 127.x | `--practice` is missing | Add `--practice` (the call prints this hint). |
+| `PREFLIGHT-FAILED` `no_response: timeout`, target on 127.x | `--practice` is missing | Add `--practice` (the call prints this hint). The failed run stays in the report: record it as a mistake in the journal. |
 | `Guided call: MEDIA-OUTSIDE-SCOPE` (exit 1) | media address (or network) not in the scope | Stop. Ask the owner to approve the media address. |
 | `Guided call: BLOCKED` / `BLOCK: authorization has expired (valid_until ...)` | window ended | Ask the owner for a new written window, record it, and run `scope compile`. |
-| `campaign: error: refusing to plan: the approval window has ended` / `refusing to run: ...` (exit 2) | window ended, not open yet, too short for the first step, or the approval in `scope.yaml` was revoked or changed | Nothing was sent. Ask the owner for a new written window, record it, run `scope compile`, then `campaign plan` again. |
+| `campaign: error: refusing to plan: the approval window has ended` / `refusing to plan: the approval in the scope file beside the manifest ... differs` / `refusing to run: ...` (exit 2) | window ended, not open yet, too short for the first step, or the approval in `scope.yaml` was revoked or changed since `campaign.yaml` was written (`scope compile` leaves the old `campaign.yaml` when the scope has an error) | Nothing was sent. Ask the owner for a new written window, record it, run `scope compile`, then `campaign plan` again. |
 | `Campaign: AUTHORIZATION_LAPSED` (exit 1) and `Safety stop on our side` | the window ended (or the approval was revoked) between two steps | The completed steps are valid. Ask the owner for a new window before you send the rest. |
 | `campaign: WARNING: this campaign plan is not bound to an approval window` | the manifest has no `authorization.approval` (hand-written or old) | Generate the manifest with `scope compile` and plan again. |
 | `ERROR scope.window_not_started` / `scope.window_expired` | window is in the future or in the past | Same: wait, or ask for a new window. |

@@ -216,6 +216,12 @@ container's tmpfs and send from `127.0.0.3` can impersonate the proxy.
 locations of the password, CA, profile, campaign, expectations, and softphone
 files. It never prints the password. `down` removes the container and deletes
 the password and the softphone configurations; captures and reports remain.
+The next `up` makes a new password (checked: the file differs after
+`down` then `up`), so a copy of it in an engagement directory is stale after
+that and gives `REGISTRATION-FAILED`; copy `work/practice/account.password`
+again. To rehearse the engagement path (`scope check`, `scope compile`,
+`ready`, `call`) against the practice target with your own `scope.yaml`, start
+from `examples/scope/practice-scope.yaml` (`FIRST-ENGAGEMENT.md`, section 0).
 
 `SIPPYCUP_PRACTICE_IMAGE` (default `localhost/sippycup-practice:latest`) and
 `SIPPYCUP_PRACTICE_CONTAINER` (default `sippycup-practice`) override the image

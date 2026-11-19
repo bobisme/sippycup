@@ -140,5 +140,21 @@ class PracticeExampleTests(ScopeTestCase):
         self.assertEqual(document["account"]["credential_ref"], "practice-password")
 
 
+class DocConsistencyTests(unittest.TestCase):
+    def test_first_engagement_points_at_the_example_and_uses_valid_references(self) -> None:
+        import re
+
+        from sippycup_workbench.scope import NAME_PATTERN
+
+        text = (ROOT / "docs" / "FIRST-ENGAGEMENT.md").read_text()
+        self.assertIn("examples/scope/practice-scope.yaml", text)
+        references = re.findall(r"--secret-env (\S+?)=", text)
+        self.assertTrue(references)
+        for reference in references:
+            self.assertRegex(reference, NAME_PATTERN, f"--secret-env {reference}= is not a valid credential_ref")
+        self.assertIn("work/practice/account.password", text)
+        self.assertIn("practice-target down", text)
+
+
 if __name__ == "__main__":
     unittest.main()
