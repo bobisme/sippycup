@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import hashlib
 from collections import deque
+import ipaddress
 import os
 import re
 import secrets as random
 import shutil
 import signal
+import socket
 import struct
 import subprocess
 import threading
@@ -559,6 +561,36 @@ def _used_destinations(plan: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _local_source_address(address: str, port: int) -> str | None:
+    """The kernel's source address toward ADDRESS; UDP connect sends nothing.
+
+    Campaign runners do not bind a source address, so this is the address
+    every step and preflight to that destination sends from (the softphone
+    runner advertises the same lookup in its Contact and SDP).
+    """
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect((address, port))
+            return str(ipaddress.ip_address(probe.getsockname()[0]))
+    except (OSError, ValueError):
+        return None
+
+
+def local_source_addresses(plan: dict[str, Any]) -> list[str]:
+    """This run's own source addresses toward its approved destinations (bn-2yib).
+
+    Recorded in result.json so the evidence privacy lint can tell the
+    assessor's own address from an unexpected party in the capture.
+    """
+    found: list[str] = []
+    for destination in _used_destinations(plan):
+        local = _local_source_address(destination["address"], destination["port"])
+        if local is not None and local not in found:
+            found.append(local)
+    return found
+
+
 def sip_options_preflight(
     destination: dict[str, Any],
     *,
@@ -735,6 +767,7 @@ def _execute_campaign(
     name = plan["metadata"]["name"]
     run_dir = create_run_directory(run_root, name)
     started = _utc()
+    local_addresses = local_source_addresses(plan)
     manifest_copy = run_dir / "reviewed-manifest.yaml"
     manifest_copy.write_bytes(manifest_bytes)
     manifest_copy.chmod(0o600)
@@ -1132,6 +1165,9 @@ def _execute_campaign(
                 # The approval window this run was held to (bound: false for a
                 # plan without one) and, when it stopped the run, why.
                 "approvalWindow": gate.facts(),
+                # The run's own source addresses (route lookup, nothing sent),
+                # so the privacy lint does not report them as unexpected.
+                "localAddresses": local_addresses,
             },
         )
         _write_json(

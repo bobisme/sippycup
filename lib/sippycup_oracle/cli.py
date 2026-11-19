@@ -29,8 +29,8 @@ from .media import (
     Applicability,
     AssertionResult,
     MediaExpectations,
+    attribute_media_frames,
     evaluate_invariants,
-    partition_media_frames,
 )
 from .records import (
     RESULT_SCHEMA_VERSION,
@@ -247,9 +247,19 @@ def build_result_document(
     ]
     if len(dialogs) > MAX_ANALYSIS_DIALOGS:
         raise ValueError("capture exceeds the analysis dialog limit")
-    assigned_media, assignment_ambiguity = partition_media_frames(
-        capture.frames, tuple(dialogs)
+    # Media is attributed across every visible dialog, so a selected call
+    # never receives another visible call's media and that media is not
+    # reported as unattributed either.
+    all_assigned, all_ambiguity, unattributed = attribute_media_frames(
+        capture.frames, reconstruction.dialogs
     )
+    selected = [
+        index
+        for index, dialog in enumerate(reconstruction.dialogs)
+        if dialog_selector is None or dialog.key.call_id == dialog_selector
+    ]
+    assigned_media = [all_assigned[index] for index in selected]
+    assignment_ambiguity = [all_ambiguity[index] for index in selected]
     assertions: list[dict[str, Any]] = []
     dialog_json: list[dict[str, Any]] = []
     stream_json: list[dict[str, Any]] = []
@@ -332,6 +342,24 @@ def build_result_document(
                     ],
                 }
             )
+    if dialogs and unattributed:
+        # bn-2sfa: media no visible dialog can own (typically a call whose
+        # signaling was TLS-encrypted) is reported, never judged against the
+        # nearest cleartext dialog and never counted as a failure.
+        orphan = AssertionResult(
+            "media.attribution",
+            Verdict.UNKNOWN,
+            Applicability.APPLICABLE,
+            f"{len(unattributed)} RTP/RTCP packets could not be attributed to any SIP "
+            "dialog visible in the capture (for example a call whose signaling was "
+            "TLS-encrypted), so they were not judged; the dialogs above were judged "
+            "on their own media only",
+            unattributed,
+            Unknown(UnknownReason.AMBIGUOUS, "media-to-dialog attribution"),
+        )
+        item = _assertion_json(_apply_unknown_policy(orphan, on_unknown), 0)
+        item["id"] = "capture.media.attribution"
+        assertions.append(item)
     counts = {
         name: sum(item["verdict"] == name for item in assertions)
         for name in ("pass", "fail", "unknown")

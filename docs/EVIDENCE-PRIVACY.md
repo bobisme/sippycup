@@ -44,8 +44,11 @@ clean or explicitly overridden content, 1 for blocked high-risk findings, and
 
 - SIP `Authorization` and `Proxy-Authorization` material;
 - Call-IDs, SIP users, and international-format phone identifiers;
-- literal addresses outside the plan allowlist and any explicit
-  `--allow-network` additions;
+- literal addresses outside the plan allowlist, the run's own recorded
+  source addresses (`localAddresses` in a campaign `result.json`,
+  `localAddress` in a guided call's), and any explicit `--allow-network`
+  additions; an address seen only in the capture is never assumed to be
+  yours;
 - decoded audio by extension or file signature;
 - captures above `--max-capture-bytes`;
 - captures or large artifacts that could not be completely inspected.

@@ -182,6 +182,27 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(run_dir.stat().st_uid, os.getuid())
         self.assertEqual(run_dir.stat().st_mode & 0o777, 0o700)
 
+    def test_result_records_the_runs_own_source_address(self):
+        # bn-2yib: the evidence lint reads this record to tell the assessor's
+        # own address from an unexpected party; it is the kernel's route
+        # lookup toward each approved destination, not read from the capture.
+        with mock.patch(
+            "sippycup.integration._local_source_address", return_value="192.0.2.50"
+        ) as lookup:
+            result, run_dir, _order = self.execute(
+                one_call_plan(), preflight=lambda _d: (True, "SIP/2.0 200 OK")
+            )
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual(lookup.call_args.args, ("127.0.0.1", 5060))
+        recorded = json.loads((run_dir / "result.json").read_text())
+        self.assertEqual(recorded["localAddresses"], ["192.0.2.50"])
+        _result, run_dir, _order = self.execute(
+            one_call_plan(), preflight=lambda _d: (True, "SIP/2.0 200 OK")
+        )
+        self.assertEqual(
+            json.loads((run_dir / "result.json").read_text())["localAddresses"], ["127.0.0.1"]
+        )
+
     def test_preflight_records_status_class_and_surfaces_server_errors(self):
         for detail, klass, warning in (
             ("SIP/2.0 200 OK", "2xx", None),
