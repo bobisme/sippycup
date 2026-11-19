@@ -75,5 +75,65 @@ class ApprovalPromptTests(ReadyTestCase):
         self.assertIn("call, matrix run and campaign run typed in a shell do not ask", text)
 
 
+class WindowFirstTests(ReadyTestCase):
+    """Finding 7: a window that is over or not open leads, and the unrelated advice is not printed."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from datetime import timedelta
+
+        from cockpit_support import make_engagement, scope_text, write_scope
+        from sippycup_workbench.scope_derive import compile_scope
+
+        self.timedelta = timedelta
+        self.make_engagement, self.scope_text = make_engagement, scope_text
+        self.write_scope, self.compile_scope = write_scope, compile_scope
+
+    def pending_engagement(self, valid_from, valid_until, now, name="late"):
+        root = self.make_engagement(self.repo, name)
+        self.write_scope(root, self.scope_text(valid_from=valid_from, valid_until=valid_until, account=True))
+        self.compile_scope(root, now=now)  # exit 1: the profile is written as pending
+        return root
+
+    def run_ready(self, root, now):
+        from test_ready import FakeHost
+
+        host = FakeHost(self.repo, now=now)
+        return ready.assess(root, host=host, image="localhost/sippycup:test")
+
+    def assert_window_leads(self, result, root, word, profile_word):
+        window = next(c for c in result["checks"] if c["id"] == "window")
+        self.assertEqual("no-go", window["status"])
+        self.assertIn(word, "\n".join(window["lines"]))
+        self.assertNotIn("record the owner's written approval", window["fix"])
+        self.assertNotIn("record the owner's written approval", "\n".join(window["lines"]))
+        self.assertNotIn("is pending, not approved", "\n".join(window["lines"]))
+        scope = next(c for c in result["checks"] if c["id"] == "scope")
+        self.assertNotIn("unanswered question", "\n".join(scope["lines"]))
+        profile = next(c for c in result["checks"] if c["id"] == "profile")
+        self.assertIn(profile_word, profile["lines"][0], profile["lines"])
+
+    def test_expired_window_leads(self) -> None:
+        now = NOW + self.timedelta(hours=5)
+        root = self.pending_engagement(NOW - self.timedelta(hours=1), NOW + self.timedelta(hours=3), now)
+        self.assert_window_leads(self.run_ready(root, now), root, "EXPIRED", "has expired")
+
+    def test_future_window_leads(self) -> None:
+        root = self.pending_engagement(NOW + self.timedelta(hours=1), NOW + self.timedelta(hours=4), NOW)
+        self.assert_window_leads(self.run_ready(root, NOW), root, "not open yet", "not valid yet")
+
+
+    def test_rehearse_names_the_window_before_the_pending_status(self) -> None:
+        from sippycup_workbench.profile import load_profile, rehearse
+
+        now = NOW + self.timedelta(hours=5)
+        root = self.pending_engagement(NOW - self.timedelta(hours=1), NOW + self.timedelta(hours=3), now)
+        errors = rehearse(load_profile(root / "target-profile.yaml"), now=now).errors
+        self.assertIn("expired", errors[0])
+        future = self.pending_engagement(NOW + self.timedelta(hours=1), NOW + self.timedelta(hours=4), NOW, "early")
+        errors = rehearse(load_profile(future / "target-profile.yaml"), now=NOW).errors
+        self.assertIn("not valid yet", errors[0])
+
+
 if __name__ == "__main__":
     unittest.main()

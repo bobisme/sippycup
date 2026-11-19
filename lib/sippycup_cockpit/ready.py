@@ -188,8 +188,12 @@ def check_scope(model: dict[str, Any]) -> Check:
     if state == "missing":
         return Check("scope", "Scope compiled and current", NOGO, ["no scope.yaml and no target profile"],
                      f"{LAUNCHER} scope init {eng}")
-    detail = [f"scope.yaml is {state}: {len(scope.get('unanswered') or [])} unanswered question(s)"]
-    detail += [f"  {item}" for item in (scope.get("errors") or [])[:5]]
+    errors = scope.get("errors") or []
+    if state == "incomplete":
+        detail = [f"scope.yaml is incomplete: {len(scope.get('unanswered') or [])} unanswered question(s)"]
+    else:
+        detail = [f"scope.yaml is {state}: {len(errors)} problem(s) to fix"]
+    detail += [f"  {item}" for item in errors[:5]]
     return Check("scope", "Scope compiled and current", NOGO, detail, f"{LAUNCHER} scope check {eng}")
 
 
@@ -290,6 +294,23 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
         f"closes     {_both(end, zone)}",
     ]
     if auth.get("status") != "approved" or end is None:
+        # A window that is over or not open yet is the cause to fix first, even
+        # when the profile says "pending" (compile writes a scope with any error
+        # as pending, and an expired window is one of those errors).
+        if end is not None and now >= end:
+            return Check("window", "Approval window", NOGO, lines + ["EXPIRED"],
+                         f"get a renewed written approval, update authorization in {eng}/scope.yaml, then "
+                         f"{LAUNCHER} scope compile {eng}")
+        if start is not None and now < start:
+            return Check("window", "Approval window", NOGO,
+                         lines + [f"not open yet: opens in {_duration((start - now).total_seconds())}"],
+                         f"no command fixes this: wait until {_both(start, zone)}, then run "
+                         f"{LAUNCHER} scope compile {eng}")
+        if (model.get("scope") or {}).get("state") in {"incomplete", "inconsistent"} and (
+                model.get("profile") or {}).get("present"):
+            return Check("window", "Approval window", NOGO,
+                         lines + [f"authorization: {auth.get('text')}, because scope.yaml has errors"],
+                         f"{LAUNCHER} scope check {eng}   (fix what it reports, then scope compile {eng})")
         return Check("window", "Approval window", NOGO, lines + [f"authorization: {auth.get('text')}"],
                      f"record the owner's written approval in {eng}/scope.yaml, then {LAUNCHER} scope compile {eng}")
     if start is not None and now < start:
