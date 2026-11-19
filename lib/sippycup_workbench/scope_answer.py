@@ -907,8 +907,8 @@ def _approval(session: Session, item: Item, only_open: bool) -> None:
     if only_open and status == "approved":
         return
     window = f"{show(auth.get('valid_from'))} to {show(auth.get('valid_until'))}"
-    session.say(f"  Approval status  [authorization.status]")
-    session.say(f"    Current: {show(status)}")
+    session.say("  Approval status  [authorization.status]")
+    session.say(f"    Current: {status if present(status) else 'not answered'}")
     session.say(f"    Recorded so far: reference {show(auth.get('approval_id'))}, approved by "
                 f"{show(auth.get('approved_by'))}, window {window}")
     session.say("    Type the word approved ONLY if you hold the owner's written approval of this scope.")

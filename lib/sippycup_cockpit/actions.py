@@ -325,6 +325,9 @@ ADVISOR_COVERED = {
     # A hand-made pending profile from `init` blocks the first `scope compile`
     # (scope.derivative_unmanaged, needs --force); stage 3 compiles the profile.
     "create-target-profile",
+    # scope answer asks questions: the cockpit runs actions without a terminal,
+    # so scope-edit shows it as a step to run in a terminal instead.
+    "scope-answer",
 }
 
 
