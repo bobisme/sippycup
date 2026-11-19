@@ -867,6 +867,67 @@ def operator_path(path: str | Path) -> str:
     return text
 
 
+# Write-once copies of each scope file a sender ran under, named by SHA-256
+# (bn-2rgk): summary judges each run by the scope in force when it ran.
+APPROVED_SCOPES_DIR = "approved-scopes"
+
+
+def archive_scope(directory: str | Path, scope_sha256: str) -> str | None:
+    """Keep a write-once copy of the scope file whose SHA-256 a run recorded.
+
+    Returns its path relative to the engagement directory, or None when the
+    scope file no longer has that hash or the copy cannot be written (the run
+    is then judged against the current records). Never blocks a send.
+    """
+    directory = Path(directory)
+    sidecar, _problem = read_sidecar(directory)
+    recorded = ((sidecar or {}).get("scope") or {}).get("path")
+    name = recorded if isinstance(recorded, str) and recorded and "/" not in recorded else "scope.yaml"
+    source = directory / name
+    try:
+        if source.is_symlink() or not source.is_file():
+            return None
+        data = source.read_bytes()
+        if _sha256(data) != scope_sha256:
+            return None
+        archive = directory / APPROVED_SCOPES_DIR
+        if archive.is_symlink():
+            return None
+        archive.mkdir(mode=0o700, exist_ok=True)
+        target = archive / f"scope-{scope_sha256}.yaml"
+        relative = f"{APPROVED_SCOPES_DIR}/{target.name}"
+        try:
+            descriptor = os.open(
+                target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+            )
+        except FileExistsError:
+            if not target.is_symlink() and target.is_file() and _sha256(target.read_bytes()) == scope_sha256:
+                return relative
+            return None
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return relative
+    except OSError:
+        return None
+
+
+def approval_record(path: str | Path, content: bytes | None = None) -> dict[str, Any]:
+    """What a run records about the approval in force when it sent (bn-2rgk)."""
+    found = derivative_integrity(path, content)
+    record = {
+        "state": found["state"],
+        "source": Path(path).name,
+        "sha256": found["sha256"],
+        "scopeSha256": found["scopeSha256"],
+        "scopeArchive": None,
+    }
+    if found["state"] == "compiled-current" and found["scopeSha256"]:
+        record["scopeArchive"] = archive_scope(Path(path).parent, found["scopeSha256"])
+    return record
+
+
 def derivative_integrity(path: str | Path, content: bytes | None = None) -> dict[str, Any]:
     """Is this the file ``scope compile`` wrote, unchanged, from the current scope? (bn-zqe8)
 

@@ -364,6 +364,10 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     network_mode = deps.network_mode or deps.environ.get("SIPPYCUP_NETWORK_MODE", "unknown")
     # INVITE attempts count against the owner's call limit for the whole
     # engagement (bn-2sfn), reserved in its ledger before anything exists.
+    from sippycup_workbench.scope_derive import approval_record
+
+    # The approval in force for this run, kept with it (bn-2rgk).
+    approval_in_force = approval_record(profile_path)
     reservation = None
     if plan["inviteAttempts"]:
         from sippycup import call_ledger
@@ -560,6 +564,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         "exitCode": exit_code,
         "failOn": options.fail_on,
         "profile": document.get("name"),
+        "approvalRecord": approval_in_force,
         "runDirectory": _display(run_dir, work_root),
         "requestsSent": total,
         "requestLog": budget.log,

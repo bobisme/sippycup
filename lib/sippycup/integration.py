@@ -801,14 +801,17 @@ def _execute_campaign(
     )
     if refusal is not None:
         raise AuthorizationLapsed(refusal.message)
+    approval_in_force = None
     if manifest_path is not None:
         # A manifest scope compile wrote must still be what it wrote, from the
         # current scope file (bn-zqe8); a hand-written one is unaffected.
-        from sippycup_workbench.scope_derive import integrity_error
+        from sippycup_workbench.scope_derive import approval_record, integrity_error
 
         problem = integrity_error(manifest_path, manifest_bytes)
         if problem:
             raise AuthorizationLapsed(problem)
+        # The approval in force for this run, kept with it (bn-2rgk).
+        approval_in_force = approval_record(manifest_path, manifest_bytes)
 
     def step_gate(step: dict[str, Any]) -> tuple[str, str] | None:
         refusal = gate.refusal(
@@ -1245,6 +1248,9 @@ def _execute_campaign(
                 # The approval window this run was held to (bound: false for a
                 # plan without one) and, when it stopped the run, why.
                 "approvalWindow": gate.facts(),
+                # Which scope file the manifest was compiled from, kept in
+                # approved-scopes/ (bn-2rgk); None for an unbound plan.
+                "approvalRecord": approval_in_force,
                 # The run's own source addresses (route lookup, nothing sent),
                 # so the privacy lint does not report them as unexpected.
                 "localAddresses": local_addresses,

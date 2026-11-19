@@ -2002,6 +2002,10 @@ def _execute(
     child_environment = _sanitized_environment(secrets, scrub_names, environ=deps.environ)
     # The owner's call limit holds for the engagement (bn-2sfn): reserve this
     # call in the engagement's ledger, under its lock, before anything exists.
+    from .scope_derive import approval_record
+
+    # The approval in force for this run, kept with it (bn-2rgk).
+    approval_in_force = approval_record(profile_path)
     reservation = None
     if not deps.ledger_reserved:
         from sippycup import call_ledger
@@ -2445,6 +2449,7 @@ def _execute(
         "verdict": verdict,
         "exitCode": exit_code,
         "profile": profile_name,
+        "approvalRecord": approval_in_force,
         "target": {"host": host, "port": port, "transport": transport},
         "destinationUri": uri,
         **_destination_record(document, options.destination),

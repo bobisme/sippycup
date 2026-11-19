@@ -218,6 +218,19 @@ ceilings are still per run, and two commands at once each get their own rate.
 A campaign plan with no approval (`campaign selftest`, hand-written manifests
 without `authorization.approval`) is not counted.
 
+### Wave 8: senders refuse edited derivatives; summary judges by the approval in force (bn-zqe8, bn-2rgk)
+
+`call`, `rehearse`, `preflight --profile`, `media send --profile`, `checks`,
+`matrix`, `campaign run` and the MCP live tools refuse a profile or manifest
+that `scope compile` wrote but that was edited since, was compiled from an
+older `scope.yaml`, was copied out of its engagement directory, or is not in
+`scope-derivatives.json`. The refusal says to change `scope.yaml` and run
+`scope compile` again. Hand-written profiles (no compile header, no record)
+are unaffected. Each run records the scope it ran under
+(`approvalRecord`, `ENG/approved-scopes/`), and `summary` judges the run by
+that scope. Runs made before this change have no record and are judged
+against the current records.
+
 ### 9: campaign artifacts are private
 
 `campaign run` now works with umask 077, creates a new run root with mode
