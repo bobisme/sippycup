@@ -7,7 +7,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Iterable
 
-from .dialogs import DialogRecord, NegotiatedSdpRevision, SdpRole
+from .dialogs import DialogRecord, DialogState, NegotiatedSdpRevision, SdpRole
 from .records import (
     EvidenceRef,
     FrameRecord,
@@ -306,31 +306,116 @@ def _expected_sender(
     return None
 
 
-def partition_media_frames(
+def _dialog_lifetime(
+    dialog: DialogRecord,
+) -> tuple[Decimal | None, Decimal | None]:
+    """When a stream of DIALOG may start: first SIP evidence to end + grace.
+
+    The end is open while the dialog is not over in the capture. A stream
+    that is already running may continue past the end (media.timing judges
+    that); a stream that starts after it cannot belong to this dialog.
+    """
+    times = [
+        time
+        for time in (
+            *(_evidence_time(item.evidence) for item in dialog.transitions),
+            *(
+                _evidence_time(item.revision.evidence)
+                for item in dialog.sdp_revisions
+            ),
+        )
+        if time is not None
+    ]
+    if not times:
+        return None, None
+    ended = dialog.state in {DialogState.TERMINATED, DialogState.REJECTED}
+    return min(times), (max(times) + TEARDOWN_GRACE if ended else None)
+
+
+def _stream_starts(frames: Iterable[FrameRecord]) -> dict[MediaFlowKey, Decimal]:
+    starts: dict[MediaFlowKey, Decimal] = {}
+    for frame in frames:
+        if frame.rtp is None:
+            continue
+        key = _stream_key(frame)
+        time = _evidence_time(frame.evidence)
+        if key is not None and time is not None:
+            starts[key] = min(starts.get(key, time), time)
+    return starts
+
+
+def _attribution_anchor(
+    frame: FrameRecord, starts: dict[MediaFlowKey, Decimal]
+) -> Decimal | None:
+    """The time that decides which dialog may own FRAME.
+
+    RTP: when its stream started. RTCP: when the latest RTP stream on the
+    adjacent even ports (RFC 3550 port pairing) started before it, so a
+    report sent just after teardown stays with its call. Otherwise the
+    frame's own time.
+    """
+    at = _evidence_time(frame.evidence)
+    if frame.rtp is not None:
+        key = _stream_key(frame)
+        return starts.get(key, at) if key is not None else at
+    source = _endpoint(frame, True)
+    destination = _endpoint(frame, False)
+    if at is None or source is None or destination is None:
+        return at
+    paired = [
+        start
+        for key, start in starts.items()
+        if start <= at
+        and (key.source_address, key.source_port + 1, key.destination_address,
+             key.destination_port + 1) == (source[0], source[1], destination[0], destination[1])
+    ]
+    return max(paired) if paired else at
+
+
+def attribute_media_frames(
     frames: Iterable[FrameRecord],
     dialogs: tuple[DialogRecord, ...],
 ) -> tuple[
     tuple[tuple[FrameRecord, ...], ...],
     tuple[tuple[EvidenceRef, ...], ...],
+    tuple[EvidenceRef, ...],
 ]:
-    """Assign each media frame to at most one fork leg.
+    """Assign each media frame to at most one dialog or fork leg.
 
-    Equal best matches are withheld from every leg and surfaced as ambiguity
-    evidence, preventing one packet from satisfying multiple dialogs.
+    A frame is a candidate only for a dialog that was in progress when its
+    RTP stream (five-tuple and SSRC) started; a dialog's SDP does not stay
+    active after the dialog ended. Every PJSUA call binds the same local RTP
+    port, so without this the RTP of a later call whose signaling is not
+    visible (TLS) matched an earlier cleartext dialog (bn-2sfa). Equal best
+    matches are withheld from every leg and surfaced as ambiguity evidence.
+    Frames no visible dialog can own are returned as unattributed evidence.
     """
     assigned: list[list[FrameRecord]] = [[] for _ in dialogs]
     ambiguous: list[list[EvidenceRef]] = [[] for _ in dialogs]
+    unattributed: list[EvidenceRef] = []
     media_frames = [
         frame for frame in frames if frame.rtp is not None or frame.rtcp is not None
     ]
-    if len(dialogs) == 1:
-        return (
-            (tuple(media_frames),),
-            ((),),
-        )
+    lifetimes = [_dialog_lifetime(dialog) for dialog in dialogs]
+    starts = _stream_starts(media_frames)
     for frame in media_frames:
+        anchor = _attribution_anchor(frame, starts)
+        live = [
+            index
+            for index, (start, end) in enumerate(lifetimes)
+            if anchor is None
+            or start is None
+            or (start <= anchor and (end is None or anchor <= end))
+        ]
+        if not live:
+            unattributed.append(frame.evidence)
+            continue
+        if len(live) == 1:
+            assigned[live[0]].append(frame)
+            continue
         scored: list[tuple[int, int]] = []
-        for index, dialog in enumerate(dialogs):
+        for index in live:
+            dialog = dialogs[index]
             direction = _direction(frame, dialog)
             if direction is MediaDirection.UNKNOWN:
                 scored.append((index, 0))
@@ -356,10 +441,25 @@ def partition_media_frames(
         elif candidates:
             for index in candidates:
                 ambiguous[index].append(frame.evidence)
+        else:
+            unattributed.append(frame.evidence)
     return (
         tuple(tuple(items) for items in assigned),
         tuple(tuple(items) for items in ambiguous),
+        tuple(unattributed),
     )
+
+
+def partition_media_frames(
+    frames: Iterable[FrameRecord],
+    dialogs: tuple[DialogRecord, ...],
+) -> tuple[
+    tuple[tuple[FrameRecord, ...], ...],
+    tuple[tuple[EvidenceRef, ...], ...],
+]:
+    """``attribute_media_frames`` without the unattributed evidence."""
+    assigned, ambiguous, _ = attribute_media_frames(frames, dialogs)
+    return assigned, ambiguous
 
 
 def _correlation(

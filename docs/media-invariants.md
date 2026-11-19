@@ -45,6 +45,22 @@ clock units using the configured tolerance.
 RTCP sender SSRC and network direction correlate reports to RTP streams.
 Ambiguous or absent matches remain typed unknowns.
 
+## Which dialog owns a stream
+
+A capture can hold several calls, and only the cleartext ones show their SIP
+and SDP; a TLS call's RTP is visible but its dialog is not. Every softphone
+call binds the same local RTP port, so ports alone cannot tell two calls
+apart. An RTP stream (five-tuple and SSRC) may belong only to a dialog that
+was in progress when the stream started: from the dialog's first SIP evidence
+to its last one plus 250 ms when the capture shows it ended, open-ended
+otherwise. RTCP uses the start of the latest RTP stream on the adjacent ports.
+A stream that started in no visible dialog's lifetime (for example the RTP of
+a TLS call placed after a cleartext call) is not judged against any dialog:
+the result carries `capture.media.attribution` with verdict `unknown` and the
+unattributed packets as evidence, so the run is inconclusive, not failed. A
+stream that started during a call and runs on after its BYE still belongs to
+that call, so late media still fails `media.timing`.
+
 ## Media after teardown
 
 `media.timing` fails when RTP is seen before the answer or after teardown.
