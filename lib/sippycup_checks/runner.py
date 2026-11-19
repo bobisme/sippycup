@@ -95,9 +95,17 @@ def build_plan(
     only: Sequence[str] = (),
     password_available: bool | None = None,
     work_root: Path | None = None,
+    profile_path: str | Path | None = None,
 ) -> dict[str, Any]:
     rehearsal = rehearse(document, now=now, work_root=work_root)
     blocking = list(rehearsal.errors)
+    if profile_path is not None:
+        # A profile scope compile wrote must still be what it wrote (bn-zqe8).
+        from sippycup_workbench.scope_derive import integrity_error
+
+        refusal = integrity_error(profile_path)
+        if refusal:
+            blocking.insert(0, refusal)
     if not host_is_approved_literal(document):
         blocking.append("checks require target.host itself to be one of the literal approved_addresses")
     section = _section(document)
@@ -162,6 +170,10 @@ def build_plan(
         blocking.append(
             f"the selected checks place up to {invites} INVITE attempts, above limits.max_calls {max_calls}"
         )
+    if invites and profile_path is not None:
+        from sippycup_workbench.call import ledger_blocking
+
+        blocking.extend(ledger_blocking(profile_path, document, invites, "checks run"))
     valid_until = (rehearsal.facts.get("authorization") or {}).get("valid_until") if rehearsal.facts else None
     if not blocking and valid_until and now + timedelta(seconds=seconds) >= datetime.fromisoformat(valid_until):
         blocking.append(f"authorization expires before the run's latest possible end ({int(seconds)}s from now)")
@@ -305,7 +317,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     password_source = bool(options.secret_env or options.secret_file)
     now = deps.now()
     plan = build_plan(document, now=now, only=options.only, password_available=password_source,
-                      work_root=work_root)
+                      work_root=work_root, profile_path=options.profile)
     if options.dry_run:
         return (EXIT_OK if plan["ready"] else EXIT_REFUSED), plan
     if not plan["ready"]:
@@ -350,6 +362,31 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     if not _within(run_root, work_root):
         raise ChecksError(f"--run-root must be beneath the work directory ({work_root})")
     network_mode = deps.network_mode or deps.environ.get("SIPPYCUP_NETWORK_MODE", "unknown")
+    # INVITE attempts count against the owner's call limit for the whole
+    # engagement (bn-2sfn), reserved in its ledger before anything exists.
+    from sippycup_workbench.scope_derive import approval_record
+
+    # The approval in force for this run, kept with it (bn-2rgk).
+    approval_in_force = approval_record(profile_path)
+    from sippycup.call_ledger import run_record as call_ledger_record
+
+    reservation = None
+    if plan["inviteAttempts"]:
+        from sippycup import call_ledger
+        from sippycup_workbench.call import ledger_terms
+
+        approval, ceiling = ledger_terms(document)
+        try:
+            reservation = call_ledger.reserve(
+                profile_path.parent, approval_id=approval, ceiling=ceiling,
+                calls=plan["inviteAttempts"], command="checks run", source=profile_path.name,
+            )
+        except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
+            return EXIT_REFUSED, {
+                "apiVersion": RESULT_VERSION, "state": "blocked", "exitCode": EXIT_REFUSED,
+                "blockingErrors": [str(error)], "runDirectory": None, "requestsSent": 0,
+                "networkActivity": "none",
+            }
     old_umask = os.umask(0o077)
     run_dir = create_run_directory(run_root, _slug(str(document.get("name", "profile"))))
     timestamps: dict[str, str] = {"started": _utc(deps.now())}
@@ -483,6 +520,10 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     findings = [item for result in results for item in result.findings]
     findings.sort(key=lambda item: (-catalog.SEVERITY_RANK[item["severity"]], item["id"]))
     total = sum(result.requests_sent for result in results)
+    if reservation is not None and not total and not budget.log:
+        # Nothing was sent: the reserved INVITE attempts do not count. Once
+        # any request left, every reserved attempt counts (fail closed).
+        reservation.release(reservation.calls, "nothing was sent")
     findings_document = {
         "apiVersion": FINDINGS_VERSION,
         "target": {"address": host, "port": port, "transport": transport, "serverName": server_name},
@@ -525,6 +566,8 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         "exitCode": exit_code,
         "failOn": options.fail_on,
         "profile": document.get("name"),
+        "approvalRecord": approval_in_force,
+        "callLedger": call_ledger_record(reservation, run_dir),
         "runDirectory": _display(run_dir, work_root),
         "requestsSent": total,
         "requestLog": budget.log,
@@ -660,7 +703,8 @@ def main(argv: Sequence[str] | None = None, deps: Dependencies | None = None) ->
             print("Network activity: none", file=sys.stderr if args.format == "json" else sys.stdout)
             return EXIT_REFUSED
         plan = build_plan(document, now=datetime.now(timezone.utc), only=tuple(args.only),
-                          work_root=(deps.work_root if deps else None) or _work_root(Dependencies()))
+                          work_root=(deps.work_root if deps else None) or _work_root(Dependencies()),
+                          profile_path=args.profile)
         if args.format == "json":
             print(json.dumps(plan, indent=2, sort_keys=True))
         else:

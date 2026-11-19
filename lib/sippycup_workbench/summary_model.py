@@ -376,6 +376,9 @@ class Source:
     assessor: list[str] = field(default_factory=list)
     limits: dict[str, int] = field(default_factory=dict)
     media_ports: tuple[int, int] | None = None
+    # The dial strings this record approves (None: it does not restrict the
+    # destination). Not part of as_dict, so report bytes are unchanged.
+    dial_list: list[str] | None = None
 
     def covers(self, address: str | None, port: int | None, transport: str | None) -> bool:
         if address is None:
@@ -466,6 +469,8 @@ def _scope_source(document: dict[str, Any], ref: str) -> Source:
         for key in ("user", "name"):
             if isinstance(destination.get(key), (str, int)):
                 source.destinations.append(str(destination[key]))
+        if isinstance(destination.get("user"), (str, int)):
+            source.dial_list = (source.dial_list or []) + [str(destination["user"])]
     source.assessor = _str_list(_dict(document.get("client")).get("source_addresses"))
     for key, value in _dict(document.get("limits")).items():
         if _int(value) is not None:
@@ -490,6 +495,8 @@ def _profile_source(document: dict[str, Any], ref: str) -> Source:
     )
     if isinstance(target.get("tls_server_name"), str):
         source.server_names.append(target["tls_server_name"])
+    if isinstance(target.get("approved_destinations"), list):
+        source.dial_list = _str_list(target["approved_destinations"])
     # Owner-approved media networks (media only: Source.covers, the signaling
     # target check, never consults them) and the far end's RTP ports.
     media = _dict(document.get("media"))
@@ -1440,6 +1447,173 @@ def _exception(code: str, run: str | None, detail: str) -> dict[str, Any]:
     return {"code": code, "run": run, "detail": detail}
 
 
+def _recorded(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file():
+        return {}
+    try:
+        value = read_json(path)
+    except Unreadable:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _run_call_terms(raw: RawRun, model: dict[str, Any]) -> tuple[str, int | None, int]:
+    """(approval id, ceiling recorded with the run, calls the run placed).
+
+    A call counts once its first packet left (an attempted call counts,
+    whatever happened next); a checks run counts its INVITE requests.
+    """
+    sent = model.get("sent") or {}
+    if raw.kind == "campaign":
+        plan = _dict(raw.docs.get("plan.json"))
+        auth = _dict(plan.get("authorization"))
+        approval = _dict(auth.get("approval")).get("id")
+        ceiling = _int(_dict(auth.get("hardMaxima")).get("calls"))
+        calls = _int(sent.get("calls")) or 0
+        return (approval if isinstance(approval, str) else ""), ceiling, calls
+    profile = _recorded(raw.path / "profile.json")
+    approval = _dict(profile.get("authorization")).get("approval_id")
+    ceiling = _int(_dict(profile.get("limits")).get("max_calls"))
+    if raw.kind == "call":
+        result = _dict(raw.docs.get("result.json"))
+        attempted = bool(_dict(result.get("timestamps")).get("preflight_sent")) or bool(_int(sent.get("calls")))
+        calls = 1 if attempted else 0
+    else:
+        result = _recorded(raw.path / "result.json")
+        calls = sum(
+            1 for entry in _list(result.get("requestLog"))
+            if isinstance(entry, dict) and str(entry.get("request", "")).upper().startswith("INVITE")
+            and entry.get("paced") is not False
+        )
+    return (approval if isinstance(approval, str) else ""), ceiling, calls
+
+
+def _engagement_call_check(
+    runs: list[dict[str, Any]], raws: dict[str, RawRun], sources: list[Source]
+) -> list[dict[str, Any]]:
+    """The owner's call limit holds for the engagement, across runs (bn-2sfn).
+
+    Owner runs (not practice runs) are counted per approval id in start
+    order; a run is an exception when the calls placed under its approval,
+    with its own, exceed the limit: the smaller of the ceiling recorded with
+    the run and ``limits.calls`` of a scope file that states the same
+    approval id.
+    """
+    scope_limits: dict[str, int] = {}
+    reviewed = {source.approval_id for source in sources if source.approval_id}
+    for source in sources:
+        calls = source.limits.get("calls")
+        if source.kind == "scope" and source.approval_id and isinstance(calls, int):
+            scope_limits[source.approval_id] = min(calls, scope_limits.get(source.approval_id, calls))
+    exceptions = []
+    placed: dict[str, int] = {}
+    for run in runs:
+        raw = raws.get(run["id"])
+        if raw is None or run.get("practiceApproval") or run["readable"] == "unreadable":
+            continue
+        approval, recorded, calls = _run_call_terms(raw, run)
+        if not calls or approval == "LOCAL-PRACTICE-ONLY":
+            # Practice-bench runs have their own budget per `practice-target up`.
+            continue
+        placed[approval] = placed.get(approval, 0) + calls
+        limits = [value for value in (recorded, scope_limits.get(approval)) if isinstance(value, int)]
+        if not limits:
+            continue
+        limit = min(limits)
+        if placed[approval] > limit:
+            # Only an approval id a reviewed record names is shown; a run's
+            # own text is not repeated in the report.
+            shown = approval if approval in reviewed else "the run's recorded approval"
+            exceptions.append(_exception(
+                "call-limit-exceeded", run["id"],
+                f"this run brought the calls placed under {shown} in this engagement to "
+                f"{placed[approval]}, above the approved limit of {limit}",
+            ))
+    return exceptions
+
+
+RECORDED_SCOPES = "approved-scopes"
+
+
+def _recorded_scopes(
+    root: Path, raws: list[RawRun], scope: _Scope, skip: set[str]
+) -> tuple[dict[str, _Scope], list[str], list[Source]]:
+    """Per-run scopes: the scope file in force when each run sent (bn-2rgk).
+
+    A run counts only when its result records ``approvalRecord`` with state
+    ``compiled-current`` and a scope SHA-256 whose write-once copy is in
+    ``ENG/approved-scopes/`` under that hash and still hashes to it. The run's
+    own copy of a profile never authorizes anything. Returns the scopes, the
+    owner runs without such a record, and the archived sources used.
+    """
+    import hashlib
+
+    archives: dict[Path, dict[str, tuple[str, Any]]] = {}
+
+    def archive(engagement: Path) -> dict[str, tuple[str, Any]]:
+        key = engagement.resolve() if engagement.exists() else engagement
+        if key in archives:
+            return archives[key]
+        found: dict[str, tuple[str, Any]] = {}
+        directory = engagement / RECORDED_SCOPES
+        if not directory.is_symlink() and directory.is_dir():
+            try:
+                paths = sorted(directory.glob("scope-*.yaml"))[:1000]
+            except OSError:
+                paths = []
+            for path in paths:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                try:
+                    data = path.read_bytes()[: MAX_YAML_BYTES + 1]
+                    if len(data) > MAX_YAML_BYTES:
+                        continue
+                    sha = hashlib.sha256(data).hexdigest()
+                    if path.name != f"scope-{sha}.yaml":
+                        continue
+                    found[sha] = (path, read_yaml(path))
+                except Exception:  # noqa: BLE001 - an unreadable copy is not an authority
+                    continue
+        archives[key] = found
+        return found
+
+    scopes: dict[str, _Scope] = {}
+    unrecorded: list[str] = []
+    by_sha: dict[str, Source] = {}
+    for raw in raws:
+        if raw.name in skip or raw.kind not in {"call", "campaign", "check"}:
+            continue
+        result = raw.docs.get("result.json") if raw.kind != "check" else _recorded(raw.path / "result.json")
+        record = _dict(_dict(result).get("approvalRecord"))
+        sha = record.get("scopeSha256")
+        if record.get("state") != "compiled-current" or not isinstance(sha, str):
+            unrecorded.append(raw.name)
+            continue
+        engagement = raw.path.parent.parent
+        entry = archive(engagement).get(sha) or archive(root).get(sha)
+        if entry is None or not isinstance(entry[1], dict):
+            unrecorded.append(raw.name)
+            continue
+        source = by_sha.get(sha)
+        if source is None:
+            source = _scope_source(entry[1], f"{RECORDED_SCOPES}/scope-{sha[:12]}.yaml")
+            source.kind = "scope-in-force"
+            by_sha[sha] = source
+            for network in source.networks:
+                scope.addresses.add_network(network)
+            for network in source.media_networks:
+                scope.addresses.add_network(network, media_only=True)
+            scope.server_names.reviewed.update(source.server_names)
+        scopes[raw.name] = _Scope(
+            sources=[source],
+            destinations=scope.destinations,
+            accounts=scope.accounts,
+            server_names=scope.server_names,
+            addresses=scope.addresses,
+        )
+    return scopes, unrecorded, list(by_sha.values())
+
+
 def _practice_scopes(root: Path, raws: list[RawRun], scope: _Scope) -> dict[str, _Scope]:
     """Per-run scopes for runs whose recorded profile is an archived practice approval.
 
@@ -1545,6 +1719,48 @@ def _target_check(scope: _Scope, model: dict[str, Any], target: dict[str, Any] |
             )
         ]
     return []
+
+
+def _tampered_record(path: Path) -> str | None:
+    """Why a compiled profile or manifest cannot be an authorization record, or None.
+
+    Only a file ``scope compile`` wrote that was then edited by hand (or a
+    file that sits among compiled ones, or copies the compile header, without
+    a record) is refused; a file compiled from an older scope file is still
+    what the owner's answers produced then.
+    """
+    from .scope_derive import derivative_integrity
+
+    try:
+        state = derivative_integrity(path)["state"]
+    except Exception:  # noqa: BLE001 - an unreadable file is reported elsewhere
+        return None
+    reasons = {
+        "edited": "was edited after scope compile wrote it",
+        "unrecorded": "is not recorded by scope compile (scope-derivatives.json)",
+        "record-unreadable": "cannot be checked: scope-derivatives.json is unreadable",
+    }
+    if state not in reasons:
+        return None
+    return f"{reasons[state]}, so it was not used as an approval record; runs are checked against the other records"
+
+
+def _destination_check(scope: _Scope, model: dict[str, Any], raw: RawRun) -> list[dict[str, Any]]:
+    """A call whose dialed destination is on no approved destination list (bn-zqe8)."""
+    if model["kind"] != "call":
+        return []
+    user = _destination_user(_dict(raw.docs.get("result.json")).get("destinationUri"))
+    lists = [source.dial_list for source in scope.sources if source.dial_list is not None]
+    if user is None or not lists or any(user in item for item in lists):
+        return []
+    return [
+        _exception(
+            "destination-not-approved",
+            model["id"],
+            f"destination {scope.destinations(user)} is not on the approved destination list of "
+            + ", ".join(sorted({source.ref for source in scope.sources if source.dial_list is not None})),
+        )
+    ]
 
 
 def _ceiling_check(model: dict[str, Any], scope: _Scope) -> list[dict[str, Any]]:
@@ -1877,6 +2093,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     explicit_profiles = [Path(p) for p in options.profiles]
     explicit_manifests = [Path(p) for p in options.manifests]
     profile_paths: list[Path] = []
+    record_exceptions: list[dict[str, Any]] = []
     for path in yaml_files + explicit_profiles + explicit_manifests:
         try:
             document = read_yaml(path)
@@ -1889,6 +2106,12 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             ref = path.resolve().relative_to(root).as_posix()
         except (OSError, ValueError):
             ref = f"external/{path.name}"
+        tampered = _tampered_record(path)
+        if tampered is not None:
+            # A compiled profile or manifest edited by hand approves nothing
+            # (bn-zqe8): it is not used as an authorization record.
+            record_exceptions.append(_exception("approval-record-edited", None, f"{ref} {tampered}"))
+            continue
         if str(document.get("schema_version", "")).startswith("sippycup.dev/target-profile/"):
             sources.append(_profile_source(document, ref))
             profile_paths.append(path.resolve())
@@ -1969,6 +2192,11 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     # archived practice approval they used (see summary_practice), never
     # against a run's own copy of a profile.
     practice_scopes = _practice_scopes(root, raws, scope)
+    # Owner runs are judged by the scope in force when they ran (bn-2rgk).
+    recorded_scopes, unrecorded_runs, recorded_sources = _recorded_scopes(
+        root, raws, scope, set(practice_scopes)
+    )
+    run_scopes = {**recorded_scopes, **practice_scopes}
     filtered: list[RawRun] = []
     for raw in raws:
         if options.run_globs and not any(
@@ -1979,7 +2207,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         filtered.append(raw)
     runs: list[dict[str, Any]] = []
     candidate_findings: list[dict[str, Any]] = []
-    exceptions: list[dict[str, Any]] = []
+    exceptions: list[dict[str, Any]] = list(record_exceptions)
     for raw in filtered:
         model = _base_run(raw)
         prefix = f"runs[{raw.name}]"
@@ -1988,7 +2216,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             if raw.problems:
                 model["readable"] = "partial"
             if raw.kind == "call":
-                _call_run(raw, model, practice_scopes.get(raw.name, scope), ctx, prefix)
+                _call_run(raw, model, run_scopes.get(raw.name, scope), ctx, prefix)
             elif raw.kind == "campaign":
                 _campaign_run(raw, model, scope, ctx, prefix)
             elif raw.kind == "check":
@@ -2008,8 +2236,13 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         if start and end and end >= start:
             model["durationSeconds"] = round((end - start).total_seconds(), 3)
         model["evidence"] = _evidence(raw, ctx, f"{prefix}.evidence")
-        run_scope = practice_scopes.get(raw.name, scope)
-        if run_scope is not scope:
+        run_scope = run_scopes.get(raw.name, scope)
+        if raw.name in recorded_scopes:
+            model["reasons"].append(
+                "judged against the scope in force when it ran "
+                f"({run_scope.sources[0].ref}, recorded when it ran)"
+            )
+        if raw.name in practice_scopes:
             model["practiceApproval"] = run_scope.sources[0].ref
             model["reasons"].append(
                 "practice target run (loopback-only practice namespace; checked against "
@@ -2041,6 +2274,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     )
             model["integrity"].extend(_window_check(run_scope, model, raw_targets))
             model["integrity"].extend(_ceiling_check(model, run_scope))
+            model["integrity"].extend(_destination_check(run_scope, model, raw))
             if model["started"] is None:
                 model["problems"].append("no recorded start time; approval window not checked")
         model.pop("_mediaPeerRaw", None)
@@ -2056,6 +2290,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     runs.sort(key=lambda r: (r.get("started") or "9999", r["id"]))
     for index, run in enumerate(runs, 1):
         run["label"] = f"R{index}"
+    exceptions.extend(_engagement_call_check(runs, {raw.name: raw for raw in filtered}, sources))
     for run in runs:
         exceptions.extend(run["integrity"])
         candidate_findings.extend(_observations(run) if run["readable"] != "unreadable" else [])
@@ -2129,6 +2364,17 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     "practice profile against the local practice target (a loopback address inside a network namespace "
                     "with no other interface). They are rehearsal runs, not assessment traffic: they are not counted in "
                     "the totals and were re-checked against the archived practice approval each one used.",
+        })
+    stale_judged = [
+        r for r in owner_runs if r["id"] in set(unrecorded_runs) and r["readable"] != "unreadable"
+    ]
+    if recorded_sources and stale_judged:
+        limitations.append({
+            "code": "approval-in-force-unrecorded",
+            "text": f"{len(stale_judged)} run(s) ({', '.join(r['label'] for r in stale_judged)}) carry no record of "
+                    "the scope in force when they ran (they predate the record, or used a profile or manifest that "
+                    "scope compile did not write), so they were judged against the current records, not the "
+                    f"{len(recorded_sources)} scope version(s) on record in {RECORDED_SCOPES}/.",
         })
     for matrix in matrices:
         if matrix["state"] in {"stopped", "cancelled"} or matrix["notRun"]:

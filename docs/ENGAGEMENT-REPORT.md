@@ -199,6 +199,9 @@ from the recorded artifacts, and lists any exception at the top:
 | `approval-not-active` | The covering record is not in `approved` status |
 | `ceiling-exceeded` | Recorded packets, bytes, calls, or call time exceed the frozen ceiling |
 | `unapproved-address-in-artifact` | A run artifact's text named an address outside the approved set |
+| `destination-not-approved` | A call dialed a destination that is not on the approved destination list |
+| `call-limit-exceeded` | The calls placed under one approval id in the engagement, counted in start order across all commands, went above its limit (`limits.calls`); practice runs are not counted |
+| `approval-record-edited` | A compiled profile or manifest was edited after `scope compile`, or is not recorded by it; it is not used as an approval record |
 
 Windows come from the scope file and target profiles. A campaign manifest's
 `authorization.approval` window is what `campaign run` enforced, but it has no
@@ -210,6 +213,19 @@ against that approval instead, labelled as a practice target run, and left out
 of the totals; see `PRACTICE-TARGET.md`. A run whose target no windowed record covers, or that recorded
 no start time, is listed under Limitations as not re-checked against a
 window; it is not silently treated as inside one.
+
+Each run is judged by the approval in force when it ran (bn-2rgk). `call`,
+`checks run` and `campaign run` record `approvalRecord` in `result.json`: the
+integrity state of the profile or manifest they used, its SHA-256, and the
+SHA-256 of the scope file it was compiled from. They also keep a write-once
+copy of that scope file in `ENG/approved-scopes/scope-SHA256.yaml`. When the
+state is `compiled-current` and the copy still hashes to its name, the report
+checks the run's targets, window, status and destinations against that copy
+alone (the run's reasons say so), not against the current records. A run's own
+`profile.json` never authorizes anything. Runs without such a record (made
+before this change, or with a hand-written profile or manifest) are judged
+against the current records; when other runs do have a record, the report
+lists them under Limitations (`approval-in-force-unrecorded`).
 
 ## Privacy
 

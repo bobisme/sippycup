@@ -32,7 +32,7 @@ from .profile import (
 )
 from .call_explanations import CALL_EXPLANATIONS
 from .scope import ScopeError, create_scope, inspect as inspect_scope, scope_path_for
-from .scope_derive import compile_scope
+from .scope_derive import compile_scope, integrity_error
 from .scope_questions import render_questions
 from .triage import TriageError, analyze
 
@@ -174,9 +174,24 @@ def _work_spelling(path: str) -> str:
     return "work/" + path[len("/work/"):] if path.startswith("/work/") else path
 
 
+def rehearse_file(profile_path: str | Path) -> Any:
+    """``rehearse`` of a profile file, plus the compiled-profile integrity check (bn-zqe8).
+
+    A profile that scope compile wrote and that was edited (or whose scope
+    changed) since is not ready, whatever its contents say.
+    """
+    from .profile import Rehearsal
+
+    rehearsal = rehearse(load_profile(profile_path))
+    refusal = integrity_error(profile_path)
+    if refusal:
+        rehearsal = Rehearsal(False, (refusal, *rehearsal.errors), rehearsal.warnings, rehearsal.facts)
+    return rehearsal
+
+
 def _one_call_plan(profile_path: str) -> dict[str, Any]:
     document = load_profile(profile_path)
-    rehearsal = rehearse(document)
+    rehearsal = rehearse_file(profile_path)
     target = document.get("target", {})
     capture = document.get("capture", {})
     host = str(target.get("host", "TARGET"))
@@ -518,7 +533,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("No approval, credentials, or resolved addresses were invented.")
             return 0
         if args.command == "rehearse":
-            value = rehearse(load_profile(args.profile)).as_dict()
+            value = rehearse_file(args.profile).as_dict()
             _emit(value, args.format)
             return 0 if value["ready"] else 1
         if args.command == "one-call":

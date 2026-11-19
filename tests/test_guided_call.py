@@ -195,6 +195,20 @@ class Fakes:
         )
 
 
+# These tests place several calls from one profile in one engagement
+# directory, and they are not about the engagement's call limit (the owner's
+# limit holds across calls since bn-2sfn; tests/test_call_ledger.py tests it).
+# Their profile therefore approves a budget for the whole test.
+TEST_ENGAGEMENT_CALLS = 50
+
+
+def with_test_budget(document):
+    limits = document.get("limits") if isinstance(document, dict) else None
+    if isinstance(limits, dict) and limits.get("max_calls") == 1:
+        document = {**document, "limits": {**limits, "max_calls": TEST_ENGAGEMENT_CALLS}}
+    return document
+
+
 class GuidedCallCase(unittest.TestCase):
     def setUp(self):
         self._directory = tempfile.TemporaryDirectory()
@@ -208,7 +222,7 @@ class GuidedCallCase(unittest.TestCase):
         self._directory.cleanup()
 
     def write_profile(self, document):
-        self.profile.write_text(yaml.safe_dump(document), encoding="utf-8")
+        self.profile.write_text(yaml.safe_dump(with_test_budget(document)), encoding="utf-8")
 
     def options(self, **values):
         defaults = {"profile": self.profile, "destination": "echo", "duration": 5}

@@ -171,6 +171,12 @@ def load_binding(
     instant = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     rehearsal = rehearse(document, now=instant, work_root=work_root)
     reasons = list(rehearsal.errors)
+    from .scope_derive import integrity_error
+
+    # A profile scope compile wrote must still be what it wrote (bn-zqe8).
+    refusal = integrity_error(_resolve_profile_path(path))
+    if refusal:
+        reasons.insert(0, refusal)
     if literal_host and not host_is_approved_literal(document):
         reasons.append("target.host must itself be one of the literal approved_addresses")
     authorization = rehearsal.facts.get("authorization", {}) if rehearsal.facts else {}

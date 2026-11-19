@@ -695,9 +695,11 @@ def execute_campaign(
     # Everything a run writes, including what tcpdump and the runners create,
     # is private (0700 directories, 0600 files) like call and checks runs.
     old_umask = os.umask(0o077)
+    ledger: dict[str, Any] = {}
     try:
         return _execute_campaign(
             plan,
+            ledger=ledger,
             manifest_bytes=manifest_bytes,
             run_root=run_root,
             interface=interface,
@@ -713,11 +715,67 @@ def execute_campaign(
         )
     finally:
         os.umask(old_umask)
+        reservation = ledger.get("reservation")
+        if reservation is not None:
+            # Calls of steps that never started were not attempted.
+            reservation.release(
+                _unstarted_calls(plan, ledger.get("run_dir")), "campaign steps that never started"
+            )
+
+
+def _ledger_record(reservation: Any, run_dir: Path) -> dict[str, str] | None:
+    from sippycup import call_ledger
+
+    return call_ledger.run_record(reservation, run_dir)
+
+
+def _planned_calls(plan: Mapping[str, Any]) -> int:
+    return sum(int((step.get("budget") or {}).get("calls") or 0) for step in plan["steps"])
+
+
+def _unstarted_calls(plan: Mapping[str, Any], run_dir: Path | None) -> int:
+    """Calls of steps that ``events.jsonl`` does not show as started (0 when unsure)."""
+    planned = _planned_calls(plan)
+    if run_dir is None:
+        return planned
+    events = Path(run_dir) / "events.jsonl"
+    if not events.exists():
+        return planned
+    started: set[int] = set()
+    try:
+        for line in events.read_text(encoding="utf-8").splitlines():
+            entry = json.loads(line)
+            if entry.get("event") == "step.started":
+                started.add(int(entry["step"]))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return 0
+    return sum(
+        int((step.get("budget") or {}).get("calls") or 0)
+        for step in plan["steps"]
+        if step["index"] not in started
+    )
+
+
+def _scope_call_limit(directory: Path) -> int | None:
+    """``limits.calls`` of the scope file beside the manifest, when it states one."""
+    path = directory / approval_rules.SCOPE_FILE
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        import yaml
+
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - the window gate reports an unreadable scope
+        return None
+    limits = value.get("limits") if isinstance(value, dict) else None
+    calls = limits.get("calls") if isinstance(limits, dict) else None
+    return calls if type(calls) is int and calls >= 0 else None
 
 
 def _execute_campaign(
     plan: dict[str, Any],
     *,
+    ledger: dict[str, Any],
     manifest_bytes: bytes,
     run_root: Path,
     interface: str,
@@ -749,6 +807,17 @@ def _execute_campaign(
     )
     if refusal is not None:
         raise AuthorizationLapsed(refusal.message)
+    approval_in_force = None
+    if manifest_path is not None:
+        # A manifest scope compile wrote must still be what it wrote, from the
+        # current scope file (bn-zqe8); a hand-written one is unaffected.
+        from sippycup_workbench.scope_derive import approval_record, integrity_error
+
+        problem = integrity_error(manifest_path, manifest_bytes)
+        if problem:
+            raise AuthorizationLapsed(problem)
+        # The approval in force for this run, kept with it (bn-2rgk).
+        approval_in_force = approval_record(manifest_path, manifest_bytes)
 
     def step_gate(step: dict[str, Any]) -> tuple[str, str] | None:
         refusal = gate.refusal(
@@ -765,7 +834,27 @@ def _execute_campaign(
     if not plan["evidence"]["capture"]:
         raise RuntimeError("active execution requires evidence.capture=true for watchdogs")
     name = plan["metadata"]["name"]
+    calls = _planned_calls(plan)
+    if manifest_path is not None and gate.window.approval_id and calls:
+        # The owner's call limit holds for the engagement (bn-2sfn): reserve
+        # every planned call in the ledger beside the manifest, under its
+        # lock, before anything exists.
+        from sippycup import call_ledger
+
+        directory = Path(manifest_path).parent
+        ceiling = int(plan["authorization"]["hardMaxima"]["calls"])
+        scope_limit = _scope_call_limit(directory)
+        if scope_limit is not None:
+            ceiling = min(ceiling, scope_limit)
+        try:
+            ledger["reservation"] = call_ledger.reserve(
+                directory, approval_id=gate.window.approval_id, ceiling=ceiling, calls=calls,
+                command="campaign run", source=Path(manifest_path).name,
+            )
+        except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
+            raise AuthorizationLapsed(str(error)) from error
     run_dir = create_run_directory(run_root, name)
+    ledger["run_dir"] = run_dir
     started = _utc()
     local_addresses = local_source_addresses(plan)
     manifest_copy = run_dir / "reviewed-manifest.yaml"
@@ -1165,6 +1254,11 @@ def _execute_campaign(
                 # The approval window this run was held to (bound: false for a
                 # plan without one) and, when it stopped the run, why.
                 "approvalWindow": gate.facts(),
+                # Which scope file the manifest was compiled from, kept in
+                # approved-scopes/ (bn-2rgk); None for an unbound plan.
+                "approvalRecord": approval_in_force,
+                # The ledger reservation that counted this run's calls.
+                "callLedger": _ledger_record(ledger.get("reservation"), run_dir),
                 # The run's own source addresses (route lookup, nothing sent),
                 # so the privacy lint does not report them as unexpected.
                 "localAddresses": local_addresses,

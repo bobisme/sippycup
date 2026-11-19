@@ -67,8 +67,13 @@ guided call's gate (approval, validity window, a literal approved
 Calls start at least 1 s apart, and further apart when a profile's
 `limits.max_calls_per_second` asks for it.
 
-The scope's `limits.calls` is the owner's total, and `scope compile` copies it
-into every target profile as `limits.max_calls`. It is not a ceiling per
+The scope's `limits.calls` is the owner's total for the engagement, and
+`scope compile` copies it into every target profile as `limits.max_calls`.
+Calls already placed under the same approval by `call`, earlier matrices,
+`checks run` or `campaign run` count against it too: `matrix run` reserves
+the whole grid in `ENG/call-ledger.jsonl` before the first cell and gives back
+the cells that sent nothing, and `matrix plan` is BLOCKED when the grid would
+exceed what remains (see SAFETY-AUDIT.md, finding 6). It is not a ceiling per
 profile: a grid over the UDP and TLS profiles of a scope with `calls: 6` may
 place 6 calls in total, not 6 through each. The plan prints a
 `Shared ceiling:` line for such profiles, and a larger grid is refused, for

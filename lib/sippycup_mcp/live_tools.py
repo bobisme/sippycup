@@ -67,13 +67,20 @@ def _strict_json(content: bytes, field: str) -> dict[str, Any]:
     return value
 
 
-def _load_profile(content: bytes) -> dict[str, Any]:
+def _load_profile(content: bytes, path: Path | None = None) -> dict[str, Any]:
     try:
         profile = yaml.safe_load(content)
     except (UnicodeDecodeError, yaml.YAMLError) as exc:
         raise MCPPolicyError("target profile is invalid YAML") from exc
     if not isinstance(profile, dict):
         raise MCPPolicyError("target profile must be a YAML object")
+    if path is not None:
+        # A profile scope compile wrote must still be what it wrote (bn-zqe8).
+        from sippycup_workbench.scope_derive import integrity_error
+
+        refusal = integrity_error(path, content)
+        if refusal:
+            raise MCPPolicyError(f"target profile is not ready: {refusal}")
     rehearsal = rehearse(profile)
     if not rehearsal.ready:
         raise MCPPolicyError(
@@ -299,7 +306,7 @@ class LivePreparationTools:
             capability_path, profile_path, plan_path
         )
         plan_value = _load_plan(plan.content)
-        profile_status = _load_profile(profile.content)
+        profile_status = _load_profile(profile.content, self.inputs.path / profile_path)
         endpoints, ceilings = _plan_bindings(plan_value, profile_status)
         grant = self.validator.validate(
             capability.content,
@@ -370,7 +377,7 @@ class LivePreparationTools:
             capability_path, profile_path, plan_path
         )
         plan_value = _load_plan(plan.content)
-        profile_status = _load_profile(profile.content)
+        profile_status = _load_profile(profile.content, self.inputs.path / profile_path)
         endpoints, ceilings = _plan_bindings(plan_value, profile_status)
         grant = self.validator.validate(
             capability.content,
@@ -460,7 +467,7 @@ class LivePreparationTools:
             manifest_path, maximum=MAX_LIVE_INPUT_BYTES
         )
         plan_value = _load_plan(plan.content)
-        profile_status = _load_profile(profile.content)
+        profile_status = _load_profile(profile.content, self.inputs.path / profile_path)
         _verify_manifest(plan_value, manifest.content)
         _require_one_call(plan_value)
         # The same approval gate as `campaign run` (bn-wcx2): the frozen

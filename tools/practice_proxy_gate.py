@@ -53,6 +53,11 @@ CALL_SECONDS = "3"
 # The media-scope stop must hang up within this many RTP packets sent to the
 # unapproved media address (it was about 27 before the early call dump).
 SCOPE_STOP_MAX_PACKETS = 10
+# The calls the whole gate may place under the practice approval from its own
+# directory: the signaling-only call, the legacy campaign and the INVITE
+# attempts of both checks runs share one count (bn-2sfn), about 8 in all.
+GATE_CALL_BUDGET = 12
+
 SIPP_MANIFEST = """\
 apiVersion: sippycup.dev/v1
 kind: Campaign
@@ -349,6 +354,7 @@ class ProxyGate(practice_gate.Gate):
         document = yaml.safe_load(source.read_text(encoding="utf-8"))
         document["name"] = "proxy-gate-signaling-only"
         document["target"]["approved_addresses"] = [self.proxy]
+        document["limits"]["max_calls"] = GATE_CALL_BUDGET
         practice.write_private(self.host_path("signaling-only.yaml"),
                                yaml.safe_dump(document, sort_keys=False))
         status, value = self.guided(
@@ -502,6 +508,8 @@ class ProxyGate(practice_gate.Gate):
         document["metadata"]["name"] = "proxy-gate-legacy-networks"
         authorization = document["authorization"]
         authorization["networks"] = [*authorization["networks"], *authorization.pop("mediaNetworks")]
+        # See GATE_CALL_BUDGET: this directory's calls share one count.
+        authorization["ceilings"]["calls"] = GATE_CALL_BUDGET
         practice.write_private(self.host_path("campaign-legacy.yaml"), yaml.safe_dump(document, sort_keys=False))
         code, result, events, run_dir = self.campaign(self.work_path("campaign-legacy.yaml"), "legacy")
         plan = json.loads((run_dir / "plan.json").read_text(encoding="utf-8")) if run_dir else {}
@@ -531,7 +539,7 @@ class ProxyGate(practice_gate.Gate):
 
     def checks_profile(self, source: str, name: str, section: dict[str, Any]) -> str:
         document = yaml.safe_load((practice.state_dir(self.project) / source).read_text(encoding="utf-8"))
-        document["limits"]["max_calls"] = 3
+        document["limits"]["max_calls"] = GATE_CALL_BUDGET  # see GATE_CALL_BUDGET
         document["security_checks"] = section
         practice.write_private(self.host_path(name), yaml.safe_dump(document, sort_keys=False))
         return self.work_path(name)

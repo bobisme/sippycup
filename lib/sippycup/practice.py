@@ -120,6 +120,10 @@ STATE_FILES = {
     "profile_matrix_proxy_tls": "target-profile-matrix-proxy-tls.yaml",
 }
 MATRIX_MAX_CALLS = 12
+# The calls one practice approval window (one `practice-target up`) allows in
+# work/practice, across call, matrix, checks and campaign runs together
+# (bn-2sfn). Each profile's limits.max_calls still bounds one command.
+PRACTICE_CALL_BUDGET = 200
 # (one-call profile, matrix-ready profile) pairs, in `info` order.
 MATRIX_PROFILES = (
     ("target-profile.yaml", "target-profile-matrix.yaml"),
@@ -524,6 +528,14 @@ def prepare(
             matrix_variant((state / source_name).read_text(encoding="utf-8")),
         )
     archive_approvals(state, started)
+    # Each `up` issues a new practice approval window; the call ledger in
+    # work/practice starts counting it afresh, with the bench's budget
+    # (bn-2sfn). Gates and rehearsals place many calls per `up`.
+    from sippycup import call_ledger
+
+    call_ledger.new_approval_window(
+        state, approval_id=APPROVAL_ID, budget=PRACTICE_CALL_BUDGET, by="practice-target up",
+    )
     ulaw_to_wav(
         project / "media" / "canary-v1" / "caller_to_callee.pcmu",
         state / "phrase.wav",
