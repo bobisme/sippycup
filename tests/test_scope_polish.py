@@ -5,9 +5,11 @@ Offline only: nothing here opens a socket or starts a container.
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -111,6 +113,18 @@ class CredentialRefFormatTests(ScopeTestCase):
 
 
 class PracticeExampleTests(ScopeTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        # The example names work/practice/ca.crt, which `practice-target up` writes.
+        # Tests never read git-ignored state: a fixture CA stands in for it.
+        work = Path(self._temporary.name) / "work"
+        (work / "practice").mkdir(parents=True)
+        fixture = ROOT / "tests" / "fixtures" / "tls" / "test-ca.crt"
+        (work / "practice" / "ca.crt").write_bytes(fixture.read_bytes())
+        patcher = mock.patch.dict(os.environ, {"SIPPYCUP_WORK_ROOT": str(work)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def example_text(self, *, in_window: bool) -> str:
         text = PRACTICE_EXAMPLE.read_text()
         if in_window:
@@ -134,6 +148,12 @@ class PracticeExampleTests(ScopeTestCase):
         self.assertEqual(profile["target"]["approved_destinations"], ["echo", "dtmf"])
         self.assertTrue(rehearse(profile, now=NOW).ready)
         self.assertTrue((self.root / "campaign.yaml").is_file())
+        # The TLS profile that the doc passes to matrix and to `--srtp mandatory`.
+        tls = load_profile(self.root / "target-profile-tls.yaml")
+        self.assertEqual(tls["target"]["transport"], "tls")
+        self.assertEqual(tls["target"]["port"], 5061)
+        self.assertEqual(tls["target"]["approved_destinations"], ["echo"])
+        self.assertTrue(rehearse(tls, now=NOW).ready)
 
     def test_example_credential_ref_has_the_documented_format(self) -> None:
         document = yaml.safe_load(PRACTICE_EXAMPLE.read_text())

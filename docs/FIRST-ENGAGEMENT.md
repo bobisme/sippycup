@@ -57,7 +57,11 @@ Edit `valid_from` and `valid_until` in `work/acme/scope.yaml` (UTC, trailing
 `Z`; the window must contain the current time). The file ships with a window
 in the past on purpose: until you set it, `scope check` stops with
 `scope.window_expired`. Nothing else needs to change. Its `credential_ref` is
-`practice-password`.
+`practice-password`. It has two targets, `practice` (UDP, profile
+`target-profile.yaml`) and `tls` (TLS, profile `target-profile-tls.yaml`,
+which the SRTP call and the matrix below use). The TLS target trusts the CA
+that `practice-target up` writes to `work/practice/ca.crt`; that is a new
+file after every `up`, so run `scope compile` again after every `up`.
 
 **The `credential_ref` format:** lowercase letters, digits and `-`, starting
 with a letter, at most 63 characters. `PRACTICE_PASSWORD`, `practice_password`
@@ -319,7 +323,7 @@ When they are right, the output contains these lines:
 ```sh
 ./bin/sippycup campaign plan work/acme/campaign.yaml --output work/acme/plan.json
 ./bin/sippycup --practice campaign run work/acme/plan.json --manifest work/acme/campaign.yaml \
-  --run-root work/acme/runs --interface lo --secret-env REF=ACME_PASSWORD
+  --run-root work/acme/runs --interface lo --secret-env practice-password=ACME_PASSWORD
 ```
 
 - When it is right:

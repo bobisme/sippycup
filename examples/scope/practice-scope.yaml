@@ -30,23 +30,21 @@ authorization:
 
 signaling:
   networks: [127.0.0.2]                  # the practice address (`info`: Address)
-  ports: [5060]
-  transports: [udp]                      # add tls (and port 5061) only if you also add the TLS target below
+  ports: [5060, 5061]
+  transports: [udp, tls]
 
 targets:
   - name: practice
     address: 127.0.0.2
     transport: udp
     port: 5060
-  # For the TLS profile (SRTP variant, matrix with tls): add 5061 to signaling.ports,
-  # tls to signaling.transports, and uncomment this target. The CA file is the one
-  # `practice-target up` writes; it is a new file after every `up`.
-  # - name: practice-tls
-  #   address: 127.0.0.2
-  #   transport: tls
-  #   port: 5061
-  #   tls_server_name: sippycup-practice
-  #   tls_ca_file: work/practice/ca.crt
+  - name: tls                           # its profile is target-profile-tls.yaml
+    address: 127.0.0.2
+    transport: tls
+    port: 5061
+    tls_server_name: sippycup-practice   # `info`: DNS SAN. Never resolved: packets go to the literal address.
+    tls_ca_file: work/practice/ca.crt    # written by `practice-target up`; a NEW file after every `up`,
+                                         # so run `scope compile` again after each `up`
 
 media:
   networks: [127.0.0.2]                  # the practice media address (same as signaling here)
@@ -67,12 +65,18 @@ account:
                                          # letters, digits and "-", starting with a letter (no "_", no upper case)
   credential_delivery: other             # secret-manager | encrypted-message | in-person | phone-call | other
 
-destinations:
+destinations:                            # `target:` is required because there are two targets
   - name: echo
+    target: practice
     user: echo
     expect: echo
   - name: dtmf
+    target: practice
     user: dtmf
+    expect: echo
+  - name: echo-tls
+    target: tls
+    user: echo
     expect: echo
 
 limits:                                  # generous for practice; a real owner gives these numbers
