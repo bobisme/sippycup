@@ -194,3 +194,8 @@
 1795040584058134	sippycup-2u2m2v	itc:AQ		item.move	bn-328	{"state":"done"}	blake3:odPYxb3WajGSY052dSh3Hfcs-rt2ZYR4L45Ax-RSIk8
 1795040584074129	sippycup-2u2m2v	itc:AQ		item.move	bn-3df	{"state":"done"}	blake3:O02vrtoN-luowaDX2wUKgb-BcXP-BO-TehAErYXNtZU
 1795042563530641	sippycup-2u2m2v	itc:AQ		item.comment	bn-65l	{"body":"2026-11-18: intake half merged (platform + application sections, question sheet part 2, application-surfaces.yaml record). Remaining: adapter skeleton and web-security contract binding, which need the live runner (bn-upd)."}	blake3:MLUP634czsD4drg_qWBNDw2yf4XUd7aFOPiR4Dsd6T4
+1795051067970268	sippycup-2u2m2v	itc:AQ		item.move	bn-28vz	{"state":"done"}	blake3:cdX-TUe4i5kv5mi7hgoIfz9tft05jFi8JI9eU0ONIXA
+1795051067986196	sippycup-2u2m2v	itc:AQ		item.move	bn-wcx2	{"state":"done"}	blake3:TFLyFQBf-sFXVo2yU9hxvm1nmQGJNvPp6QZvbd9lXn0
+1795051068003989	sippycup-2u2m2v	itc:AQ		item.move	bn-2sfa	{"state":"done"}	blake3:NBusk08MQv3w4Kv_kRA1fkmpMwOkqz7SlIOAz_47NgA
+1795051068019228	sippycup-2u2m2v	itc:AQ		item.move	bn-2yib	{"state":"done"}	blake3:mWuK5TjXHQr9r4OoJ4H4fLL5JqFPwoxTPJYsJVSobDM
+1795051068118706	sippycup-2u2m2v	itc:AQ		item.create	bn-3oib	{"description":"From the bn-2sfa fix. Sequential campaign steps are now attributed by dialog lifetime; overlapping calls are not. Give each step a distinct --rtp-port or feed step start/end times from events.jsonl to the oracle. Also: tests/oracle is not run by the host suite (no __init__.py), only by make oracle-test.","kind":"bug","size":"m","title":"Oracle cannot separate a TLS call's RTP from a concurrent cleartext call: every PJSUA call binds local RTP port 4000"}	blake3:50zhtXqCos4l-dk86z21B6yhdyPTsL8693DX3JKbNOU
