@@ -46,7 +46,7 @@ give. For the practice target, copy the worked example over the pending
 form below is GNU `date`, as on this Linux host):
 
 ```sh
-./bin/sippycup practice-target up
+./bin/sippycup practice-target up      # "container ... already exists" means it is already up: carry on
 cp examples/scope/practice-scope.yaml work/acme/scope.yaml
 chmod 600 work/acme/scope.yaml
 date -u +%Y-%m-%dT%H:%M:%SZ                    # now: paste into valid_from
@@ -263,6 +263,10 @@ then refuse to run without `--profile`. `./bin/sippycup shell` and
 `./bin/sippycup -- COMMAND` are never checked against an approval and say so
 (`Scope: UNBOUND ...` on stderr). See "Scope binding" in [CLI.md](CLI.md).
 
+On the practice target `ready` can also print a `[WARN] Profile target-profile-tls`
+line: the practice CA lives two days, so it says the CA expires in under 7
+days. Expected there; on a real engagement read it as a real warning.
+
 When it is right:
 
 ```text
@@ -330,9 +334,9 @@ When they are right, the output contains these lines:
 
 - When it is right:
   - `plan` prints
-    `Wrote frozen plan: work/acme/plan.json (3 step(s); review it before running)`
+    `Wrote frozen plan: work/acme/plan.json (4 step(s); review it before running)`
     and the next command. Read the plan before you run it.
-  - `run` prints `Campaign: SUCCEEDED (3 of 3 step(s) completed; exit 0)`
+  - `run` prints `Campaign: SUCCEEDED (4 of 4 step(s) completed; exit 0)`
     and a `Record it:` line.
 - The plan is bound to the approval window from `scope.yaml`. `run` checks
   the window before every step and stops before a step that could end after
