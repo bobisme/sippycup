@@ -49,8 +49,9 @@ STAGES: tuple[StageText, ...] = (
         3,
         "Scope",
         "Record the service owner's written answers once in the private "
-        "scope.yaml: `scope init`, send the `scope questions` sheet, fill the "
-        "file from the written reply, `scope check` until it is complete and "
+        "scope.yaml: `scope init`, send the `scope questions` sheet, record the "
+        "written reply with `scope answer` (or edit the file by hand), `scope "
+        "check` until it is complete and "
         "consistent, then `scope compile` to generate the target profile, "
         "campaign manifest, and oracle expectations. The file holds credential "
         "reference names only, never a password.",

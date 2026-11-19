@@ -372,6 +372,16 @@ def _scope_facts(
                 argv=["./bin/sippycup", "scope", "questions", str(root)],
             )
         )
+        if report.document is not None:
+            actions.append(
+                _action(
+                    "scope-answer",
+                    "Record the owner's written answers (interactive)",
+                    "Asks each open question and checks each answer with the scope check rules; "
+                    "editing scope.yaml by hand works too.",
+                    argv=["./bin/sippycup", "scope", "answer", str(root)],
+                )
+            )
     state = derivatives["state"]
     if state in {"stale", "invalid"}:
         stale = sorted(
@@ -685,7 +695,8 @@ def assess(
                     "Record a destination for the guided baseline call",
                     "The guided call needs a destination; none is recorded in the scope.",
                     instruction=(
-                        "Add the owner's destinations[] (user, expect) to scope.yaml and compile, "
+                        f"Record the owner's destinations with ./bin/sippycup scope answer {root} destinations "
+                        "(or add destinations[] with user and expect to scope.yaml by hand) and compile, "
                         "then run ./bin/sippycup call PROFILE --dial USER --dry-run."
                     ),
                 )

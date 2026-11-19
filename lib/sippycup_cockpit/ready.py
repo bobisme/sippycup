@@ -194,7 +194,11 @@ def check_scope(model: dict[str, Any]) -> Check:
     else:
         detail = [f"scope.yaml is {state}: {len(errors)} problem(s) to fix"]
     detail += [f"  {item}" for item in errors[:5]]
-    return Check("scope", "Scope compiled and current", NOGO, detail, f"{LAUNCHER} scope check {eng}")
+    fix = (f"{LAUNCHER} scope answer {eng}   (records the open answers, checks each, and ends with scope check;"
+           " or edit scope.yaml by hand and run scope check)" if state == "incomplete" else
+           f"{LAUNCHER} scope check {eng}   (then correct the answer it names with {LAUNCHER} scope answer {eng}"
+           " QUESTION, or by hand)")
+    return Check("scope", "Scope compiled and current", NOGO, detail, fix)
 
 
 def check_profile(model: dict[str, Any]) -> Check:
@@ -299,7 +303,8 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
         # as pending, and an expired window is one of those errors).
         if end is not None and now >= end:
             return Check("window", "Approval window", NOGO, lines + ["EXPIRED"],
-                         f"get a renewed written approval, update authorization in {eng}/scope.yaml, then "
+                         f"get a renewed written approval, record it with {LAUNCHER} scope answer {eng} "
+                         f"authorization.window (or edit authorization in {eng}/scope.yaml), then "
                          f"{LAUNCHER} scope compile {eng}")
         if start is not None and now < start:
             return Check("window", "Approval window", NOGO,
@@ -310,9 +315,11 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
                 model.get("profile") or {}).get("present"):
             return Check("window", "Approval window", NOGO,
                          lines + [f"authorization: {auth.get('text')}, because scope.yaml has errors"],
-                         f"{LAUNCHER} scope check {eng}   (fix what it reports, then scope compile {eng})")
+                         f"{LAUNCHER} scope check {eng}   (fix what it reports with {LAUNCHER} scope answer {eng} "
+                         f"or by hand, then scope compile {eng})")
         return Check("window", "Approval window", NOGO, lines + [f"authorization: {auth.get('text')}"],
-                     f"record the owner's written approval in {eng}/scope.yaml, then {LAUNCHER} scope compile {eng}")
+                     f"record the owner's written approval with {LAUNCHER} scope answer {eng} authorization.status "
+                     f"(or in {eng}/scope.yaml by hand), then {LAUNCHER} scope compile {eng}")
     if start is not None and now < start:
         return Check("window", "Approval window", NOGO,
                      lines + [f"not open yet: opens in {_duration((start - now).total_seconds())}"],
@@ -320,7 +327,8 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
     remaining = (end - now).total_seconds()
     if remaining <= 0:
         return Check("window", "Approval window", NOGO, lines + ["EXPIRED"],
-                     f"get a renewed written approval, update authorization in {eng}/scope.yaml, then "
+                     f"get a renewed written approval, record it with {LAUNCHER} scope answer {eng} "
+                     f"authorization.window (or edit authorization in {eng}/scope.yaml), then "
                      f"{LAUNCHER} scope compile {eng}")
     lines.append(f"remaining  {_duration(remaining)}")
     need = f"margin {margin_minutes} min" + (f" + the frozen campaign plan's {planned} s" if planned else "")
@@ -595,7 +603,8 @@ def check_tls(host: Host, model: dict[str, Any], profile_document: dict[str, Any
     eng = model["engagement"]["display"]
     title = "TLS trust"
     lines: list[str] = []
-    fix_scope = f"edit targets[] in {eng}/scope.yaml, then {LAUNCHER} scope compile {eng}"
+    fix_scope = (f"{LAUNCHER} scope answer {eng} targets (or edit targets[] in {eng}/scope.yaml), then "
+                 f"{LAUNCHER} scope compile {eng}")
     name = target.get("tls_server_name")
     if not name:
         return Check("tls", title, NOGO,
@@ -695,8 +704,11 @@ def check_network(host: Host, model: dict[str, Any], mode: str, probe: dict[str,
     if not address:
         eng = model["engagement"]["display"]
         compilable = (model.get("scope") or {}).get("state") in {"complete", "complete-not-compiled", "stale"}
+        state = (model.get("scope") or {}).get("state")
         return Check("network", title, NOGO, ["no target address yet"],
                      f"{LAUNCHER} scope compile {eng}" if compilable else
+                     f"{LAUNCHER} scope answer {eng}   (answer what is open first, or edit scope.yaml by hand; "
+                     "scope compile writes the profile only from a complete scope)" if state == "incomplete" else
                      f"{LAUNCHER} scope check {eng}   (answer what it lists in scope.yaml first; "
                      "scope compile writes the profile only from a complete scope)"), None
     if mode == "--practice":

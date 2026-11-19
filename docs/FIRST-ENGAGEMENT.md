@@ -36,12 +36,42 @@ The `umask` keeps the file private like the other engagement files (a plain
   have their written answers: the literal addresses, the window, the limits,
   the destinations, the account, and, for the proxy shape, the media network
   and the media port range.
+- If `scope init` says `engagement directory does not exist`, run the
+  `journal init ... --title "..." --owner "..."` command it prints first.
 
-### Practice target: the scope file is already written for you
+### Practice target: answer the questions as you will for the owner
 
 `./bin/sippycup practice-target info` prints the address, ports, account and
 realm, but not a window, limits, contact or the other answers an owner would
-give. For the practice target, copy the worked example over the pending
+give. The worked example `examples/scope/practice-scope.yaml` has all of them.
+Rehearse the real step: run `scope answer` and type the example's values
+(its comments say where each one comes from):
+
+```sh
+./bin/sippycup practice-target up      # "container ... already exists" means it is already up: carry on
+./bin/sippycup scope answer work/acme
+```
+
+| Question | Type |
+|---|---|
+| 1 | `LOCAL-PRACTICE-ONLY`, `practice target (you)` |
+| 3 | `UTC`, `now`, `+4h` |
+| 2 | `approved` (on a real engagement: only with the owner's written approval) |
+| 4 | `127.0.0.2` |
+| 5 | `5060, 5061`, `udp, tls`; target `practice` `127.0.0.2` `udp` `5060`, `y`; target `tls` `127.0.0.2` `tls` `5061`, certificate name `sippycup-practice`, CA `work/practice/ca.crt`, `n` |
+| 7 | `127.0.0.1` |
+| 8 to 10 | `yes`; `practice`, `sippycup-practice`; `practice-password`, `other` |
+| 11 | `echo` `practice` `echo` `echo`, `y`; `dtmf` `practice` `dtmf` `echo`, `y`; `echo-tls` `tls` `echo` `echo`, `n` |
+| 12 to 16 | `127.0.0.2`; `20000`, `20019`; `rtp, sdes-srtp`; `PCMU, PCMA`, `rfc4733`; `yes` |
+| 17 to 19 | `40`, `2`, `1`; `200`, `200000`, `50000000`; `60`, `3600` |
+| 20 to 23 | `3`, `yes`, `20`; `options, call`, `none`; `you`, `this terminal`, `yes`; `7`, `private` |
+
+It ends with `Scope: COMPLETE and CONSISTENT` and
+`Next: ./bin/sippycup scope compile work/acme`. A typing mistake is refused
+with the reason and asked again; `quit` stops and keeps what you typed, and
+`./bin/sippycup scope answer work/acme 11` changes one answer later.
+
+Faster, the hand-edit route: copy the worked example over the pending
 `scope.yaml` that `scope init` made, and set the window (the `date -u -d`
 form below is GNU `date`, as on this Linux host):
 
@@ -84,10 +114,11 @@ the scope file with the two extra sections:
 ```
 
 For a scope file that exists already, copy the `platform:` and `application:`
-sections from `examples/scope/platform-scope.yaml`.
+sections from `examples/scope/platform-scope.yaml`. `scope answer` then also
+asks P1 to P18 and A1 to A6.
 
-- Write each answer as the owner gave it. If the owner does not know, write
-  `unknown`. If you are waiting for an answer, write `pending`. Never guess.
+- Write each answer as the owner gave it. If the owner does not know, type
+  `unknown`. If you are waiting for an answer, type `pending`. Never guess.
 - A name is not an address. Ask for the literal IP address behind every
   public name, and whether it is shared with other customers or changes.
 - The owner cannot give permission for another company. Record the hosting
@@ -102,13 +133,23 @@ sections from `examples/scope/platform-scope.yaml`.
 
 ## 1. Scope (offline)
 
-Write the owner's answers into `work/acme/scope.yaml`, then:
+Record the owner's written answers, then check and compile:
 
 ```sh
+./bin/sippycup scope answer work/acme
 ./bin/sippycup scope check work/acme
 ./bin/sippycup scope compile work/acme
 ./bin/sippycup rehearse work/acme/target-profile.yaml
 ```
+
+`scope answer` shows each open question as the owner saw it, asks its answers
+one field at a time, checks each with the `scope check` rules, and saves it at
+once. Press Enter where the owner has not answered: the question stays open.
+Run it again when more answers come in; `scope answer work/acme NUMBER`
+changes one answer. It records `approved` only when you type that word, and
+typing it asserts that you hold the owner's written approval. You can also
+edit `work/acme/scope.yaml` by hand (mode 0600); both give the same file. See
+`SCOPE-INTAKE.md`, "scope answer".
 
 - If `scope check` or `scope compile` prints an `ERROR`, it names the field
   (for example `[destinations[0].expect]`) and, for a YAML mistake, the line
@@ -135,8 +176,9 @@ Write the owner's answers into `work/acme/scope.yaml`, then:
   accept for `--dial` with that profile, for example
   `Destinations: echo, dtmf (the only values call and matrix accept for --dial with this profile)`.
   They are the `destinations[].user` values of that target in `scope.yaml`.
-  To dial another destination, ask the owner, add it to `destinations` in
-  `scope.yaml`, and run `scope compile` again. Never edit a profile.
+  To dial another destination, ask the owner, add it with
+  `./bin/sippycup scope answer work/acme destinations` (type `add`) or in
+  `scope.yaml` by hand, and run `scope compile` again. Never edit a profile.
 - **More than one target (for example UDP and TLS):** compile writes one
   profile for each entry of `targets` in `scope.yaml`. Do not copy or edit a
   profile by hand.
@@ -226,9 +268,10 @@ cockpit refuses LIVE actions until a GO exists for the current profile. See
 [COCKPIT.md](COCKPIT.md).
 
 When the approval window has ended or has not opened yet, `ready`, `rehearse`
-and `call` say so first (`EXPIRED`, `not open yet`). Fix the window in
-`scope.yaml`: ask the owner for a new written window (see "Stop conditions"),
-record it, and run `scope compile`.
+and `call` say so first (`EXPIRED`, `not open yet`). Ask the owner for a new
+written window (see "Stop conditions"), record it with
+`./bin/sippycup scope answer work/acme authorization.window` (or in
+`scope.yaml` by hand), and run `scope compile`.
 
 The "last 4 characters of the approval id" prompt appears only in the cockpit
 (`./bin/sippycup go`), before it starts a LIVE action. `call`, `matrix run`
@@ -348,8 +391,10 @@ When they are right, the output contains these lines:
 
 ## 6. Security checks (LIVE, only if the owner approved them)
 
-Add this to the scope: `security_checks.approved` (ids from
-`./bin/sippycup checks list`), `max_requests`, and `security-checks` in
+Record them with `./bin/sippycup scope answer work/acme 24`: the approved ids
+(from `./bin/sippycup checks list`) and `max_requests`; it adds
+`security-checks` to `test_scope.allowed_classes` with them. By hand: add
+`security_checks.approved`, `max_requests`, and `security-checks` in
 `test_scope.allowed_classes`. Then run `scope compile` again.
 
 ```sh
@@ -456,7 +501,7 @@ Each row is an error or verdict seen in this walk-through:
 | You see | Cause | Do |
 |---|---|---|
 | `Guided call: REGISTRATION-FAILED` (401) | wrong password. On the practice target: the copy in your engagement directory is from before the last `practice-target up` | Stop. Check the password file with the owner. Do not retry. Practice only: copy `work/practice/account.password` again (section 2). |
-| `Guided call: BLOCKED` / `BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf)` (exit 2) | typo in `--dial` (`ecoh`), or a destination that is not in the scope | Nothing was sent. Use a destination from the `approved:` list. For a new one, ask the owner, add it to `destinations` in `scope.yaml`, and run `scope compile`. |
+| `Guided call: BLOCKED` / `BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf)` (exit 2) | typo in `--dial` (`ecoh`), or a destination that is not in the scope | Nothing was sent. Use a destination from the `approved:` list. For a new one, ask the owner, add it with `scope answer work/acme destinations` (or in `scope.yaml`), and run `scope compile`. |
 | `Guided call: CALL-NOT-FOUND` (404) | the destination is in the scope, but the platform has no such user; or the profile has no destination list (`rehearse` prints `Destinations: NOT RESTRICTED`) and `--dial` has a typo | Run the `Diagnose:` line: it says whether the destination was on the approved list. Ask the owner for the exact destination. Do not guess. |
 | `Guided call: PREFLIGHT-FAILED` ... `Hostname mismatch ... [TLS UNVERIFIED]` | wrong `tls_server_name` | Use the certificate name that the owner gave. |
 | `PREFLIGHT-FAILED` ... `unable to get local issuer certificate` | wrong or stale `tls_ca_file` | Get the owner's CA again. |

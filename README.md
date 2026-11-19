@@ -295,11 +295,14 @@ expectations:
 ```sh
 ./bin/sippycup scope init work/voice-assessment
 ./bin/sippycup scope questions work/voice-assessment
+./bin/sippycup scope answer work/voice-assessment
 ./bin/sippycup scope check work/voice-assessment
 ./bin/sippycup scope compile work/voice-assessment
 ```
 
-`scope questions` renders the question sheet to send to the owner, `check`
+`scope questions` renders the question sheet to send to the owner, `answer`
+records the owner's written answers question by question (each checked as it is
+typed; hand-editing `scope.yaml` works too), `check`
 reports exactly which answers are missing or inconsistent, and `compile`
 generates the target profile, a baseline campaign manifest, and oracle
 expectations that pass their existing validators. All of it is offline, and the
