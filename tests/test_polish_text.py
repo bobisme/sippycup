@@ -90,5 +90,54 @@ class CockpitTextTests(unittest.TestCase):
         self.assertIn("the cockpit asks for the password source itself", text)
 
 
+class StopWordingTests(unittest.TestCase):
+    """Finding 16: `stop` says what it proved without contradicting the lines above, and prints a runnable journal line."""
+
+    def render(self, *, engagement=None, practice_running=True) -> str:
+        import test_stop
+        from sippycup_cockpit import stop
+
+        containers = test_stop.standard_containers()
+        if not practice_running:
+            containers = [c for c in containers if c["Id"] != test_stop.PRACTICE]
+        host = test_stop.FakeHost(containers)
+        report = test_stop.run_stop(host)
+        return "\n".join(stop.render(report, engagement))
+
+    def test_silence_line_does_not_claim_no_container_while_the_practice_target_is_listed(self) -> None:
+        text = self.render()
+        self.assertIn("untouched ws-practice (the practice target; add --include-practice)", text)
+        self.assertIn("Silence: PROVED. No Sippycup sender", text)
+        self.assertNotIn("No container of this checkout is running", text)
+        self.assertIn("The practice target is still up", text)
+        self.assertIn("it is a server and sends nothing on its own", text)
+
+    def test_silence_line_without_a_practice_target_has_no_practice_sentence(self) -> None:
+        self.assertNotIn("practice target is still up", self.render(practice_running=False))
+
+    def test_placeholder_journal_line_is_explained(self) -> None:
+        text = self.render()
+        self.assertIn("work/NAME is a placeholder", text)
+        self.assertIn("--engagement DIR", text)
+
+    def test_named_engagement_has_no_placeholder_note(self) -> None:
+        text = self.render(engagement="work/acme")
+        self.assertIn("journal add work/acme", text)
+        self.assertNotIn("placeholder", text)
+
+    def test_a_single_engagement_is_used_without_being_named(self) -> None:
+        import test_stop
+        from cockpit_support import make_engagement, make_repo
+        from sippycup_cockpit import stop
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(Path(tmp))
+            make_engagement(repo, "only-one")
+            self.assertEqual("work/only-one", stop.default_engagement(repo))
+            make_engagement(repo, "second")
+            self.assertIsNone(stop.default_engagement(repo))
+            del test_stop
+
+
 if __name__ == "__main__":
     unittest.main()
