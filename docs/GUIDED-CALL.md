@@ -369,6 +369,10 @@ media is captured in both directions whatever local port PJSUA picks.
 `softphone.local_rtp_port` reports the port from PJSUA's SDP offer (PJSUA
 starts at 4000 and takes the next free pair). The driver's
 `allowed_media_ports` range applies to the remote (target) media port only.
+The run also writes that port, the local address, and the call's start and
+end to `call-media.json` before the oracle runs, so `assert` tells this
+call's media from that of any other call in the capture (see
+`media-invariants.md`, "The run's record of local RTP ports").
 
 ## Run directory
 

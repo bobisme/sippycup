@@ -591,6 +591,73 @@ def local_source_addresses(plan: dict[str, Any]) -> list[str]:
     return found
 
 
+_STEP_ENDED = {
+    "step.succeeded", "step.failed", "step.timed_out", "step.cancelled", "step.start_failed",
+}
+
+
+def call_media_record(
+    run_dir: Path, plan: Mapping[str, Any], softphone_steps: Sequence[int]
+) -> dict[str, Any] | None:
+    """The run's ``call-media.json``: each softphone call's local RTP port (bn-3oib).
+
+    The port is the one PJSUA advertised in its SDP offer (from the step's
+    softphone.json); the window is the step's start and end in events.jsonl.
+    ``None`` when no softphone step started. A started step without a usable
+    port makes the record incomplete, so the oracle does not rely on it for
+    ports it does not list.
+    """
+    from sippycup_oracle.call_media import call_media_document, recorded_call
+
+    windows: dict[int, list[int | None]] = {}
+    try:
+        with (run_dir / "events.jsonl").open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                step = event.get("step") if isinstance(event, dict) else None
+                at = event.get("timeUnixNs") if isinstance(event, dict) else None
+                if type(step) is not int or type(at) is not int:
+                    continue
+                if event.get("event") == "step.started":
+                    windows[step] = [at, None]
+                elif event.get("event") in _STEP_ENDED and step in windows:
+                    windows[step][1] = at
+    except OSError:
+        return None
+    wanted = set(softphone_steps)
+    by_index = {step["index"]: step for step in plan["steps"]}
+    started = sorted(index for index in windows if index in wanted)
+    if not started:
+        return None
+    calls: list[dict[str, Any] | None] = []
+    for index in started:
+        begin, end = windows[index]
+        step = by_index[index]
+        try:
+            summary = json.loads(
+                (_step_artifact_directory(run_dir, step) / "softphone.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        except (OSError, ValueError):
+            summary = {}
+        destination = step["destination"]
+        calls.append(
+            recorded_call(
+                f"step {index}",
+                destination["transport"],
+                _local_source_address(destination["addresses"][0], destination["port"]),
+                summary.get("localRtpPort") if isinstance(summary, dict) else None,
+                begin,
+                end if end is not None else time.time_ns(),
+            )
+        )
+    return call_media_document(calls, placed=len(started))
+
+
 def sip_options_preflight(
     destination: dict[str, Any],
     *,
@@ -1237,6 +1304,18 @@ def _execute_campaign(
         else:
             (run_dir / "report.txt").write_text("capture disabled or unavailable\n")
             (run_dir / "report.stderr").write_text("")
+        # bn-3oib: the local RTP port of each softphone call, next to the
+        # capture, so the oracle can tell whose media is whose.
+        try:
+            call_media = call_media_record(
+                run_dir,
+                plan,
+                [index for index, name in step_runner_names.items() if name == SOFTPHONE_RUNNER],
+            )
+        except Exception:  # pragma: no cover - evidence only, never fails the run
+            call_media = None
+        if call_media is not None:
+            _write_json(run_dir / "call-media.json", call_media)
         _write_json(
             run_dir / "result.json",
             {

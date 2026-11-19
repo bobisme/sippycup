@@ -29,9 +29,10 @@ from .media import (
     Applicability,
     AssertionResult,
     MediaExpectations,
-    attribute_media_frames,
+    attribute_media,
     evaluate_invariants,
 )
+from .call_media import CALL_MEDIA_FILE, CallMediaError, CallMediaRecord, load_call_media
 from .records import (
     RESULT_SCHEMA_VERSION,
     EvidenceRef,
@@ -236,6 +237,7 @@ def build_result_document(
     *,
     on_unknown: str = "inconclusive",
     dialog_selector: str | None = None,
+    call_media: CallMediaRecord | None = None,
 ) -> dict[str, Any]:
     if len(capture.frames) > MAX_ANALYSIS_FRAMES:
         raise ValueError("capture exceeds the analysis frame limit")
@@ -250,9 +252,12 @@ def build_result_document(
     # Media is attributed across every visible dialog, so a selected call
     # never receives another visible call's media and that media is not
     # reported as unattributed either.
-    all_assigned, all_ambiguity, unattributed = attribute_media_frames(
-        capture.frames, reconstruction.dialogs
+    attribution = attribute_media(
+        capture.frames, reconstruction.dialogs, call_media
     )
+    all_assigned = attribution.assigned
+    all_ambiguity = attribution.ambiguous
+    unattributed = attribution.unattributed
     selected = [
         index
         for index, dialog in enumerate(reconstruction.dialogs)
@@ -346,6 +351,13 @@ def build_result_document(
         # bn-2sfa: media no visible dialog can own (typically a call whose
         # signaling was TLS-encrypted) is reported, never judged against the
         # nearest cleartext dialog and never counted as a failure.
+        record_note = (
+            f"; the run's {CALL_MEDIA_FILE} does not attribute them to one call either "
+            "(an unrecorded local port, or one port recorded for two calls at that time)"
+            if call_media is not None
+            else f"; the capture's directory has no {CALL_MEDIA_FILE} (the local RTP port "
+            "of each call), which runs made before it was recorded lack"
+        )
         orphan = AssertionResult(
             "media.attribution",
             Verdict.UNKNOWN,
@@ -353,11 +365,48 @@ def build_result_document(
             f"{len(unattributed)} RTP/RTCP packets could not be attributed to any SIP "
             "dialog visible in the capture (for example a call whose signaling was "
             "TLS-encrypted), so they were not judged; the dialogs above were judged "
-            "on their own media only",
+            "on their own media only" + record_note,
             unattributed,
             Unknown(UnknownReason.AMBIGUOUS, "media-to-dialog attribution"),
         )
         item = _assertion_json(_apply_unknown_policy(orphan, on_unknown), 0)
+        item["id"] = "capture.media.attribution"
+        assertions.append(item)
+    elif dialogs and attribution.recorded:
+        # bn-3oib: every packet has an owner. The media of calls whose
+        # signaling is not visible was attributed by the run's recorded local
+        # RTP port and call window; it was not judged, and the message says so.
+        calls = [call for call, _ in attribution.recorded]
+        packets = sum(len(items) for _, items in attribution.recorded)
+        evidence = tuple(
+            frame.evidence
+            for _, items in attribution.recorded
+            for frame in (items[0], items[-1])[: len(items)]
+        )
+        accounted = AssertionResult(
+            "media.attribution",
+            Verdict.PASS,
+            Applicability.APPLICABLE,
+            f"every RTP/RTCP packet belongs to one call: {packets} packets belong to "
+            f"{len(calls)} call(s) whose signaling is not visible in the capture ("
+            + "; ".join(call.label for call in calls)
+            + f"), attributed by the local RTP port and call window in the run's "
+            f"{CALL_MEDIA_FILE}; those packets were not judged, and the dialogs above "
+            "were judged on their own media only",
+            evidence,
+            Known(
+                [
+                    {
+                        "call": call.id,
+                        "transport": call.transport,
+                        "local_rtp_port": call.rtp_port,
+                        "packets": len(items),
+                    }
+                    for call, items in attribution.recorded
+                ]
+            ),
+        )
+        item = _assertion_json(accounted, 0)
         item["id"] = "capture.media.attribution"
         assertions.append(item)
     counts = {
@@ -504,6 +553,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if tshark_status != 0:
         print(f"TShark error: {tshark_stderr.strip()}", file=sys.stderr)
         return EXIT_INTERNAL
+    # bn-3oib: the run's own record of each call's local RTP port, next to
+    # the capture. A record that cannot be read is not used: the analysis
+    # then refuses to guess exactly as it does for a capture without one.
+    record_path = Path(args.capture).parent / CALL_MEDIA_FILE
+    try:
+        call_media = load_call_media(record_path)
+    except CallMediaError as exc:
+        print(
+            f"warning: {record_path} was not used ({exc}); media that no visible "
+            "dialog owns stays unattributed",
+            file=sys.stderr,
+        )
+        call_media = None
     try:
         capture = parse_tshark_json(tshark_stdout, capture_format)
         document = build_result_document(
@@ -511,6 +573,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expectation,
             on_unknown=on_unknown,
             dialog_selector=selector,
+            call_media=call_media,
         )
     except (CaptureDecodeError, ValueError, TypeError) as exc:
         print(f"analysis error: {exc}", file=sys.stderr)

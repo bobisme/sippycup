@@ -60,6 +60,7 @@ from sippycup_softphone.driver import (
     registrar_uri,
 )
 from sippycup_softphone import evidence as softphone_evidence
+from sippycup_oracle.call_media import call_media_document, recorded_call
 
 from .profile import (
     ProfileError,
@@ -2274,7 +2275,8 @@ def _execute(
         def abort() -> str | None:
             return None if capture.alive() else "capture_died"
 
-        timestamps["call_started"] = _utc(deps.now())
+        call_started = deps.now()
+        timestamps["call_started"] = _utc(call_started)
         result = deps.place_call(
             softphone_call,
             password=password,
@@ -2283,11 +2285,22 @@ def _execute(
             pjsua=tools["pjsua"],
             environment=child_environment,
         )
-        timestamps["call_ended"] = _utc(deps.now())
+        call_ended = deps.now()
+        timestamps["call_ended"] = _utc(call_ended)
         softphone_result = result.as_dict()
         if softphone_result.get("error") == "capture_died":
             stop_reason = "capture-died"
         _write_json(run_dir / "softphone.json", softphone_result)
+        # bn-3oib: this run's one call and its local RTP port, next to the
+        # capture, so the oracle tells this call's media from any other
+        # call's (for example one placed from another terminal).
+        _write_json(run_dir / "call-media.json", call_media_document(
+            [recorded_call(
+                "call", transport, local, softphone_result.get("local_rtp_port"),
+                int(call_started.timestamp() * 10**9), int(call_ended.timestamp() * 10**9),
+            )],
+            placed=1,
+        ))
     except _Finish:
         pass
     except Exception as error:  # keep the evidence and report honestly
