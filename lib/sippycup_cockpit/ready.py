@@ -983,6 +983,15 @@ def gate_facts(engagement: Path, profile_present: bool, now: datetime) -> dict[s
         ageSeconds=(now - generated).total_seconds() if generated else None,
     )
     facts["go"] = facts["current"] and facts["verdict"] == "GO"
+    # Which compiled profiles differ from what that check saw, for the line the
+    # cockpit prints ("the last check was before target-profile.yaml changed").
+    recorded_others = latest.get("otherProfiles") or {}
+    changed = []
+    if latest.get("profileSha256") != current:
+        changed.append("target-profile.yaml")
+    changed += sorted(path for path in set(others) | set(recorded_others)
+                      if others.get(path) != recorded_others.get(path))
+    facts["changedProfiles"] = [] if facts["current"] else changed
     return facts
 
 

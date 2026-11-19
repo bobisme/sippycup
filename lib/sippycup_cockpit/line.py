@@ -79,8 +79,14 @@ class LineUI:
                 else:
                     self.say("No such run.")
                 continue
-            if 1 <= number <= len(self.session.actions):
-                self.perform(self.session.actions[number - 1])
+            chosen = self.session.action_numbered(number)
+            if chosen is not None:
+                self.perform(chosen)
+                continue
+            retired = self.session.retired_title(number)
+            if retired:
+                self.say(f"Action {number} ({retired}) is not offered now. Press Enter to see the current "
+                         "list; numbers do not change during a session.")
             else:
                 self.say("No such action.")
 
@@ -99,7 +105,9 @@ class LineUI:
             choice = self.ask(f"Password source: 'file PATH' or 'env NAME' [file {confirmation.secret_default}]: ")
             if choice is None:
                 return
-            choice = choice.strip() or f"file {confirmation.secret_default}"
+            choice = choice.strip()
+            if not choice or choice.lower() in {"y", "yes"}:
+                choice = f"file {confirmation.secret_default}"  # Enter, or yes: take the offered default
             problem = self.session.apply_secret(confirmation, choice)
             if problem:
                 self.say(f"[!!] {problem}. Nothing was started.")
