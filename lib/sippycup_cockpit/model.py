@@ -222,6 +222,8 @@ def _scope_facts(root: Path, repo: Path, now: datetime) -> dict[str, Any]:
 
     facts["platform"] = platform_facts(report, root)
     for number, question in enumerate(QUESTIONS, 1):
+        if question.identifier == "security_checks" and "security_checks" not in report.document:
+            continue  # optional (question 24): an absent section approves no check and is not an open question
         if question_state(report, question) == "unanswered":
             facts["unanswered"].append({"number": number, "id": question.identifier,
                                         "section": question.section, "text": question.text})

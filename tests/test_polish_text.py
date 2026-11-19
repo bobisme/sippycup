@@ -59,5 +59,36 @@ class DryRunTextTests(GuidedCallCase):
         self.assertIn("one_call_plan", value)
 
 
+class CockpitTextTests(unittest.TestCase):
+    """Finding 13: cockpit lines that sent the operator the wrong way."""
+
+    def setUp(self) -> None:
+        from cockpit_support import NOW, compiled_engagement, make_repo
+
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.repo = make_repo(Path(self.temporary.name))
+        self.root = compiled_engagement(self.repo, now=NOW, account=True, go=False)
+        self.now = NOW
+
+    def model(self):
+        from sippycup_cockpit.model import build_model
+
+        return build_model(self.root, repo=self.repo, now=self.now)
+
+    def test_optional_security_checks_question_is_not_an_open_owner_question(self) -> None:
+        stage = next(item for item in self.model()["stages"] if item["id"] == "scope")
+        step = next(item for item in stage["steps"] if item["label"].startswith("owner questions answered"))
+        self.assertEqual("owner questions answered (0 open)", step["label"])
+        self.assertTrue(step["done"])
+
+    def test_live_call_command_names_the_password_source_when_pasted_into_a_shell(self) -> None:
+        from sippycup_cockpit.render import render_dashboard
+
+        text = "\n".join(render_dashboard(self.model(), now=self.now))
+        self.assertIn("--secret-file work/eng/account.password", text)
+        self.assertIn("the cockpit asks for the password source itself", text)
+
+
 if __name__ == "__main__":
     unittest.main()

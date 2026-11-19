@@ -173,6 +173,9 @@ def action_line(index: int, action: dict[str, Any]) -> list[str]:
              f"{status}" if action["stage"] in STAGE_BY_ID else f"{index:>2}. {action['label']:9} {action['title']}{status}"]
     if action.get("command"):
         lines.append(f"      {action['command']}")
+        if action.get("secretHint"):
+            lines.append(f"      (pasted into a shell, add {action['secretHint']} or --secret-env NAME; "
+                         "the cockpit asks for the password source itself)")
     elif action.get("instruction"):
         lines.append(f"      {action['instruction']}")
     return lines
