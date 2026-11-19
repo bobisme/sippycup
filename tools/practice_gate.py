@@ -584,6 +584,10 @@ class Gate:
                 document["target"].pop(key, None)
             else:
                 document["target"][key] = value
+        # The variants share this gate directory and the practice approval, so
+        # the owner's call limit counts their calls together (bn-2sfn): one
+        # attempted call each for the wrong-name and system-CA variants.
+        document["limits"]["max_calls"] = 2
         practice.write_private(self.host_path(name), yaml.safe_dump(document, sort_keys=False))
         return self.work_path(name)
 
