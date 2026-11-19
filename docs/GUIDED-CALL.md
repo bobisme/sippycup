@@ -503,11 +503,15 @@ The output ends with a journal command, for example:
 
 ```sh
 ./bin/sippycup journal add work/ENGAGEMENT --kind action \
-  --summary 'Guided baseline call (voice-staging): pass' \
+  --summary 'Guided call to echo over udp 192.0.2.10:5060 (voice-staging): pass' \
   --evidence calls/RUN_ID/result.json \
   --evidence calls/RUN_ID/evidence-manifest.json \
   --evidence calls/RUN_ID/capture.pcap
 ```
+
+The summary names the destination, the transport and address, the verdict,
+and what made the call different (`[SRTP mandatory, codec PCMA, DTMF]`), so a
+journal of several calls reads as several calls.
 
 ## Self-test
 
