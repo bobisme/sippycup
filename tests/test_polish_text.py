@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from test_engagement_report import engagement, run_cli  # noqa: E402
+from test_guided_call import Fakes, GuidedCallCase, guided  # noqa: E402
 
 
 class ReportPathTests(unittest.TestCase):
@@ -39,6 +40,23 @@ class ReportPathTests(unittest.TestCase):
         self.assertIn(f"{self.root}/report ", out + " ")
         # Nothing already written is deleted or changed.
         self.assertTrue((self.root / "report" / "report.json").is_file())
+
+
+class DryRunTextTests(GuidedCallCase):
+    """Finding 10: the dry-run text lists what `call` itself does, not a manual procedure."""
+
+    def test_dry_run_text_describes_what_call_does(self) -> None:
+        code, value = self.run_call(Fakes(), dry_run=True)
+        self.assertEqual(code, 0)
+        rendered = guided.render_human(value)
+        self.assertIn("What call does by itself", rendered)
+        self.assertIn("one SIP OPTIONS preflight to 192.0.2.10:5060", rendered)
+        self.assertIn("capture on interface", rendered)
+        for stale in ("speak the agreed canary phrase", "Press Ctrl-C", "./bin/sippycup capture --target",
+                      "place_manual_softphone_call"):
+            self.assertNotIn(stale, rendered)
+        # The machine-readable plan is unchanged.
+        self.assertIn("one_call_plan", value)
 
 
 if __name__ == "__main__":

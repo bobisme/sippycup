@@ -343,7 +343,7 @@ class GatingTests(GuidedCallCase):
         )
         rendered = guided.render_human(value)
         self.assertIn("Softphone parameters:", rendered)
-        self.assertIn("single_options_preflight", rendered)
+        self.assertIn("one SIP OPTIONS preflight", rendered)
         self.assertIn("password=environment variable SOME_NAME", rendered)
         self.assertTrue(rendered.rstrip().endswith("Network activity: none"))
 
