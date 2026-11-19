@@ -1615,6 +1615,14 @@ def place_call(
         result.codec = facts["codec"] or result.codec
         result.media_direction = facts["media_direction"]
         result.media_peer = facts["media_peer"] or result.media_peer
+        violation = result.scope_violation
+        if (result.media_peer is None and violation is not None and violation.get("kind") == "media"
+                and violation.get("what") != "RTCP" and violation.get("address") and violation.get("port")):
+            # Stopped on the far end's SDP before PJSUA reported a media peer
+            # (the hang-up can win that race): the peer is the one the SDP
+            # named, so the report and the cockpit can still say which address.
+            address = str(violation["address"])
+            result.media_peer = f"[{address}]:{violation['port']}" if ":" in address else f"{address}:{violation['port']}"
         if result.error is None and _media_outside_scope(call, result.media_peer):
             result.error = "media_peer_outside_scope"
         result.media_scope = media_scope_decision(call, result.media_peer)

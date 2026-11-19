@@ -143,6 +143,10 @@ class DriverScopeWatchTests(unittest.TestCase):
         self.assertEqual(result.scope_violation["address"], "198.51.100.88")
         self.assertEqual(record.get("hangups"), ["BYE"])
         self.assertFalse(result.media_scope["inScope"])
+        # The report names a media peer even when the hang-up came before
+        # PJSUA printed one: then it is the address the SDP named.
+        self.assertTrue(result.media_peer)
+        self.assertIn(result.media_peer.rsplit(":", 1)[0], {"198.51.100.88", "192.0.2.10", "127.0.0.1"})
 
     def test_rtcp_attribute_off_scope_hangs_up(self):
         result, record = self.run_fake(self.call(duration_seconds=20), "rtcpsteer")
