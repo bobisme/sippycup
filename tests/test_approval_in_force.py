@@ -76,7 +76,7 @@ class ApprovalInForceTests(unittest.TestCase):
         model = self.report()
         self.assertEqual([e for e in model["integrityExceptions"] if e["code"] == "target-not-approved"], [])
         run = model["runs"][0]
-        self.assertTrue(any("scope in force when it ran" in reason for reason in run["reasons"]), run["reasons"])
+        self.assertTrue(any("approval that was in force when it ran" in reason for reason in run["reasons"]), run["reasons"])
 
     def test_a_run_without_a_record_is_judged_against_the_current_records_and_says_so(self) -> None:
         first = self.call()
@@ -106,7 +106,7 @@ class ApprovalInForceTests(unittest.TestCase):
         model = self.report()
         campaign = [run for run in model["runs"] if run["kind"] == "campaign"]
         self.assertEqual(len(campaign), 1)
-        self.assertTrue(any("scope in force when it ran" in reason for reason in campaign[0]["reasons"]))
+        self.assertTrue(any("approval that was in force when it ran" in reason for reason in campaign[0]["reasons"]))
         self.assertEqual([e for e in model["integrityExceptions"] if e["code"] == "target-not-approved"], [])
 
     def test_a_tampered_copy_is_not_an_authority(self) -> None:
