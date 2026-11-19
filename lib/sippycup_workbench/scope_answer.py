@@ -1335,12 +1335,6 @@ HANDLERS: dict[str, Callable[[Session, Item, bool], None]] = {
 # ---------------------------------------------------------------- entry points
 
 
-@dataclass
-class Result:
-    exit_code: int
-    report: Report | None
-
-
 def answered_view(report: Report) -> Report:
     """The report without findings about time (a window not open yet is answered)."""
     return Report(report.path, report.present, report.sha256,

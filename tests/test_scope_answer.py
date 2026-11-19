@@ -228,6 +228,33 @@ class AnswerTypeTests(AnswerTestCase):
         # the flow-style line of the template keeps its layout
         self.assertIn("cdn_waf:      {provider: null, permission: null, reference: null}", self.scope.read_text())
 
+    def test_platform_collections_reach_surfaces_and_identities(self) -> None:
+        document = complete_scope()
+        self.write_scope(document)
+        text = self.scope.read_text()
+        from sippycup_workbench.scope_app import TEMPLATE
+
+        self.scope.write_text(text + TEMPLATE)
+        _, out = self.answer(["on-net"], "P11")
+        self.assertEqual(self.document()["platform"]["dialing"]["reach"], {"echo": "on-net"})
+        _, out = self.answer(["sip.acme.tld", "sip.other.tld", "10.20.30.40", "no", "pending", "n"], "P18")
+        self.assertIn("That is a name, not an address", out)
+        self.assertEqual(self.document()["platform"]["addressing"],
+                         [{"name": "sip.acme.tld", "addresses": ["10.20.30.40"], "shared": False,
+                           "changing": "pending"}])
+        self.answer(["admin-console", "browser", "in-scope", "https://admin.acme.tld", "n"], "A1")
+        self.answer(["10.20.30.41", "443", "admin.acme.tld", "public"], "A2")
+        surface = self.document()["application"]["surfaces"][0]
+        self.assertEqual((surface["connect_address"], surface["connect_port"], surface["tls_ca"]),
+                         ("10.20.30.41", 443, "public"))
+        _, out = self.answer(["admin-test", "admin", "test-a", "admin-test", "n"], "A4")
+        self.assertEqual(self.document()["application"]["identities"],
+                         [{"id": "admin-test", "role": "admin", "tenant": "test-a", "credential_ref": "admin-test"}])
+        self.assertIn("NEVER type a password here", out)
+        report = inspect(self.scope, now=NOW)
+        self.assertIsNotNone(report.document)
+        self.assertFalse([item.as_dict() for item in report.errors if item.field.startswith(("platform", "application"))])
+
     def test_account_not_required_skips_the_account_questions(self) -> None:
         self.new_scope()
         _, out = self.answer(["no"], "8")
