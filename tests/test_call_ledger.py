@@ -117,6 +117,24 @@ class LedgerUnitTests(unittest.TestCase):
         # A run under another approval does not block a new approval id.
         self.reserve(approval="CHG-10")
 
+    def test_runs_whose_records_show_no_call_do_not_block_a_missing_ledger(self) -> None:
+        options_only = self.engagement / "runs" / "20261119T000000Z-baseline-1"
+        options_only.mkdir(parents=True)
+        (options_only / "plan.json").write_text(json.dumps({
+            "authorization": {"approval": {"id": "CHG-9"}},
+            "steps": [{"index": 1, "budget": {"calls": 0}}, {"index": 2, "budget": {"calls": 0}}]}))
+        (options_only / "result.json").write_text("{}")
+        no_invite = self.engagement / "checks" / "20261119T000000Z-checks-1"
+        no_invite.mkdir(parents=True)
+        (no_invite / "profile.json").write_text(json.dumps({"authorization": {"approval_id": "CHG-9"}}))
+        (no_invite / "result.json").write_text(json.dumps({"requestLog": [{"request": "OPTIONS"}]}))
+        self.assertEqual(call_ledger.earlier_runs(self.engagement, "CHG-9"), [])
+        # A checks run that sent an INVITE, or a campaign that budgets a call, counts.
+        (no_invite / "result.json").write_text(json.dumps({"requestLog": [{"request": "INVITE x"}]}))
+        (options_only / "plan.json").write_text(json.dumps({
+            "authorization": {"approval": {"id": "CHG-9"}}, "steps": [{"index": 1, "budget": {"calls": 1}}]}))
+        self.assertEqual(len(call_ledger.earlier_runs(self.engagement, "CHG-9")), 2)
+
     def test_unreadable_or_truncated_ledger_refuses(self) -> None:
         path = self.engagement / call_ledger.LEDGER_FILE
         for content, text in ((b"not json\n", "is not valid JSON"),

@@ -233,21 +233,24 @@ class StopGate:
 
     def scenario_campaign(self) -> None:
         # The compiled manifest's calls last the runner's default 5 s; make the
-        # UDP call long enough to be stopped mid-call (a reviewed manifest field).
-        manifest_path = self.root / "campaign.yaml"
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        # UDP call long enough to be stopped mid-call (a reviewed manifest
+        # field). A compiled manifest is never edited (senders refuse it,
+        # bn-zqe8): the gate writes its own hand-written copy beside its logs.
+        manifest = yaml.safe_load((self.root / "campaign.yaml").read_text(encoding="utf-8"))
+        manifest_path = self.root / "stop-gate" / "campaign-long-call.yaml"
+        manifest_work = f"{self.eng}/stop-gate/campaign-long-call.yaml"
         case = next(item for item in manifest["cases"] if item["id"] == "practice-udp-call")
         case["call"] = {"codecs": ["PCMU"], "durationSeconds": CALL_SECONDS}
         case["budget"].update(durationSecondsPerRun=CALL_SECONDS + 20, packetsPerRun=8000, bytesPerRun=2000000)
         practice.write_private(manifest_path, yaml.safe_dump(manifest, sort_keys=False))
-        planned = self.run("campaign", "plan", f"{self.eng}/campaign.yaml", "--output", f"{self.eng}/plan.json")
+        planned = self.run("campaign", "plan", manifest_work, "--output", f"{self.eng}/plan.json")
         self.record("campaign plan frozen", planned.returncode == 0, planned.stderr[-300:])
         plan = json.loads((self.root / "plan.json").read_text(encoding="utf-8"))
         kinds = ["call" if step.get("dial") else "options" for step in plan.get("steps", [])]
         runs = self.root / "runs"
         process, log = self.background(
             "campaign", "--practice", "campaign", "run", f"{self.eng}/plan.json", "--manifest",
-            f"{self.eng}/campaign.yaml", "--run-root", f"{self.eng}/runs", "--interface", "lo",
+            manifest_work, "--run-root", f"{self.eng}/runs", "--interface", "lo",
             "--secret-env", f"{CREDENTIAL_REF}={SECRET_ENV}", env={SECRET_ENV: self.rehearsal.password()})
 
         def in_call() -> bool:

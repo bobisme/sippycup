@@ -203,6 +203,38 @@ def run_record(reservation: "Reservation | None", run_dir: str | Path) -> dict[s
     }
 
 
+def _placed_no_calls(run: Path) -> bool:
+    """True only when the run's own record shows it could not have placed a call:
+    a campaign whose plan budgets no call, or a checks run whose request log
+    has no INVITE. Anything unreadable may have placed calls (False)."""
+    def load(name: str) -> Any:
+        path = run / name
+        if path.is_symlink() or not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    if (run / "profile.json").exists():
+        result = load("result.json")
+        log = result.get("requestLog") if isinstance(result, dict) else None
+        if not isinstance(log, list) or (result or {}).get("verdict") is not None:
+            return False  # a guided call, or a checks run without a readable log
+        return not any(
+            isinstance(entry, dict) and str(entry.get("request", "")).upper().startswith("INVITE")
+            for entry in log
+        )
+    plan = load("plan.json")
+    steps = plan.get("steps") if isinstance(plan, dict) else None
+    if not isinstance(steps, list) or not steps:
+        return False
+    try:
+        return all(int((step.get("budget") or {}).get("calls")) == 0 for step in steps)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def _counted_elsewhere(run: Path, directory: Path) -> bool:
     """True when the run's result names a reservation in another engagement's ledger
     that exists and holds it (a run placed with ``--run-root`` in this directory)."""
@@ -251,7 +283,7 @@ def earlier_runs(directory: str | Path, approval_id: str) -> list[str]:
             if child.is_symlink() or not child.is_dir():
                 continue
             recorded = _run_approval(child)
-            if _counted_elsewhere(child, Path(directory)):
+            if _counted_elsewhere(child, Path(directory)) or _placed_no_calls(child):
                 continue
             if recorded in ("", approval_id) and (
                 recorded == approval_id or any((child / item).exists() for item in ("result.json", "capture.pcap"))
