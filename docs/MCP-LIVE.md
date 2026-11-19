@@ -114,6 +114,16 @@ capture, one OPTIONS preflight, the call, watchdog enforcement, process-group
 cleanup, payload stripping, reporting, and evidence-manifest creation. The MCP
 result contains only hashes and a bounded receipt.
 
+One-call passes the same approval gate as `campaign run` (bn-wcx2): the
+approval window frozen in the plan, and `scope.yaml` beside the reviewed
+manifest in the input root. A revoked, pending, changed, or unreadable scope
+file refuses the call with `networkActivity: false` before the grant is used.
+The helper reads the same scope file again before the preflight and before
+the call; a refusal there also sends nothing, but the grant is spent. A plan
+with no approval window and no scope file beside its manifest still runs, and
+the result's `warnings` carries the same `WARNING: this campaign plan is not
+bound to an approval window` text that `campaign run` prints.
+
 The fixed helper has a 130-second outer deadline and is killed as a process
 group on timeout. Server/container termination is the emergency stop during
 the pre-exit-gate phase. Client-cancellation propagation and the local

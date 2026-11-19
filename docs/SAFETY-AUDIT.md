@@ -218,7 +218,9 @@ careless range; `scope check` still warns above a `/16`.
    `WARNING`. For such a plan, check the written window by hand. A
    revocation reaches a campaign through `scope.yaml` only: set
    `authorization.status: revoked` there, or press Ctrl-C. It takes effect
-   before the next step, not inside a running step.
+   before the next step, not inside a running step. The MCP one-call tool
+   applies the same gate to `scope.yaml` beside its reviewed manifest
+   (bn-wcx2).
 2. **Ceilings are per process (finding 6).** Run one sender at a time, from one
    terminal, and do not repeat `call` beyond what the owner approved:
    `max_calls` limits one matrix or campaign run, not the engagement. Within

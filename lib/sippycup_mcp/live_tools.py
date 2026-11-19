@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 import yaml
 
+from sippycup import approval as approval_rules
 from sippycup.campaign import ManifestError, verify_frozen_plan
 from sippycup.integration import sip_options_preflight
 from sippycup.runtime import validate_plan
@@ -163,6 +164,7 @@ def _result(
     network_activity: bool,
     data: Any = None,
     error: Exception | None = None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "apiVersion": LIVE_RESULT_API_VERSION,
@@ -172,7 +174,7 @@ def _result(
         "durationMs": max(0, round((time.monotonic() - started) * 1000)),
         "sensitivity": "internal",
         "data": redact(data) if error is None else None,
-        "warnings": [],
+        "warnings": list(warnings or []),
         "errors": (
             []
             if error is None
@@ -255,6 +257,7 @@ class LivePreparationTools:
         tool: str,
         network_on_success: bool,
         function: Callable[[], dict[str, Any]],
+        warnings: list[str] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
         if not self._gate.acquire(timeout=0.25):
@@ -271,6 +274,7 @@ class LivePreparationTools:
                     started=started,
                     network_activity=network_on_success,
                     data=function(),
+                    warnings=warnings,
                 )
             except Exception as exc:
                 return _result(
@@ -280,6 +284,7 @@ class LivePreparationTools:
                         exc, (PreflightAttemptError, OneCallAttemptError)
                     ),
                     error=exc,
+                    warnings=warnings,
                 )
         finally:
             self._gate.release()
@@ -424,6 +429,7 @@ class LivePreparationTools:
         reviewed_plan: str,
         reviewed_manifest: str,
     ) -> dict[str, Any]:
+        warnings: list[str] = []
         return self._invoke(
             "execute_one_call",
             True,
@@ -432,7 +438,9 @@ class LivePreparationTools:
                 target_profile,
                 reviewed_plan,
                 reviewed_manifest,
+                warnings,
             ),
+            warnings=warnings,
         )
 
     def _one_call(
@@ -441,6 +449,7 @@ class LivePreparationTools:
         profile_path: str,
         plan_path: str,
         manifest_path: str,
+        warnings: list[str],
     ) -> dict[str, Any]:
         if self.evidence is None:
             raise MCPPolicyError("live MCP one-call evidence root is not configured")
@@ -454,6 +463,20 @@ class LivePreparationTools:
         profile_status = _load_profile(profile.content)
         _verify_manifest(plan_value, manifest.content)
         _require_one_call(plan_value)
+        # The same approval gate as `campaign run` (bn-wcx2): the frozen
+        # window, and scope.yaml beside the reviewed manifest for a revocation
+        # or a changed approval, before the capability is used. The helper
+        # re-reads the same scope file before the call.
+        scope_manifest = self.inputs.path / manifest_path
+        gate = approval_rules.WindowGate(plan_value, manifest_path=scope_manifest)
+        refusal = gate.refusal()
+        if refusal is not None:
+            raise MCPPolicyError(
+                f"refusing to run: {refusal.message}. Nothing was sent, no run directory was "
+                "created, and the capability was not used"
+            )
+        if not gate.window.bound:
+            warnings.append(approval_rules.UNBOUND_WARNING)
         endpoints, ceilings = _execution_bindings(plan_value, profile_status)
         grant = self.validator.validate(
             capability.content,
@@ -481,6 +504,7 @@ class LivePreparationTools:
             returncode, receipt, _stderr = self.process_runner.run_json(
                 [
                     self.one_call_helper,
+                    f"--scope-manifest={scope_manifest}",
                     str(request / "reviewed-plan.json"),
                     str(request / "reviewed-manifest.yaml"),
                     str(self.evidence),
@@ -490,6 +514,16 @@ class LivePreparationTools:
             raise OneCallAttemptError(
                 "fixed one-call helper failed after execution began"
             ) from exc
+        if returncode != 0 and isinstance(receipt, dict) and receipt.get("error") == "AuthorizationLapsed":
+            # The executor raises this only before it creates anything.
+            detail = receipt.get("detail")
+            raise MCPPolicyError(
+                "refusing to run: "
+                + (str(redact(detail))[:512] if isinstance(detail, str) and detail else
+                   "the approval window or the scope file beside the reviewed manifest refused the call")
+                + ". Nothing was sent and no run directory was created; the capability is spent, "
+                "so ask for a new one once the owner's approval allows the call"
+            )
         if returncode != 0:
             raise OneCallAttemptError(
                 "fixed one-call helper reported a bounded execution failure"
