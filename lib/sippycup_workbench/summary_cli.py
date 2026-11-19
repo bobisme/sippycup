@@ -268,6 +268,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     counts = model["runCounts"]
     derived = sum(1 for f in model["findings"] if f["derived"])
     print(f"Engagement report: {shown}")
+    sendable = next((FILES[key] for key in ("html", "md", "text") if key in formats), None)
+    if sendable is not None:
+        print(f"  Send to the owner: {shown}/{sendable}")
+    earlier = sorted(
+        item.name
+        for item in root.iterdir()
+        if (item.name == "report" or item.name.startswith("report-"))
+        and item.is_dir()
+        and not item.is_symlink()
+        and item.resolve() != directory.resolve()
+        and (item / "report.json").is_file()
+    )
+    if earlier:
+        listed = ", ".join(f"{args.directory.rstrip('/')}/{name}" for name in earlier)
+        print(f"  EARLIER report(s), do not send: {listed} (older than the one above; nothing was changed in them)")
     print("  Files: " + ", ".join(sorted(outputs)) + " (mode 0600)")
     print(f"  report.json SHA-256: {report_sha}")
     print(
