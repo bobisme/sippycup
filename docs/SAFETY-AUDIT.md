@@ -198,7 +198,10 @@ engagement directory that holds the profile or manifest:
   does a missing ledger while `ENG/calls`, `matrix`, `runs` or `checks` hold
   runs under the same approval id. The message gives the recovery: restore the
   ledger from the backup of the engagement directory, or ask the owner for a
-  new approval id. Do not create an empty ledger.
+  new approval id. Do not create an empty ledger. Each run records the
+  reservation that counted it (`callLedger` in `result.json`), so a run placed
+  here with `--run-root` from another engagement, whose ledger holds that
+  reservation, is not taken for an uncounted one.
 - `summary` counts the calls of every owner run per approval id, in start
   order, and raises `call-limit-exceeded` for a run that took the total above
   the limit (the smaller of the ceiling recorded with the run and

@@ -189,10 +189,50 @@ def _run_approval(run: Path) -> str | None:
     return ""
 
 
+def run_record(reservation: "Reservation | None", run_dir: str | Path) -> dict[str, str] | None:
+    """What a run records about the ledger reservation that counted it.
+
+    The ledger path is relative to the run directory, so it resolves the same
+    on the host and inside the image (``work/`` is ``/work``).
+    """
+    if reservation is None:
+        return None
+    return {
+        "ledger": os.path.relpath(Path(reservation.directory) / LEDGER_FILE, Path(run_dir)),
+        "reservation": reservation.identifier,
+    }
+
+
+def _counted_elsewhere(run: Path, directory: Path) -> bool:
+    """True when the run's result names a reservation in another engagement's ledger
+    that exists and holds it (a run placed with ``--run-root`` in this directory)."""
+    path = run / "result.json"
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        record = json.loads(path.read_text(encoding="utf-8")).get("callLedger")
+    except (OSError, ValueError, AttributeError):
+        return False
+    if not isinstance(record, dict) or not isinstance(record.get("ledger"), str):
+        return False
+    ledger = (run / record["ledger"]).resolve()
+    if ledger.name != LEDGER_FILE or ledger.parent == Path(directory).resolve():
+        return False
+    try:
+        entries = read_entries(ledger.parent)
+    except LedgerError:
+        return False
+    return any(
+        entry.get("event") == "reserve" and entry.get("id") == record.get("reservation")
+        for entry in entries or ()
+    )
+
+
 def earlier_runs(directory: str | Path, approval_id: str) -> list[str]:
     """Run directories in the engagement's default run roots recorded under ``approval_id``.
 
-    A run whose approval cannot be read counts (fail closed).
+    A run whose approval cannot be read counts (fail closed). A run that
+    another engagement's existing ledger counted (``--run-root`` here) does not.
     """
     found: list[str] = []
     seen = 0
@@ -211,6 +251,8 @@ def earlier_runs(directory: str | Path, approval_id: str) -> list[str]:
             if child.is_symlink() or not child.is_dir():
                 continue
             recorded = _run_approval(child)
+            if _counted_elsewhere(child, Path(directory)):
+                continue
             if recorded in ("", approval_id) and (
                 recorded == approval_id or any((child / item).exists() for item in ("result.json", "capture.pcap"))
             ):

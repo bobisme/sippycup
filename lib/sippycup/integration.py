@@ -723,6 +723,12 @@ def execute_campaign(
             )
 
 
+def _ledger_record(reservation: Any, run_dir: Path) -> dict[str, str] | None:
+    from sippycup import call_ledger
+
+    return call_ledger.run_record(reservation, run_dir)
+
+
 def _planned_calls(plan: Mapping[str, Any]) -> int:
     return sum(int((step.get("budget") or {}).get("calls") or 0) for step in plan["steps"])
 
@@ -1251,6 +1257,8 @@ def _execute_campaign(
                 # Which scope file the manifest was compiled from, kept in
                 # approved-scopes/ (bn-2rgk); None for an unbound plan.
                 "approvalRecord": approval_in_force,
+                # The ledger reservation that counted this run's calls.
+                "callLedger": _ledger_record(ledger.get("reservation"), run_dir),
                 # The run's own source addresses (route lookup, nothing sent),
                 # so the privacy lint does not report them as unexpected.
                 "localAddresses": local_addresses,

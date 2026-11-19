@@ -502,6 +502,9 @@ class ProxyGate(practice_gate.Gate):
         document["metadata"]["name"] = "proxy-gate-legacy-networks"
         authorization = document["authorization"]
         authorization["networks"] = [*authorization["networks"], *authorization.pop("mediaNetworks")]
+        # This gate directory already holds the signaling-only call under the
+        # same practice approval; the owner's call limit counts both (bn-2sfn).
+        authorization["ceilings"]["calls"] = 2
         practice.write_private(self.host_path("campaign-legacy.yaml"), yaml.safe_dump(document, sort_keys=False))
         code, result, events, run_dir = self.campaign(self.work_path("campaign-legacy.yaml"), "legacy")
         plan = json.loads((run_dir / "plan.json").read_text(encoding="utf-8")) if run_dir else {}

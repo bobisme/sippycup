@@ -116,7 +116,10 @@ class CodecGate(practice_gate.Gate):
         paths = []
         for name in ("target-profile.yaml", "target-profile-tls.yaml"):
             document = yaml.safe_load((practice.state_dir(self.project) / name).read_text(encoding="utf-8"))
-            document["limits"]["max_calls"] = 4
+            # Both matrices of this gate share this directory and one practice
+            # approval, so the owner's call limit counts them together
+            # (bn-2sfn): the 4-cell grid and the 2-cell stop matrix.
+            document["limits"]["max_calls"] = 6
             document["media"] = {"codecs": ["PCMU", "PCMA", "G722"]}
             target = "matrix-" + name
             practice.write_private(self.host_path(target), yaml.safe_dump(document, sort_keys=False))

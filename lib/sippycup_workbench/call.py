@@ -262,6 +262,8 @@ class Dependencies:
     # engagement's call ledger (bn-2sfn); the call then neither reserves nor
     # releases it itself.
     ledger_reserved: bool = False
+    # That reservation, recorded with the run (callLedger in result.json).
+    ledger_reservation: Any = None
     tools: dict[str, str] = field(
         default_factory=lambda: {
             "tcpdump": shutil.which("tcpdump") or "tcpdump",
@@ -437,6 +439,12 @@ def gate(
                 f"authorization expires before the call's latest possible end ({planned_seconds}s from now)"
             )
     return errors
+
+
+def _ledger_record(reservation: Any, run_dir: Path) -> dict[str, str] | None:
+    from sippycup import call_ledger
+
+    return call_ledger.run_record(reservation, run_dir)
 
 
 def ledger_terms(document: dict[str, Any]) -> tuple[str, int]:
@@ -2450,6 +2458,7 @@ def _execute(
         "exitCode": exit_code,
         "profile": profile_name,
         "approvalRecord": approval_in_force,
+        "callLedger": _ledger_record(reservation or deps.ledger_reservation, run_dir),
         "target": {"host": host, "port": port, "transport": transport},
         "destinationUri": uri,
         **_destination_record(document, options.destination),

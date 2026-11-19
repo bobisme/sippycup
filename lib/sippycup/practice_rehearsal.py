@@ -287,7 +287,9 @@ destinations:
     user: dtmf
     expect: agent
 limits:
-  calls: 8
+  # For the whole rehearsal, across commands: 2 guided calls, the 2 campaign
+  # call steps and the checks run's 5 INVITE attempts (9), with room for 3.
+  calls: 12
   concurrent_calls: 1
   calls_per_second: 1
   packets_per_second: 200

@@ -59,6 +59,9 @@ EXPECTED_UDP = {
     # nonce count, so the replayed REGISTER is accepted (observed).
     "nonce-replay": ("finding", {"nonce-replay.accepted"}),
 }
+# The calls (INVITE attempts) the whole gate may place under its approval.
+GATE_CALL_BUDGET = 12
+
 EXPECTED_TLS = {
     # Verified for sippycup-practice against the generated CA; the generated
     # leaf lives for days only, so "expiring" is the one allowed finding.
@@ -77,9 +80,11 @@ class ChecksGate(Gate):
         document = yaml.safe_load((practice.state_dir(self.project) / source).read_text(encoding="utf-8"))
         if port is not None:
             document["target"]["port"] = port
-        # Three INVITE attempts (unauthenticated-invite + the user-enumeration
-        # pair) must fit the call ceiling; the practice profiles allow one.
-        document["limits"]["max_calls"] = 3
+        # The variants share this gate directory and one practice approval, so
+        # the owner's call limit counts the INVITE attempts of every checks run
+        # of the gate together (bn-2sfn): about 8 in all (3 for udp, 2 and 3
+        # for the SRTP runs). The practice profiles allow one call.
+        document["limits"]["max_calls"] = GATE_CALL_BUDGET
         if section is not None:
             document["security_checks"] = section
         practice.write_private(self.host_path(name), yaml.safe_dump(document, sort_keys=False))

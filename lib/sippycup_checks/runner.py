@@ -368,6 +368,8 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
 
     # The approval in force for this run, kept with it (bn-2rgk).
     approval_in_force = approval_record(profile_path)
+    from sippycup.call_ledger import run_record as call_ledger_record
+
     reservation = None
     if plan["inviteAttempts"]:
         from sippycup import call_ledger
@@ -565,6 +567,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         "failOn": options.fail_on,
         "profile": document.get("name"),
         "approvalRecord": approval_in_force,
+        "callLedger": call_ledger_record(reservation, run_dir),
         "runDirectory": _display(run_dir, work_root),
         "requestsSent": total,
         "requestLog": budget.log,

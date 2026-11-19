@@ -564,6 +564,7 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
             call_deps = deps.call_dependencies(environ)
             try:
                 call_deps.ledger_reserved = True
+                call_deps.ledger_reservation = reservations.get(group_of.get(cell["transport"]))
             except AttributeError:
                 pass
             try:

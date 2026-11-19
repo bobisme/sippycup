@@ -201,6 +201,22 @@ class EngagementCeilingTests(unittest.TestCase):
         rendered = guided.render_human(value)
         self.assertIn("Only the owner can raise the limit", rendered)
 
+    def test_a_run_placed_with_run_root_elsewhere_is_counted_where_it_was_reserved(self) -> None:
+        other = self.work / "other"
+        fakes = Fakes()
+        options = guided.CallOptions(profile=self.profile, destination="echo", duration=3,
+                                     run_root=other / "calls")
+        code, value = guided.execute(options, fakes.dependencies(self.work, now=lambda: NOW))
+        self.assertEqual(code, 0, value)
+        self.assertEqual(value["callLedger"]["ledger"], "../../../eng/call-ledger.jsonl")
+        # The engagement whose ledger counted the run holds it; the directory
+        # that only holds the run directory does not refuse for it.
+        self.assertEqual(call_ledger.check(self.root, APPROVAL).used, 1)
+        self.assertEqual(call_ledger.earlier_runs(other, APPROVAL), [])
+        # Without that ledger the run counts again (fail closed).
+        (self.root / call_ledger.LEDGER_FILE).unlink()
+        self.assertEqual(len(call_ledger.earlier_runs(other, APPROVAL)), 1)
+
     def test_a_call_that_sent_nothing_does_not_count(self) -> None:
         _fakes, code, value = self.call(Fakes(capture_ready="capture failed"))
         self.assertNotEqual(code, 0)
