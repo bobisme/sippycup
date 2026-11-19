@@ -14,12 +14,21 @@ from sippycup.evidence_pack import (
     EvidencePackError,
     create_evidence_pack,
     export_ci,
+    privacy_notice,
     render_verification_json,
     render_verification_junit,
     render_verification_markdown,
     sign_evidence_pack,
     verify_evidence_pack,
 )
+
+
+def _warn_privacy(privacy, subject) -> None:
+    """Say it on stderr, before the result, so it is the first thing read."""
+    for line in privacy_notice(privacy.get("findings") or [], subject):
+        print(line, file=sys.stderr)
+    if privacy.get("error"):
+        print(f"WARNING: {privacy['error']}", file=sys.stderr)
 
 
 def main(argv=None) -> int:
@@ -53,6 +62,7 @@ def main(argv=None) -> int:
                 image_digest=arguments.image_digest,
                 recipients=arguments.recipient,
             )
+            _warn_privacy(result["privacy"], "the pack just made")
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0
         if arguments.command == "sign":
@@ -75,6 +85,7 @@ def main(argv=None) -> int:
             signature=arguments.signature,
             public_key=arguments.public_key,
         )
+        _warn_privacy(result["privacy"], "this pack")
         renderer = {
             "json": render_verification_json,
             "markdown": render_verification_markdown,

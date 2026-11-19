@@ -206,6 +206,21 @@ def _run_external(command: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(command, text=True, capture_output=True, check=False)
 
 
+def _privacy_of_run(root: Path) -> dict[str, Any]:
+    """What ``evidence lint RUN_DIR`` reports for the run a pack was made from."""
+    from .evidence import EvidenceError, lint_evidence
+
+    try:
+        result = lint_evidence(root)
+    except (EvidenceError, OSError) as error:
+        return {"status": "unchecked", "findings": [], "error": f"privacy lint could not run: {error}"}
+    return {
+        "status": "pass" if result["passed"] else "blocked",
+        "findings": _clean_findings(result["findings"]),
+        "error": None,
+    }
+
+
 def create_evidence_pack(
     root: str | Path,
     output: str | Path,
@@ -257,6 +272,7 @@ def create_evidence_pack(
             "output": str(output),
             "encrypted": bool(recipient_list),
             "recipientCount": len(recipient_list),
+            "privacy": _privacy_of_run(root),
         }
     finally:
         shutil.rmtree(temporary_root, ignore_errors=True)
@@ -568,6 +584,11 @@ def verify_evidence_pack(
             signature_error = completed.stderr.strip() or "minisign rejected signature"
     manifest, errors = _verify_content(pack)
     content_status = "valid" if not errors else "invalid"
+    try:
+        privacy_status, privacy_findings = _embedded_privacy(pack)
+        privacy: dict[str, Any] = {"status": privacy_status, "findings": privacy_findings, "error": None}
+    except (EvidencePackError, OSError, tarfile.TarError) as error:
+        privacy = {"status": "unchecked", "findings": [], "error": str(error)}
     if content_status == "invalid":
         verdict = "content-failure"
     elif signature_status == "invalid":
@@ -585,6 +606,7 @@ def verify_evidence_pack(
         },
         "contentIdentity": manifest.get("contentIdentity") if manifest else None,
         "supplyChain": manifest.get("supplyChain") if manifest else None,
+        "privacy": privacy,
     }
 
 
@@ -601,6 +623,20 @@ def render_verification_markdown(result: dict[str, Any]) -> str:
         f"- Signature: `{result['signature']['status']}`",
         f"- Content identity: `{result['contentIdentity'] or 'unavailable'}`",
     ]
+    privacy = result.get("privacy") or {}
+    findings = privacy.get("findings") or []
+    if findings:
+        high = sum(1 for item in findings if item.get("severity") == "high")
+        lines.insert(
+            2,
+            f"- **Privacy: {len(findings)} finding(s), {high} high severity. Do not send this pack as it stands.**",
+        )
+        for item in findings:
+            lines.append(f"- Privacy finding: `{item['code']}` in `{item['path']}`: {item['detail']}")
+    elif privacy.get("error"):
+        lines.append(f"- Privacy: unchecked ({privacy['error']})")
+    else:
+        lines.append("- Privacy: no findings recorded")
     for error in result["content"]["errors"]:
         lines.append(f"- Content error: `{error}`")
     if result["signature"]["error"]:
@@ -643,6 +679,11 @@ def _archive_artifact(pack: Path, relative: str, destination: Path) -> None:
 
 
 def _embedded_privacy_status(pack: Path) -> str:
+    return _embedded_privacy(pack)[0]
+
+
+def _embedded_privacy(pack: Path) -> tuple[str, list[dict[str, str]]]:
+    """The privacy status and findings the pack's evidence manifest recorded."""
     with tarfile.open(pack, mode="r:*") as archive:
         matches = [
             item
@@ -662,7 +703,38 @@ def _embedded_privacy_status(pack: Path) -> str:
     status = privacy.get("status") if isinstance(privacy, dict) else None
     if status not in {"pass", "blocked"}:
         raise EvidencePackError("embedded privacy status is invalid")
-    return status
+    return status, _clean_findings(privacy.get("findings"))
+
+
+def _clean_findings(value: Any) -> list[dict[str, str]]:
+    """Findings as the lint wrote them, kept to the fields a reader needs."""
+    found = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("code"), str):
+            found.append({key: str(item.get(key, "")) for key in ("code", "severity", "path", "detail")})
+    return found
+
+
+def privacy_notice(findings: list[dict[str, str]], subject: str = "this pack") -> list[str]:
+    """The warning an operator reads when a pack holds privacy findings (no value is printed)."""
+    if not findings:
+        return []
+    high = [item for item in findings if item.get("severity") == "high"]
+    lines = [
+        f"WARNING: {len(findings)} privacy finding(s) in {subject}, {len(high)} high severity "
+        "(the same findings `./bin/sippycup evidence lint RUN_DIR` reports for this run):",
+    ]
+    lines += [f"  - {item['code']} in {item['path']}: {item['detail']}" for item in findings]
+    lines += [
+        "  Do not send this pack to anyone as it stands. It holds material that must not leave your control "
+        "in clear (for example SIP Digest authorization in the capture).",
+        "  What to send instead: the owner report (./bin/sippycup summary DIR); the CI export, which has the "
+        "verification result and copies no capture, audio, or other artifact (./bin/sippycup pack export-ci PACK "
+        "OUTPUT_DIR --allow-privacy-findings, which acknowledges these findings); and, if the "
+        "owner needs the raw evidence, a pack encrypted to the key the owner gives you "
+        "(./bin/sippycup pack create RUN_DIR OUTPUT.tar.age --image-digest sha256:ID --recipient AGE_PUBLIC_KEY).",
+    ]
+    return lines
 
 
 def export_ci(

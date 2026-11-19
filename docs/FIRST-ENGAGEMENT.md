@@ -464,17 +464,28 @@ ID=$(podman image inspect --format '{{.Id}}' localhost/sippycup:latest)
     prints `EARLIER report(s), do not send: ...`. Send only the directory on
     the `Engagement report:` line of your last `summary`.
   - `pack verify` prints `- Verdict: **pass**`.
-- `export-ci` refuses while privacy findings are open. Read them with
-  `evidence lint` (it prints JSON). If you accept them, add
+- `pack create` and `pack verify` print the privacy findings first, on
+  standard error (`WARNING: N privacy finding(s) ...`), and they are the
+  findings `evidence lint` reports for the same run. A real run nearly always
+  has some: the capture holds the account's SIP Digest authorization, and call
+  records hold user names. **A pack with findings is evidence you keep. Do not
+  send it to anyone as it stands**, plain or not. `pack create` does not stop
+  you (the pack stays on your disk); `export-ci` does, until you add
   `--allow-privacy-findings`.
 - **Send to the owner:**
   - the `Send to the owner:` file that your last `summary` printed (the
     newest `report` or `report-STAMP` directory; `engagement-report.html`, or
-    `.md`);
-  - the `.tar` packs.
+    `.md`). It holds no password, Digest response, or full Call-ID;
+  - the CI export of each run, which has the verification result and copies
+    no capture, audio, or other artifact:
+    `./bin/sippycup pack export-ci work/acme/packs/RUN.tar work/acme/ci-RUN --allow-privacy-findings`;
+  - only if the owner needs the capture itself: a pack encrypted to the
+    owner's age key (ask the owner for it). Add `--recipient AGE_PUBLIC_KEY`
+    to `pack create`; the result is `RUN.tar.age`, readable only with the
+    owner's private key. Send nothing else from `runs/` or `calls/`.
 
-  Make one pack for each run that you hand over. Do not send capture files
-  outside a pack.
+  Make one pack for each run that you hand over. Never send capture files
+  outside an encrypted pack.
 
 Clean up at the end:
 
