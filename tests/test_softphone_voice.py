@@ -672,7 +672,9 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(summary["srtp"]["active"])
         self.assertEqual(summary["warnings"], ["sdes-key-exposed-on-cleartext-signaling"])
         self.assertEqual(summary["setup"]["answerStatus"], 200)
-        self.assertEqual(summary["localRtpPort"], 4000)
+        # Step 2 tries its own local pair (bn-3oib): 4000 + 2 * (2 - 1).
+        self.assertEqual(summary["localRtpPort"], 4002)
+        self.assertIn("--rtp-port=4002", record["config"].splitlines())
         self.assertIn("--use-srtp=1", record["config"].splitlines())
 
     def test_dtmf_not_negotiated_and_srtp_not_negotiated_fail(self):

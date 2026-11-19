@@ -1128,9 +1128,12 @@ lockout rule), so that call fails. `authorization.mediaPorts` is the
 target's media port range: the runner checks the negotiated remote port
 against it, and the capture filter (`udp portrange START-END` with the target
 host) admits every packet whose target-side port is in it, so both RTP
-directions are captured whatever local port PJSUA uses (it starts at 4000;
-the result line reports `localRtpPort`). The local port is therefore not
-forced into the range. Digest
+directions are captured whatever local port PJSUA uses (the result line
+reports `localRtpPort`). The local port is therefore not forced into the
+range. Each step tries its own local pair, 4000 + 2 × ((step − 1) mod 50)
+(ports 4000–4099), and the run writes each softphone step's port and window
+to `call-media.json` so the oracle can tell the steps' media apart (see
+`media-invariants.md`). Digest
 authentication itself is exercised only against a real registrar, not by the
 loopback self-test. Every TLS connection a campaign makes (preflight,
 `options` steps, and softphone calls) verifies the certificate, against the

@@ -205,6 +205,10 @@ class SoftphoneCall:
     # the listed ones. False (the default) only raises their priority, and
     # PJSUA still offers every other codec it has.
     exclusive_codecs: bool = False
+    # bn-3oib: the first local RTP port PJSUA tries (RTCP is the next one);
+    # ``None`` keeps PJSUA's default of 4000. PJSUA moves on by two when the
+    # pair is in use, so the port it really used is ``local_rtp_port``.
+    rtp_port: int | None = None
 
 
 @dataclass
@@ -421,6 +425,10 @@ def _validate(call: SoftphoneCall, password: str | None) -> str:
                 ipaddress.ip_network(network)
             except ValueError as error:
                 raise SoftphoneError(f"invalid media network: {network!r}") from error
+    if call.rtp_port is not None and (
+        type(call.rtp_port) is not int or not 1024 <= call.rtp_port <= 65534 or call.rtp_port % 2
+    ):
+        raise SoftphoneError("the local RTP port must be an even integer from 1024 to 65534")
     if call.allowed_media_ports is not None:
         ports = call.allowed_media_ports
         if (
@@ -519,6 +527,8 @@ def build_config(call: SoftphoneCall, *, password: str | None = None, log_file: 
                 "--srtp-keying=0",
             ]
         )
+    if call.rtp_port is not None:
+        lines.append(f"--rtp-port={call.rtp_port}")
     if ":" in address:
         lines.append("--ipv6")
     if call.bound_address is not None:

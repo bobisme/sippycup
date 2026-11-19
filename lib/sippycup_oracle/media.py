@@ -372,6 +372,113 @@ def _attribution_anchor(
     return max(paired) if paired else at
 
 
+@dataclass(frozen=True, slots=True)
+class MediaAttribution:
+    """Which dialog owns each media frame (see ``attribute_media``).
+
+    ``recorded`` holds, per call of the run's ``call-media.json`` record
+    whose signaling is not visible in the capture (TLS), the media frames
+    the record attributes to it. Nothing judges those frames.
+    """
+
+    assigned: tuple[tuple[FrameRecord, ...], ...]
+    ambiguous: tuple[tuple[EvidenceRef, ...], ...]
+    unattributed: tuple[EvidenceRef, ...]
+    recorded: tuple[tuple[object, tuple[FrameRecord, ...]], ...] = ()
+
+
+def _advertised(dialog: DialogRecord) -> frozenset[tuple[str, int]]:
+    """Every (address, port) any SDP of DIALOG offered or answered."""
+    found: set[tuple[str, int]] = set()
+    for item in dialog.sdp_revisions:
+        for media in item.revision.media:
+            endpoint = _media_endpoint(media)
+            if endpoint is not None:
+                found.add(endpoint)
+    return frozenset(found)
+
+
+def _overlaps(
+    lifetime: tuple[Decimal | None, Decimal | None], start: Decimal, end: Decimal
+) -> bool:
+    first, last = lifetime
+    if first is None:
+        return True
+    return first <= end and (last is None or start <= last)
+
+
+def _record_candidates(
+    frame: FrameRecord,
+    anchor: Decimal | None,
+    live: list[int],
+    record,
+    lifetimes: list[tuple[Decimal | None, Decimal | None]],
+    advertised: list[frozenset[tuple[str, int]]],
+) -> tuple[str, object]:
+    """Narrow LIVE with the run's recorded local RTP ports (bn-3oib).
+
+    Returns ``("dialogs", indexes)``, ``("recorded", call)`` for media of a
+    recorded call whose dialog is not visible, ``("ambiguous", indexes)``
+    when two recorded calls claim the frame, or ``("unattributed", None)``.
+    Only frames with exactly one endpoint at a recorded local address are
+    narrowed; every other frame keeps ``live`` unchanged.
+    """
+    sides = [
+        endpoint
+        for endpoint in (_endpoint(frame, True), _endpoint(frame, False))
+        if endpoint is not None and endpoint[0] in record.local_addresses
+    ]
+    if len(sides) != 1 or anchor is None:
+        return "dialogs", live
+    address, port = sides[0][0], sides[0][1]
+    claims = [
+        call
+        for call in record.calls
+        if call.local_address == address
+        and port in (call.rtp_port, call.rtp_port + 1)
+        and call.started - TEARDOWN_GRACE <= anchor <= call.ended + TEARDOWN_GRACE
+    ]
+
+    def owners_of(call) -> set[int]:
+        return {
+            index
+            for index, ports in enumerate(advertised)
+            if (address, call.rtp_port) in ports
+            and _overlaps(
+                lifetimes[index],
+                call.started - TEARDOWN_GRACE,
+                call.ended + TEARDOWN_GRACE,
+            )
+        }
+
+    if len(claims) > 1:
+        # The same local port in two overlapping recorded windows: refuse.
+        # A visible dialog among them gets the frame as ambiguity evidence,
+        # so its own results become unknown instead of failing for want of
+        # the withheld media.
+        shared = sorted(
+            index for claim in claims for index in owners_of(claim) if index in live
+        )
+        return ("ambiguous", shared) if shared else ("unattributed", None)
+    if claims:
+        call = claims[0]
+        owners = owners_of(call)
+        if not owners:
+            return "recorded", call
+        return "dialogs", [index for index in live if index in owners]
+    if not record.complete:
+        return "dialogs", live
+    # Not a recorded softphone port: only a visible dialog that advertised
+    # this local endpoint (for example a SIPp step) may own it.
+    owners = {
+        index
+        for index, ports in enumerate(advertised)
+        if (address, port) in ports or (address, port - 1) in ports
+    }
+    narrowed = [index for index in live if index in owners]
+    return ("dialogs", narrowed) if narrowed else ("unattributed", None)
+
+
 def attribute_media_frames(
     frames: Iterable[FrameRecord],
     dialogs: tuple[DialogRecord, ...],
@@ -380,23 +487,42 @@ def attribute_media_frames(
     tuple[tuple[EvidenceRef, ...], ...],
     tuple[EvidenceRef, ...],
 ]:
+    """``attribute_media`` without a run record, as a plain tuple."""
+    result = attribute_media(frames, dialogs)
+    return result.assigned, result.ambiguous, result.unattributed
+
+
+def attribute_media(
+    frames: Iterable[FrameRecord],
+    dialogs: tuple[DialogRecord, ...],
+    record=None,
+) -> MediaAttribution:
     """Assign each media frame to at most one dialog or fork leg.
 
     A frame is a candidate only for a dialog that was in progress when its
     RTP stream (five-tuple and SSRC) started; a dialog's SDP does not stay
-    active after the dialog ended. Every PJSUA call binds the same local RTP
-    port, so without this the RTP of a later call whose signaling is not
-    visible (TLS) matched an earlier cleartext dialog (bn-2sfa). Equal best
-    matches are withheld from every leg and surfaced as ambiguity evidence.
-    Frames no visible dialog can own are returned as unattributed evidence.
+    active after the dialog ended. Without this the RTP of a later call
+    whose signaling is not visible (TLS) matched an earlier cleartext dialog
+    on the same local port (bn-2sfa). Equal best matches are withheld from
+    every leg and surfaced as ambiguity evidence. Frames no visible dialog
+    can own are returned as unattributed evidence.
+
+    RECORD (``sippycup_oracle.call_media.CallMediaRecord``, optional) is the
+    run's own list of local RTP ports and call windows. With it, media on a
+    recorded call's port goes only to that call: to its visible dialog, or,
+    when its signaling is not visible, to ``recorded`` (bn-3oib). A port
+    claimed by two recorded calls at once, or (with a complete record) an
+    unrecorded local port no visible dialog advertised, is unattributed.
     """
     assigned: list[list[FrameRecord]] = [[] for _ in dialogs]
     ambiguous: list[list[EvidenceRef]] = [[] for _ in dialogs]
     unattributed: list[EvidenceRef] = []
+    recorded: dict[object, list[FrameRecord]] = {}
     media_frames = [
         frame for frame in frames if frame.rtp is not None or frame.rtcp is not None
     ]
     lifetimes = [_dialog_lifetime(dialog) for dialog in dialogs]
+    advertised = [_advertised(dialog) for dialog in dialogs] if record is not None else []
     starts = _stream_starts(media_frames)
     for frame in media_frames:
         anchor = _attribution_anchor(frame, starts)
@@ -407,6 +533,22 @@ def attribute_media_frames(
             or start is None
             or (start <= anchor and (end is None or anchor <= end))
         ]
+        if record is not None:
+            kind, value = _record_candidates(
+                frame, anchor, live, record, lifetimes, advertised
+            )
+            if kind == "recorded":
+                recorded.setdefault(value, []).append(frame)
+                continue
+            if kind == "unattributed":
+                unattributed.append(frame.evidence)
+                continue
+            if kind == "ambiguous":
+                for index in value:
+                    ambiguous[index].append(frame.evidence)
+                unattributed.append(frame.evidence)
+                continue
+            live = value
         if not live:
             unattributed.append(frame.evidence)
             continue
@@ -443,10 +585,11 @@ def attribute_media_frames(
                 ambiguous[index].append(frame.evidence)
         else:
             unattributed.append(frame.evidence)
-    return (
+    return MediaAttribution(
         tuple(tuple(items) for items in assigned),
         tuple(tuple(items) for items in ambiguous),
         tuple(unattributed),
+        tuple((call, tuple(items)) for call, items in recorded.items()),
     )
 
 

@@ -319,6 +319,22 @@ def call_duration(step: Mapping[str, Any]) -> dict[str, Any]:
     return value
 
 
+# bn-3oib: each step's call tries its own local RTP/RTCP pair, so two calls
+# in one capture are told apart by port (call-media.json records the port
+# PJSUA really used). PJSUA's default 4000 is step 1; the pool wraps after
+# 50 steps, and steps never overlap, so a reused port is told apart by the
+# step's window. Local ports are not part of the capture filter or the scope.
+RTP_PORT_BASE = 4000
+RTP_PORT_PAIRS = 50
+
+
+def step_rtp_port(step: Mapping[str, Any]) -> int:
+    """The first local RTP port PJSUA tries for STEP (even; RTCP is next)."""
+    index = step.get("index")
+    position = (index - 1) % RTP_PORT_PAIRS if type(index) is int and index >= 1 else 0
+    return RTP_PORT_BASE + 2 * position
+
+
 def write_tone(path: Path, seconds: float = 3.0, rate: int = 8000) -> None:
     """Write a deterministic synthetic two-tone canary (no recorded voice)."""
     frames = bytearray()
@@ -736,6 +752,7 @@ def run(
                 "dtmfAfterSeconds", DEFAULT_DTMF_AFTER_SECONDS
             ),
             srtp=srtp_mode,
+            rtp_port=step_rtp_port(step),
         )
         result = place_call(
             call,
