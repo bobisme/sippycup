@@ -72,6 +72,27 @@ class CompileNeverCrashesTests(ScopeTestCase):
         self.assertIn("destinations[0].expect", out + err)
 
 
+class YamlErrorLineTests(ScopeTestCase):
+    """Finding 14: a YAML error says where it is."""
+
+    def message(self, text: str) -> str:
+        self.write_scope(text)
+        report = inspect(self.root / "scope.yaml", now=NOW)
+        return next(i.message for i in report.errors if i.code == "scope.unreadable")
+
+    def test_syntax_error_names_line_and_column(self) -> None:
+        text = "schema_version: sippycup.dev/scope/v1\nname: x\nports: [1, 2\nnext: 3\n"
+        message = self.message(text)
+        self.assertRegex(message, r"invalid YAML at line 4, column \d+: ")
+        self.assertIn("flow sequence", message)
+
+    def test_duplicate_key_names_line_and_the_key(self) -> None:
+        text = "schema_version: sippycup.dev/scope/v1\nname: x\nd:\n  expect: a\n  expect: b\n"
+        message = self.message(text)
+        self.assertIn("at line 5", message)
+        self.assertIn("duplicate key 'expect'", message)
+
+
 class CredentialRefFormatTests(ScopeTestCase):
     def test_error_states_the_format_and_an_example(self) -> None:
         for bad in ("PRACTICE_PASSWORD", "practice_password", "practice.password"):

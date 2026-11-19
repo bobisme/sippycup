@@ -514,9 +514,17 @@ def inspect(
         document = yaml.load(raw.decode("utf-8"), Loader=_UniqueLoader)
     except (UnicodeDecodeError, yaml.YAMLError) as exc:
         first = str(exc).splitlines()[0] if str(exc) else "invalid YAML"
+        place = ""
+        mark = getattr(exc, "problem_mark", None)
+        if mark is not None:
+            place = f" at line {mark.line + 1}, column {mark.column + 1}"
+            problem = getattr(exc, "problem", None)
+            context = getattr(exc, "context", None)
+            if problem:
+                first = f"{context}: {problem}" if context else str(problem)
         report.fatal = True
         report.findings.append(
-            Finding("scope.unreadable", "error", "invalid", "", f"invalid YAML: {first}")
+            Finding("scope.unreadable", "error", "invalid", "", f"invalid YAML{place}: {first}")
         )
         return report
     if not isinstance(document, dict):
