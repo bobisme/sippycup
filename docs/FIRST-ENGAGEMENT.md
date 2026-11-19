@@ -90,8 +90,10 @@ in the past on purpose: until you set it, `scope check` stops with
 `practice-password`. It has two targets, `practice` (UDP, profile
 `target-profile.yaml`) and `tls` (TLS, profile `target-profile-tls.yaml`,
 which the SRTP call and the matrix below use). The TLS target trusts the CA
-that `practice-target up` writes to `work/practice/ca.crt`; that is a new
-file after every `up`, so run `scope compile` again after every `up`.
+that `practice-target up` writes to `work/practice/ca.crt`. That is a new file
+after every `up`, and a frozen campaign plan pins the old one. `scope compile`
+does not change that. After every `up`, freeze a new plan (section 5, "When
+the plan is stale"); the same applies after any `down` and `up`.
 
 **The `credential_ref` format:** lowercase letters, digits and `-`, starting
 with a letter, at most 63 characters. `PRACTICE_PASSWORD`, `practice_password`
@@ -384,8 +386,27 @@ When they are right, the output contains these lines:
 - The plan is bound to the approval window from `scope.yaml`. `run` checks
   the window before every step and stops before a step that could end after
   it (`Campaign: AUTHORIZATION_LAPSED`, exit 1). After any change to the
-  approval in `scope.yaml`, run `scope compile`, move `plan.json` aside, and
-  plan again.
+  approval in `scope.yaml`, run `scope compile`, then freeze a new plan (below).
+- **When the plan is stale.** A frozen plan is never overwritten:
+  `campaign plan` refuses with `refusing to overwrite existing frozen plan`
+  and writes nothing. The plan goes stale when the approval window is renewed
+  (`scope compile`), when the campaign file is written again, or when a CA
+  file changes (every `practice-target up`). `ready` says so (`NO-GO` or
+  `WARN`), and `campaign run` refuses with `source manifest SHA-256 does not
+  match frozen plan` or a similar line; nothing is sent in either case. All
+  three print the same line under `fix:` or `run:`. It keeps the old plan
+  under a dated name and freezes a new one from the current campaign file:
+
+  ```sh
+  mv -n work/acme/plan.json work/acme/plan-STAMP.json && \
+    ./bin/sippycup campaign plan work/acme/campaign.yaml --output work/acme/plan.json
+  ```
+
+  (`STAMP`: a date and time such as `20261119T234928Z`; the printed line has
+  it filled in, so run that line.) Do not delete the old plan, and do not
+  overwrite it by any other means. Read the new plan before you run it. Run
+  `scope compile` first only when `scope.yaml` changed; `campaign plan` refuses
+  a campaign file that `scope.yaml` no longer backs and says so.
 - Use `--interface lo` only with `--practice`. Against the owner's target,
   leave out `--interface` (the default is `any`).
 
@@ -499,7 +520,11 @@ To stop everything this checkout is sending, from any terminal:
 
 It ends each run with its normal shutdown (BYE, unregister), kills what is
 left after 30 s, then checks that nothing is still sending and prints
-`Silence: PROVED`. It prints a journal line; run it. `./bin/sippycup stop
+`Silence: PROVED`, then a `Record it:` line. With one engagement under `work/`
+it is ready to run. With none or several it ends in the placeholder
+`work/NAME`: replace `NAME` with your engagement directory (for example
+`work/acme`) and run the line, or give `--engagement work/acme` to `stop`
+next time. `./bin/sippycup stop
 --dry-run` lists what it would stop and signals nothing. Do not run `stop`
 while you want another run from this checkout to continue.
 

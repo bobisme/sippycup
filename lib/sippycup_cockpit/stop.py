@@ -479,8 +479,9 @@ def render(report: Report, engagement: str | None) -> list[str]:
             lines.extend(f"  - {item}" for item in report.silence.get("remaining") or ["(unknown)"])
         lines.append("Record it: " + journal_line(report, engagement))
         if engagement is None:
-            lines.append("  (work/NAME is a placeholder: put your engagement directory there, "
-                         "or run stop again with --engagement DIR)")
+            lines.append("  (work/NAME is a placeholder, not a directory: replace it with your engagement "
+                         "directory, for example work/acme, before you run the line; or give --engagement DIR "
+                         "next time and it is filled in)")
     lines.append("work/ evidence is never touched. Run directories of stopped commands record state 'cancelled'.")
     return lines
 

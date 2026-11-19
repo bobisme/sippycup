@@ -655,8 +655,10 @@ the sidecar.
 before every step. Set `authorization.status: revoked` there and no campaign
 starts, and a running one stops before its next step
 (`authorization_lapsed`). After any change to the approval id or window,
-run `scope compile`, move the old `plan.json` aside, and run `campaign plan`
-again: a plan frozen from the old window is refused. `call`, `matrix`, and
+run `scope compile`, then freeze a new plan with the line `ready` prints
+under `fix:` (it keeps the old `plan.json` under a dated name and runs
+`campaign plan`; see `FIRST-ENGAGEMENT.md`, "When the plan is stale"): a plan
+frozen from the old window is refused. `call`, `matrix`, and
 `checks` read the profile instead, so always run `scope compile` after the
 change.
 

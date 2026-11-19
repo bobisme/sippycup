@@ -150,6 +150,16 @@ class StopFlowTests(unittest.TestCase):
         self.assertIn("would be stopped: SIGTERM, then SIGKILL", lines)
         self.assertIn("untouched ws-practice (the practice target; add --include-practice)", lines)
 
+    def test_the_record_line_is_run_as_printed_or_says_what_to_replace(self) -> None:
+        report = run_stop(FakeHost(standard_containers()))
+        named = "\n".join(stop.render(report, "work/acme"))
+        self.assertIn("Record it: ./bin/sippycup journal add work/acme --kind action", named)
+        self.assertNotIn("work/NAME", named)
+        unnamed = "\n".join(stop.render(report, None))
+        self.assertIn("journal add work/NAME --kind action", unnamed)
+        self.assertIn("replace it with your engagement directory", unnamed)
+        self.assertIn("before you run the line", unnamed)
+
     def test_clean_stop_terms_first_and_proves_silence(self) -> None:
         host = FakeHost(standard_containers())
         report = run_stop(host)

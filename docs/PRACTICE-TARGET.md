@@ -406,6 +406,9 @@ Run each step from the repository root. Use two terminals for the capture.
    `work/practice/account.password` without echoing it). Plan the TLS
    campaign again after every `up`: each `up` makes a new CA,
    and execution refuses a plan whose frozen CA digest no longer matches.
+   `campaign plan` never overwrites a plan; move the old one aside first
+   (`ready` prints the exact line, see `FIRST-ENGAGEMENT.md`, "When the plan is
+   stale").
 
 10. Tear down:
 

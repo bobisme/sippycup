@@ -38,6 +38,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from sippycup_workbench.replan import replan_command
+
 READY_VERSION = "sippycup.dev/ready/v1"
 READINESS_DIR = "readiness"
 LAUNCHER = "./bin/sippycup"
@@ -338,8 +340,7 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
                      f"finish before {_both(end, zone)}, or ask the owner to extend the window")
     # bn-3vxl: is the frozen campaign plan held to this window?
     if plan and not plan.get("error"):
-        replan = (f"move {eng}/plan.json aside, then {LAUNCHER} scope compile {eng} and "
-                  f"{LAUNCHER} campaign plan {eng}/campaign.yaml --output {eng}/plan.json")
+        replan = replan_command(f"{eng}/plan.json", f"{eng}/campaign.yaml")
         approval = plan.get("approval") or {}
         if not plan.get("windowBound"):
             return Check("window", "Approval window", WARN,
@@ -637,9 +638,11 @@ def check_tls(host: Host, model: dict[str, Any], profile_document: dict[str, Any
         pins.discard("None")
         if pins and pins != {digest}:
             return Check("tls", title, NOGO,
-                         lines + [f"the frozen campaign plan pins {', '.join(sorted(pins))}, not the file's digest"],
-                         f"{LAUNCHER} campaign plan {eng}/campaign.yaml --output {eng}/plan.json   "
-                         "(after confirming the new CA with the owner)")
+                         lines + [f"the frozen campaign plan pins {', '.join(sorted(pins))}, not the file's digest",
+                                  "the CA file changed after the plan was frozen: confirm the new CA with the owner "
+                                  "(on the practice target every `practice-target up` makes a new one), then freeze "
+                                  "a new plan; the old plan is kept under a dated name"],
+                         replan_command(f"{eng}/plan.json", f"{eng}/campaign.yaml"))
         if pins:
             lines.append("matches the digest pinned in the frozen campaign plan")
     dates = _cert_dates(data.decode("ascii", "replace"), host)
