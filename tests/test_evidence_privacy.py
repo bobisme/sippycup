@@ -338,6 +338,45 @@ class AuthorizationPatternTests(unittest.TestCase):
             report = lint_evidence(root)
             self.assertIn("authorization-material", {f["code"] for f in report["findings"]})
 
+    def test_own_recorded_source_address_is_not_an_unexpected_network(self):
+        # bn-2yib: a campaign plan authorizes only the target, so the
+        # assessor's own source address was reported as unexpected-network.
+        def unexpected(root):
+            return sorted(
+                item["detail"] for item in lint_evidence(root)["findings"]
+                if item["code"] == "unexpected-network" and item["path"] == "capture.pcap"
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            make_run(root)
+            (root / "plan.json").write_text(json.dumps({
+                "authorization": {"networks": ["10.0.0.2/32"]},
+                "evidence": {"retainPayload": False},
+            }))
+            (root / "capture.pcap").write_bytes(pcap(
+                packet("192.168.50.7", "10.0.0.2"),
+                packet("10.0.0.2", "192.168.50.7"),
+                packet("192.168.50.7", "203.0.113.9"),
+            ))
+            # Seen only as a source in the capture: still unexpected; the
+            # capture alone never establishes our own address.
+            self.assertEqual(
+                unexpected(root),
+                ["addresses outside expected networks: 192.168.50.7, 203.0.113.9"],
+            )
+            (root / "result.json").write_text(json.dumps(
+                {"state": "succeeded", "localAddresses": ["192.168.50.7"]}
+            ))
+            self.assertEqual(
+                unexpected(root), ["addresses outside expected networks: 203.0.113.9"]
+            )
+            (root / "result.json").write_text(json.dumps(
+                {"state": "succeeded", "localAddresses": ["not-an-address"]}
+            ))
+            with self.assertRaises(EvidenceError):
+                lint_evidence(root)
+
     def test_guided_call_run_expects_its_own_files_and_campaign_runs_keep_theirs(self):
         from sippycup.evidence import EXPECTED_ARTIFACTS
 

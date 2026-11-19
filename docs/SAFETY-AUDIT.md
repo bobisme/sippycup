@@ -28,6 +28,7 @@ which has no route off the host. No external host was contacted.
 | 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Fixed (bn-3vxl) |
 | 10 | Low | Campaign `authorization.networks` has no size limit (`0.0.0.0/0` is accepted); media networks are capped at 1024 addresses. | Fixed (bn-3vxl) |
 | 11 | Low | A profile with unquoted timestamps (which `scope` documents as fine) makes `call` stop with `internal-error` (`datetime is not JSON serializable`) before any packet. Fails closed. | Reported |
+| 12 | Low | Found with 9 and 10 (bn-2yib) and in the operator walkthrough: the evidence lint reported the assessor's own source address in every campaign capture and report as `unexpected-network`, because a campaign plan authorizes only the target. A real finding was hidden among false ones. | Fixed (bn-2yib) |
 
 ## Fixes
 
@@ -191,6 +192,20 @@ than one `/64`. Both the planner and the runtime validator of the frozen
 plan apply it. The cap is the widest shape the shipped manifests use (the
 isolated self-test authorizes `127.0.0.0/8`), so it stops "any", not a
 careless range; `scope check` still warns above a `/16`.
+
+### 12: the evidence lint knows the run's own source address
+
+`campaign run` now records, in `result.json` as `localAddresses`, the
+kernel's source address toward each approved destination it uses (a UDP
+`connect()` route lookup, which sends nothing; the runners bind no source
+address, and the softphone runner advertises the same lookup). The evidence
+lint adds those addresses, and a guided call's recorded `localAddress`, to
+the expected networks. Nothing is taken from the capture: an address that
+appears only there, even as a packet source, is still `unexpected-network`,
+and so is every address outside the plan and the recorded local addresses.
+The frozen plan is unchanged. Runs made before this fix have no
+`localAddresses` and keep the old finding; for those, check that the
+address is yours and pass `--allow-network ADDRESS/32`.
 
 ## Guardrails verified sound, and how
 

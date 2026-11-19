@@ -201,6 +201,34 @@ def _authorized_networks(plan: dict[str, Any], extras: Iterable[str]) -> list[An
     return networks
 
 
+def _own_networks(root: Path) -> list[Any]:
+    """The run's own source addresses, from its result record (bn-2yib).
+
+    A campaign run records the source address it sent from toward each
+    approved destination (``localAddresses``); a guided call records
+    ``localAddress``. These are the assessor's own addresses, not unexpected
+    parties. Nothing is inferred from the capture.
+    """
+    try:
+        result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(result, dict):
+        return []
+    values = result.get("localAddresses", [])
+    if not isinstance(values, list):
+        raise EvidenceError("result localAddresses must be a list")
+    if result.get("localAddress") is not None:
+        values = [*values, result["localAddress"]]
+    networks = []
+    for value in values:
+        try:
+            networks.append(ipaddress.ip_network(ipaddress.ip_address(value)))
+        except (TypeError, ValueError) as error:
+            raise EvidenceError(f"invalid recorded local address {value!r}") from error
+    return networks
+
+
 def _classic_pcap_addresses(data: bytes) -> tuple[set[str], bool]:
     """Every IP address in a classic PCAP, for the link types tcpdump writes.
 
@@ -252,7 +280,7 @@ def privacy_findings(
     if isinstance(max_capture_bytes, bool) or not isinstance(max_capture_bytes, int) or max_capture_bytes < 1:
         raise EvidenceError("max_capture_bytes must be a positive integer")
     plan = _read_plan(root)
-    networks = _authorized_networks(plan, expected_networks)
+    networks = _authorized_networks(plan, expected_networks) + _own_networks(root)
     findings: list[dict[str, str]] = []
     for artifact in artifacts:
         relative = artifact["path"]
