@@ -2498,7 +2498,7 @@ def render_human(value: dict[str, Any]) -> str:
             lines.append(f"BLOCK: {error}")
         softphone = value["softphone"]
         host_port = softphone["destination_uri"].split("@", 1)[-1]
-        lines.append("What call does by itself (type nothing else; the plan below is the whole run):")
+        lines.append("What call does by itself (type nothing else):")
         lines.append(
             f"1. [NETWORK] capture on interface {value.get('capture_interface', 'any')}, "
             "limited to the approved addresses (filter below)"

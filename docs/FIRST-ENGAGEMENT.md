@@ -314,7 +314,9 @@ When they are right, the output contains these lines:
 ```
 
 - When it is right: one `Matrix: cell i/n ...` line for each cell, then
-  `Call matrix: COMPLETED - 8 of 8 call(s) placed, 8 passed` and the grid.
+  `Call matrix: COMPLETED - 8 of 8 call(s) placed, 8 passed`, the grid, and a
+  `Record it:` line that links the matrix record and every cell's run in one
+  journal entry. Run it.
 - A `WARNING: ... sdes-key-exposed-on-cleartext-signaling` line for SRTP over
   UDP is expected. Report it to the owner.
 

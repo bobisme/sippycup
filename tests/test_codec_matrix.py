@@ -453,6 +453,22 @@ class MatrixTests(unittest.TestCase):
         self.assertIn("call-media-not-acceptable", matrix.render_human(written))
         self.assertIn("pass 0.042s", matrix.render_human(written))
 
+    def test_run_text_ends_with_a_record_it_line_that_links_every_cell_and_the_matrix(self):
+        import shlex
+
+        code, value, _calls, _environ = self.fake_run(["pass"] * 6)
+        text = matrix.render_human(value)
+        (line,) = [item for item in text.splitlines() if item.startswith("Record it: ")]
+        argv = shlex.split(line[len("Record it: "):])
+        self.assertEqual(argv[:5], ["./bin/sippycup", "journal", "add", "work/engagement", "--kind"])
+        evidence = [argv[i + 1] for i, item in enumerate(argv) if item == "--evidence"]
+        self.assertIn(f"{value['matrixDirectory'].split('work/engagement/')[1]}/matrix.json", evidence)
+        for number in range(1, 7):
+            self.assertIn(f"calls/run-{number}/result.json", evidence)
+        self.assertIn("6 of 6", argv[argv.index("--summary") + 1])
+        # A plan (nothing placed) has nothing to record.
+        self.assertNotIn("Record it:", matrix.render_human(self.plan()))
+
     def test_run_stops_on_a_stop_condition_and_does_not_hammer(self):
         code, value, calls, _environ = self.fake_run(["pass", "call-auth-failed"] + ["pass"] * 4)
         self.assertEqual(code, 3)
