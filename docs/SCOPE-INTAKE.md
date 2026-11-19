@@ -69,7 +69,9 @@ too. A rejected file produces no derivatives.
 
 Creates a pending mode-0600 `scope.yaml` containing no addresses, approval, or
 limits (`status: pending`, everything else null or empty). It refuses to
-overwrite an existing file. The directory must already exist. `scope init`
+overwrite an existing file. The directory must already exist; when it does
+not, `scope init` creates nothing and prints the complete `journal init DIR
+--title "..." --owner "..."` command to run first. `scope init`
 works whether or not the directory already has a journal, and `journal init`
 works in an existing directory that has no journal yet, so either order is fine.
 `--name` sets the engagement name (default: a slug of the directory name).
@@ -104,11 +106,124 @@ is invalid, nothing is marked and the sheet says so. A part 2 question can
 also be `pending` or `unknown` (see below); it is `not-applicable` only when
 the owner's own answer rules it out.
 
+## `scope answer ENGAGEMENT_DIR [QUESTION]`
+
+Records the owner's written answers in `scope.yaml` for you, question by
+question. You do not have to write YAML. Editing `scope.yaml` by hand stays
+possible and gives the same result: `scope check` and `scope compile` read the
+file the same way.
+
+```sh
+./bin/sippycup scope answer work/acme              # every open question, in sheet order
+./bin/sippycup scope answer work/acme 11           # one question (here: destinations), to add or change
+./bin/sippycup scope answer work/acme limits.calls # the question that asks this field
+./bin/sippycup scope answer work/acme --all        # every question, also the answered ones
+./bin/sippycup scope answer work/acme --set limits.calls=40 --set media.codecs=PCMU,PCMA
+```
+
+For each question it prints the question exactly as the owner saw it on the
+sheet (`scope questions`), then asks its answers one field at a time: what a
+valid answer looks like, the current value, and a prompt. Structured answers
+are asked field by field: each target (name, literal address, transport,
+port, and for TLS the certificate name and the CA file), each destination
+(name, target, what to dial, what it should do), the window (the timezone the
+owner used, then the start and the end), the media port range, and every
+ceiling. QUESTION is the sheet number (1 to 24, P1 to P18, A1 to A6), the id
+(`destinations`, `authorization.window`), or a field (`limits.calls`,
+`targets`).
+
+At every prompt:
+
+| You type | Result |
+|---|---|
+| the answer | it is checked; if it is accepted it is saved at once |
+| Enter | the owner has not answered yet: the question stays open (a recorded answer is kept). Nothing is invented. |
+| `pending`, `unknown` | for platform and application answers (part 2) only: the open answers of that format |
+| `?` | how to write a valid answer |
+| `clear` | removes a recorded answer; the question is open again |
+| `quit` | stops; every answer accepted so far is already saved |
+
+Ctrl-C and Ctrl-D (end of input) also stop. The file is then valid and has
+every answer accepted before; a target or destination that was half typed is
+not written.
+
+**Checks.** Each answer is checked with the same code as `scope check`: the
+answer goes into a copy of the document and the copy is checked. An answer
+that would add an error for its own field is refused with the reason, and the
+prompt asks again. Examples: a hostname where a literal address belongs
+(`sip.acme.tld` for a target address or a network), a documentation address
+(`192.0.2.7`), a target outside the signaling networks or on a port that is
+not approved, more concurrent calls than calls, a malformed credential
+reference, and anything that looks like a password, token, or key (it is not
+written). An answer that contradicts ANOTHER recorded answer (for example
+signaling networks that no longer contain a target) is shown with the error
+`scope check` would report; it is recorded only when you type `y`. A window
+that has not started yet (or has ended) is recorded with a `NOTE`, because it
+is what the owner wrote: `scope check` keeps reporting it until the window is
+open.
+
+**Window.** Type the timezone the owner used (`Europe/Amsterdam`, `UTC`,
+`+01:00`), then the start and the end as the owner wrote them
+(`2026-12-01 09:00`). They are written as RFC 3339 with that date's offset
+(`2026-12-01T09:00:00+01:00`, daylight saving time included), and the prompt
+shows each one in UTC. The end may also be relative to the start (`+8h`). For
+the practice target, `now` and `+4h` give a window that is open now.
+
+**The approval.** `authorization.status: approved` is recorded only when you
+type the word `approved` at the approval prompt (question 2, asked after the
+window). The prompt shows the reference, the approver, and the window, and
+says that typing it asserts that the owner approved this scope in writing. It
+is refused until the reference, the approver, and the window are recorded.
+`yes` is not accepted, `--set` never sets it, and nothing else sets it.
+
+**Secrets.** The password is never asked for. The credential reference prompt
+explains the format (a name such as `acme-password`, lowercase letters, digits
+and `-`) and refuses a value that is the content of
+`ENGAGEMENT_DIR/account.password`.
+
+**The file.** Only `scope.yaml` is changed (and nothing at all while the file
+is invalid: fix the line `scope check` names by hand first). Every write is
+atomic (a temporary file in the same directory, then a rename) and leaves the
+file mode 0600. PyYAML, the YAML library here, cannot keep comments when it
+writes a document, so `scope answer` edits the text instead: it replaces only
+the value of the answered field, and keeps every comment, blank line, the key
+order, and every answer it did not ask about byte for byte. After each edit it
+reads the file back with the `scope check` loader and requires exactly the
+intended answers. When an unusual layout makes that impossible, it says so
+before the write (`its comments are NOT kept`), writes the whole document, and
+keeps the previous file beside it as `scope.yaml.bak-STAMP` (mode 0600). If
+`scope.yaml` changes on disk during a session (another editor), it writes
+nothing more and stops.
+
+**Optional question 24.** The walk does not ask the security checks question;
+the summary prints the command that does (`scope answer DIR 24`). The approved
+ids and `max_requests` are checked together, and `security-checks` is added
+to `test_scope.allowed_classes` with them.
+
+**Without a terminal.** Answers can come on standard input, one per line;
+each answer is echoed after its prompt, so a log reads like a session.
+`--set FIELD=VALUE` (repeatable) records plain answers without prompts:
+everything that is one field (`limits.calls`, `media.codecs`, `contact.name`,
+`signaling.networks`, and the one-field platform answers). Targets, destinations, the
+window, and the approval are refused there. All `--set` values are checked
+together; if one is refused, nothing is written (exit 2).
+
+**The end.** It runs the same check as `scope check` and prints its findings
+(the `scope.missing` lines are counted, not listed), the questions that are
+still open by number, and the exact next command: `scope answer` again while
+questions are open, `scope check` when an answer must be corrected, or
+`scope compile` when the scope is complete and consistent. Exit 0 when the
+scope checks clean, 1 when findings remain, 2 for a refusal, 130 after Ctrl-C.
+`Network activity: none`.
+
 ## `scope check ENGAGEMENT_DIR`
 
 Network-free validation. Human output by default, `--format json`
 (`sippycup.dev/scope-check/v1`) for automation. Exit 0 only when the scope is
 complete and consistent; 1 when findings exist; 2 when the file is absent.
+The human output ends with a `Next:` line: `scope compile` when the scope is
+clean, otherwise `scope answer` (or a hand edit) for the answer to record or
+correct.
 Every finding has a stable `code`, a `field` path, a `kind`, and the derived
 artifacts it blocks.
 
@@ -549,6 +664,6 @@ change.
 
 `./bin/sippycup status ENGAGEMENT_DIR` recommends `scope init` and `scope
 questions` first when no scope file exists. When one exists it reports the check
-result, recommends `scope check` while it fails, and reports stale derivatives
+result, recommends `scope check` and `scope answer` while it fails, and reports stale derivatives
 with `scope compile` as the next action. Every recommended action is
 network-free.

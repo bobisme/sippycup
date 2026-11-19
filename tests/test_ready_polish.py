@@ -76,8 +76,13 @@ class EmptyScopeTests(unittest.TestCase):
             check, _ = ready.check_network(FakeHost(Path(tmp)), model, "--isolated", None)
             return check.as_dict()
 
-    def test_incomplete_scope_points_at_scope_check(self) -> None:
+    def test_incomplete_scope_points_at_scope_answer(self) -> None:
         item = self.network("incomplete")
+        self.assertIn("scope answer work/eng", item["fix"])
+        self.assertNotIn("sippycup scope compile", item["fix"])
+
+    def test_inconsistent_scope_points_at_scope_check(self) -> None:
+        item = self.network("inconsistent")
         self.assertIn("scope check work/eng", item["fix"])
         self.assertNotIn("sippycup scope compile", item["fix"])
 

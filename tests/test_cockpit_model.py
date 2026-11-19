@@ -77,6 +77,22 @@ class CockpitModelTests(unittest.TestCase):
         lines = "\n".join(render_dashboard(model))
         self.assertIn("unanswered question(s)", lines)
 
+    def test_incomplete_scope_names_scope_answer_as_a_terminal_step(self) -> None:
+        from sippycup_cockpit.model import save_preferences
+
+        root = make_engagement(self.repo)
+        save_preferences(root, {"skipPractice": True})
+        text = scope_text(valid_from=NOW, valid_until=NOW + timedelta(hours=2))
+        write_scope(root, text.replace("  ports: [5060]\n", "  ports: []\n"))
+        model = self.model(root)
+        self.assertEqual("scope", model["currentStage"])
+        edit = next(item for item in model["actions"] if item["id"] == "scope-edit")
+        self.assertIn("./bin/sippycup scope answer work/eng", edit["instruction"])
+        self.assertIn("or edit", edit["instruction"])
+        # it asks questions, so the cockpit (no terminal for actions) never runs it
+        self.assertFalse(any(action.get("argv") and "answer" in action["argv"] for action in model["actions"]))
+        self.assertIn("scope answer work/eng", "\n".join(render_dashboard(model)))
+
     def test_complete_scope_compiles_and_marks_stale_after_an_edit(self) -> None:
         root = compiled_engagement(self.repo, now=NOW)
         model = self.model(root)

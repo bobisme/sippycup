@@ -56,6 +56,9 @@ _sippycup() {
         stop)
             COMPREPLY=($(compgen -W "--dry-run --grace --include-practice --engagement --format json text --help" -- "${current}"))
             ;;
+        scope)
+            COMPREPLY=($(compgen -W "init questions answer check compile --scope --name --platform --all --set --force --format json human --help" -- "${current}"))
+            ;;
         capture)
             COMPREPLY=(
                 $(compgen -W \

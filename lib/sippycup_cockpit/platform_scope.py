@@ -92,8 +92,8 @@ def check_platform(model: dict[str, Any]) -> Any:
         return None
     eng = model["engagement"]["display"]
     title = "Production safety answers"
-    fix = (f"{LAUNCHER} scope questions {eng}   (ask the owner, record the answers in {eng}/scope.yaml, "
-           f"then {LAUNCHER} scope compile {eng})")
+    fix = (f"{LAUNCHER} scope questions {eng}   (ask the owner, record the answers with {LAUNCHER} scope answer "
+           f"{eng} or in {eng}/scope.yaml by hand, then {LAUNCHER} scope compile {eng})")
     blockers = facts.get("sipBlockers") or []
     if blockers:
         return Check("platform", title, NOGO, [SIP_BLOCKERS[code] for code in blockers],

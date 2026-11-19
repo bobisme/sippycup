@@ -235,9 +235,14 @@ TABLE: tuple[ActionSpec, ...] = (
     ActionSpec(
         "scope-edit", "scope", "Fill scope.yaml from the owner's written answers",
         "Only the owner's written reply may go into the scope file; then run scope check.",
-        "none", lambda m: "edit the file in your editor, then run scope check"
+        "none", lambda m: "it asks questions, so run it in a terminal, then scope check"
         if m["scope"]["state"] in {"incomplete", "inconsistent", "invalid"} else None,
-        instruction=lambda m: f"Edit {m['scope']['path']} (mode 0600); never put a password in it.",
+        instruction=lambda m: (
+            f"In a terminal: {LAUNCHER} scope answer {_eng(m)}   (asks each open question and checks each "
+            f"answer), or edit {m['scope']['path']} by hand (mode 0600); never put a password in it."
+            if m["scope"]["state"] != "invalid" else
+            f"Fix the line that scope check names in {m['scope']['path']} by hand (mode 0600); "
+            f"scope answer needs a readable file. Never put a password in it."),
     ),
     ActionSpec(
         "scope-check", "scope", "Check the scope intake file",
@@ -320,6 +325,9 @@ ADVISOR_COVERED = {
     # A hand-made pending profile from `init` blocks the first `scope compile`
     # (scope.derivative_unmanaged, needs --force); stage 3 compiles the profile.
     "create-target-profile",
+    # scope answer asks questions: the cockpit runs actions without a terminal,
+    # so scope-edit shows it as a step to run in a terminal instead.
+    "scope-answer",
 }
 
 

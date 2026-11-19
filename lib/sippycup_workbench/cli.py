@@ -291,7 +291,7 @@ def _render_status(value: dict[str, Any]) -> None:
     print("Network activity: none")
 
 
-def _render_scope_check(value: dict[str, Any]) -> None:
+def _render_scope_check(value: dict[str, Any], engagement: str | None = None) -> None:
     scope = value["scope"]
     print(f"Scope file: {scope['path']}")
     if value["ok"]:
@@ -303,6 +303,17 @@ def _render_scope_check(value: dict[str, Any]) -> None:
         print(f"ERROR {item['code']} [{item['field'] or '-'}]: {item['message']}")
     for item in value["warnings"]:
         print(f"WARN  {item['code']} [{item['field'] or '-'}]: {item['message']}")
+    if engagement is not None and scope["present"]:
+        eng = shlex.quote(engagement)
+        if value["ok"]:
+            print(f"Next: ./bin/sippycup scope compile {eng}")
+        elif any(item["kind"] == "missing" for item in value["errors"]):
+            print(f"Next: record the owner's answers with ./bin/sippycup scope answer {eng} (it asks each open "
+                  "question and checks each answer), or edit scope.yaml by hand; then run scope check again")
+        else:
+            print(f"Next: correct the answer named in [...] with ./bin/sippycup scope answer {eng} QUESTION "
+                  "(a number from scope questions, or the field, e.g. targets), or edit scope.yaml by hand; "
+                  "then run scope check again")
     print("Network activity: none")
 
 
@@ -482,6 +493,29 @@ def build_parser() -> argparse.ArgumentParser:
     scope_check.add_argument("engagement")
     scope_check.add_argument("--scope", help="scope file (default ENGAGEMENT/scope.yaml)")
     scope_check.add_argument("--format", choices=("human", "json"), default="human")
+    scope_answer = scope_commands.add_parser(
+        "answer",
+        help="record the owner's answers question by question, each checked like scope check",
+        description=(
+            "Walk the open questions of the scope sheet, or one QUESTION, and record each answer in "
+            "scope.yaml after checking it with the same rules as scope check. Comments and everything "
+            "else in the file are kept. Answers may also come on standard input (one per line)."
+        ),
+    )
+    scope_answer.add_argument("engagement")
+    scope_answer.add_argument(
+        "question", nargs="?",
+        help="one question to answer or change: its number (1-24, P1-P18, A1-A6), id, or a field such as limits.calls",
+    )
+    scope_answer.add_argument("--scope", help="scope file (default ENGAGEMENT/scope.yaml)")
+    scope_answer.add_argument(
+        "--all", action="store_true", dest="change_all",
+        help="go through every question, also the answered ones (Enter keeps an answer)",
+    )
+    scope_answer.add_argument(
+        "--set", action="append", default=[], metavar="FIELD=VALUE",
+        help="record a plain answer without prompts, e.g. --set limits.calls=40 (repeatable; never the approval)",
+    )
     scope_compile = scope_commands.add_parser(
         "compile",
         help="generate the profile, campaign manifest, and oracle expectations",
@@ -633,9 +667,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 path = create_scope(args.engagement, name=args.name, platform=args.platform)
                 print(f"Created pending scope file: {path}")
                 print("No addresses, approval, limits, or credentials were invented.")
+                eng = shlex.quote(args.engagement)
                 print(
-                    "Next: ./bin/sippycup scope questions "
-                    f"{args.engagement}  (then fill the file and run scope check)"
+                    f"Next: ./bin/sippycup scope questions {eng}  (send the sheet to the owner); when the "
+                    f"written answers are back: ./bin/sippycup scope answer {eng}"
                 )
                 print("Network activity: none")
                 return 0
@@ -647,13 +682,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                         report = inspect_scope(path)
                 sys.stdout.write(render_questions(report))
                 return 0
+            if args.scope_command == "answer":
+                from .scope_answer import run as answer_scope
+
+                if args.set and (args.question or args.change_all):
+                    raise ScopeError("--set records answers without prompts; give it without QUESTION or --all")
+                return answer_scope(
+                    args.engagement, scope=args.scope, question=args.question, change_all=args.change_all,
+                    settings=args.set,
+                )
             if args.scope_command == "check":
                 report = inspect_scope(scope_path_for(args.engagement, args.scope))
                 value = report.as_dict()
                 if args.format == "json":
                     _emit(value, "json")
                 else:
-                    _render_scope_check(value)
+                    _render_scope_check(value, args.engagement)
                 if not report.present:
                     return 2
                 return 0 if report.ok else 1

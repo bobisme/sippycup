@@ -295,6 +295,21 @@ as the range `127.0.0.2/31` (a media-only `media.networks` entry). See
 
 ## Scope intake output
 
+`./bin/sippycup scope answer DIR [QUESTION]` records the owner's answers in
+`DIR/scope.yaml` question by question: it prints each open question as on the
+sheet, asks its answers field by field, checks each with the `scope check`
+rules (a refused answer is explained and asked again), and saves it at once,
+atomically and mode 0600, keeping comments. Enter leaves a question open;
+`quit`, Ctrl-C, and end of input stop and keep what was saved. It never asks
+for a password and records `approved` only when that word is typed at the
+approval prompt. `--all` also walks answered questions, and
+`--set FIELD=VALUE` (repeatable) records plain answers without prompts (never
+the approval). It ends with the check result, the open questions, and the next
+command. `scope check` ends with a `Next:` line, and `scope init` on a missing
+directory prints the full `journal init DIR --title ... --owner ...` command.
+Hand-editing `scope.yaml` remains an alternative. See `SCOPE-INTAKE.md`,
+"scope answer".
+
 `./bin/sippycup scope init DIR --platform` also writes the empty `platform`
 and `application` sections. `scope questions` prints two parts: the SIP
 service, then "Part 2: the whole platform" (questions P1 to P18 and A1 to A6).

@@ -15,6 +15,7 @@ import hashlib
 import ipaddress
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -344,8 +345,10 @@ def create_scope(engagement: str | Path, *, name: str | None = None, platform: b
         raise ScopeError("--name must match [a-z][a-z0-9-]{0,62}")
     if not root.is_dir():
         raise ScopeError(
-            f"engagement directory does not exist: {root}; create it first with "
-            f"`./bin/sippycup journal init {root}` (or create the directory yourself; either order works)"
+            f"engagement directory does not exist: {root} (nothing was created). Create it first with "
+            f"the engagement journal, then run scope init again:\n"
+            f"  ./bin/sippycup journal init {shlex.quote(str(root))} --title \"TITLE OF THE TEST\" --owner \"WHO APPROVES THE SCOPE\"\n"
+            f"  ./bin/sippycup scope init {shlex.quote(str(root))}"
         )
     try:
         descriptor = os.open(
@@ -538,6 +541,30 @@ def inspect(
             Finding("scope.not_object", "error", "invalid", "", "scope file must be a YAML mapping")
         )
         return report
+    fatal = structural_findings(document)
+    if fatal:
+        report.fatal = True
+        report.findings.extend(fatal)
+        return report
+    report.document = document
+    report.findings.extend(validate(document, now=now))
+    return report
+
+
+def document_findings(document: dict[str, Any], *, now: datetime | None = None) -> list[Finding]:
+    """Every finding ``scope check`` reports for a parsed scope document.
+
+    The same checks as ``inspect`` after the YAML is read: the structural
+    checks (schema version, secrets, unknown fields) first, and only when
+    they pass, the full validation. ``scope answer`` checks each typed answer
+    with this, so there is one set of rules.
+    """
+    fatal = structural_findings(document)
+    return fatal if fatal else validate(document, now=now)
+
+
+def structural_findings(document: dict[str, Any]) -> list[Finding]:
+    """Schema version, secret, and unknown-field findings (each one fatal)."""
     fatal: list[Finding] = []
     if document.get("schema_version") != SCOPE_VERSION:
         fatal.append(
@@ -555,13 +582,7 @@ def inspect(
 
     _app_unknown_scan(document, lambda path: fatal.append(Finding(
         "scope.unknown_field", "error", "unknown", path, "unknown field; the scope schema does not allow it")))
-    if fatal:
-        report.fatal = True
-        report.findings.extend(fatal)
-        return report
-    report.document = document
-    report.findings.extend(validate(document, now=now))
-    return report
+    return fatal
 
 
 def present(value: Any) -> bool:
