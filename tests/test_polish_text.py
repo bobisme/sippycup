@@ -90,6 +90,59 @@ class CockpitTextTests(unittest.TestCase):
         self.assertIn("the cockpit asks for the password source itself", text)
 
 
+class ReportGrammarTests(unittest.TestCase):
+    """Finding 17: '1 run were recorded'."""
+
+    def test_one_run_is_singular_and_several_are_plural(self) -> None:
+        from test_engagement_report import PASS_CALL, model_for
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = engagement(Path(tmp))
+            one = model_for(root, run_globs=("*" + PASS_CALL[-8:],))["executiveSummary"]["paragraph"]
+            self.assertIn("1 run was recorded", one)
+            many = model_for(root)["executiveSummary"]["paragraph"]
+            self.assertRegex(many, r"\d+ runs were recorded")
+
+
+class TriviaMessageTests(unittest.TestCase):
+    """Finding 17: messages that named a cause but not the next step."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name) / "eng"
+        self.root.mkdir()
+
+    def test_profile_before_compile_says_to_compile(self) -> None:
+        from sippycup_workbench.profile import ProfileError, load_profile
+
+        (self.root / "scope.yaml").write_text("name: x\n")
+        with self.assertRaises(ProfileError) as raised:
+            load_profile(self.root / "target-profile.yaml")
+        self.assertIn("scope compile", str(raised.exception))
+        self.assertIn("does not exist", str(raised.exception))
+
+    def test_missing_profile_without_a_scope_has_no_compile_advice(self) -> None:
+        from sippycup_workbench.profile import ProfileError, load_profile
+
+        with self.assertRaises(ProfileError) as raised:
+            load_profile(self.root / "target-profile.yaml")
+        self.assertNotIn("scope compile", str(raised.exception))
+
+    def test_scope_init_platform_on_an_existing_file_says_what_to_do(self) -> None:
+        from sippycup_workbench.scope import ScopeError, create_scope
+
+        create_scope(self.root)
+        with self.assertRaises(ScopeError) as raised:
+            create_scope(self.root, platform=True)
+        message = str(raised.exception)
+        self.assertIn("nothing was changed", message)
+        self.assertIn("examples/scope/platform-scope.yaml", message)
+        with self.assertRaises(ScopeError) as plain:
+            create_scope(self.root)
+        self.assertNotIn("platform", str(plain.exception))
+
+
 class StopWordingTests(unittest.TestCase):
     """Finding 16: `stop` says what it proved without contradicting the lines above, and prints a runnable journal line."""
 

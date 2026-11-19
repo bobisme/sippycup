@@ -171,6 +171,13 @@ def write_profile(path: str | Path, profile: dict[str, Any], *, force: bool) -> 
 def load_profile(path: str | Path) -> dict[str, Any]:
     try:
         document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        where = Path(path)
+        hint = ""
+        if (where.parent / "scope.yaml").is_file():
+            hint = (f"; {where.parent / 'scope.yaml'} exists, so the profile is not compiled yet: run "
+                    f"./bin/sippycup scope compile {where.parent} (scope check first if compile refuses)")
+        raise ProfileError(f"cannot read profile: {where} does not exist{hint}") from exc
     except (OSError, yaml.YAMLError) as exc:
         raise ProfileError(f"cannot read profile: {exc}") from exc
     if not isinstance(document, dict):

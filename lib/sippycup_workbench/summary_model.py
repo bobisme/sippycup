@@ -2295,7 +2295,7 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
     if runs:
         span = f"between {starts[0]} and {ends[-1]}" if starts and ends else "at unrecorded times"
         parts.append(
-            f"{len(runs)} run{'s' if len(runs) != 1 else ''} were recorded {span}: "
+            f"{len(runs)} run{'s' if len(runs) != 1 else ''} {'was' if len(runs) == 1 else 'were'} recorded {span}: "
             f"{counts['call']} guided call{'s' if counts['call'] != 1 else ''}, "
             f"{counts['campaign']} campaign{'s' if counts['campaign'] != 1 else ''}, and "
             f"{counts['check']} security-check run{'s' if counts['check'] != 1 else ''}."

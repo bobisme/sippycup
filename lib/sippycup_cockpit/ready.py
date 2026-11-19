@@ -693,8 +693,12 @@ def check_network(host: Host, model: dict[str, Any], mode: str, probe: dict[str,
     target = model["target"]
     address = target.get("host")
     if not address:
+        eng = model["engagement"]["display"]
+        compilable = (model.get("scope") or {}).get("state") in {"complete", "complete-not-compiled", "stale"}
         return Check("network", title, NOGO, ["no target address yet"],
-                     f"{LAUNCHER} scope compile {model['engagement']['display']}"), None
+                     f"{LAUNCHER} scope compile {eng}" if compilable else
+                     f"{LAUNCHER} scope check {eng}   (answer what it lists in scope.yaml first; "
+                     "scope compile writes the profile only from a complete scope)"), None
     if mode == "--practice":
         return Check("network", title, GO,
                      [f"{address} is the local practice target: commands join its loopback-only namespace "

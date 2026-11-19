@@ -64,6 +64,27 @@ class PracticePasswordTests(ReadyTestCase):
         self.assertNotIn("practice", item["fix"])
 
 
+class EmptyScopeTests(unittest.TestCase):
+    """Finding 17: no target address yet must not send the operator to a compile that is blocked."""
+
+    def network(self, state: str) -> dict:
+        from test_ready import FakeHost
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            model = {"engagement": {"display": "work/eng"}, "target": {"host": None}, "scope": {"state": state}}
+            check, _ = ready.check_network(FakeHost(Path(tmp)), model, "--isolated", None)
+            return check.as_dict()
+
+    def test_incomplete_scope_points_at_scope_check(self) -> None:
+        item = self.network("incomplete")
+        self.assertIn("scope check work/eng", item["fix"])
+        self.assertNotIn("sippycup scope compile", item["fix"])
+
+    def test_complete_scope_points_at_compile(self) -> None:
+        self.assertIn("scope compile work/eng", self.network("complete-not-compiled")["fix"])
+
+
 class ApprovalPromptTests(ReadyTestCase):
     """Finding 12: only the cockpit asks for the last 4 characters of the approval id."""
 

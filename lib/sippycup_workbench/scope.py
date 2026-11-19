@@ -354,7 +354,12 @@ def create_scope(engagement: str | Path, *, name: str | None = None, platform: b
             0o600,
         )
     except FileExistsError as exc:
-        raise ScopeError(f"scope file already exists: {destination}") from exc
+        extra = (
+            "; --platform only applies to a new file: copy the platform: and application: sections "
+            "from examples/scope/platform-scope.yaml into it by hand"
+            if platform else ""
+        )
+        raise ScopeError(f"scope file already exists: {destination} (nothing was changed){extra}") from exc
     except OSError as exc:
         raise ScopeError(f"cannot create scope file: {exc}") from exc
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
