@@ -30,7 +30,7 @@ from sippycup_workbench import call as guided  # noqa: E402
 from sippycup_workbench import matrix  # noqa: E402
 from sippycup_workbench.call_explanations import CALL_EXPLANATIONS  # noqa: E402
 from sippycup_workbench.profile import rehearse  # noqa: E402
-from test_guided_call import NOW, SECRET, Fakes, profile_document  # noqa: E402
+from test_guided_call import NOW, SECRET, Fakes, profile_document, with_test_budget  # noqa: E402
 
 # PJSUA 2.17's "Cp" console listing from the prepared image (localhost/sippycup).
 PJSUA_CODEC_LISTING = """List of audio codecs:
@@ -143,7 +143,8 @@ class GuidedCodecTests(unittest.TestCase):
         self._directory.cleanup()
 
     def write_profile(self, document):
-        self.profile.write_text(yaml.safe_dump(document), encoding="utf-8")
+        # Several calls from one profile; see with_test_budget (bn-2sfn).
+        self.profile.write_text(yaml.safe_dump(with_test_budget(document)), encoding="utf-8")
 
     def main(self, *arguments, fakes=None):
         fakes = fakes or Fakes()

@@ -237,6 +237,23 @@ practice destination, the numeric aliases, and `nobody-home`, which the
 practice dial plan does not have on purpose: it is the drill's 404 scenario,
 an approved destination that the platform does not know.
 
+## The engagement's call limit
+
+`limits.max_calls` (the owner's `limits.calls`) is a budget for the whole
+engagement, not for one `call`. Each `call` reserves one call in
+`ENG/call-ledger.jsonl`, beside the profile, before its first packet, and is
+refused (`Guided call: BLOCKED`, exit 2, nothing sent) when the calls already
+placed under the approval id by `call`, `matrix run`, `checks run` and
+`campaign run` leave none. The `BLOCK:` line gives the calls used and
+remaining. A call that stopped before its preflight was sent gives its
+reservation back; a call that sent anything counts. `--dry-run` shows the
+same refusal. A missing or damaged ledger refuses too; see SAFETY-AUDIT.md,
+finding 6, for the recovery and the limits of the ledger.
+
+A compiled profile must also be exactly what `scope compile` wrote from the
+current `scope.yaml`. An edited, stale or copied profile is refused before
+any packet; change `scope.yaml` and run `scope compile` again.
+
 ## DTMF
 
 `--dtmf 12#,34` sends `12#`, waits 1 s, then sends `34`, starting

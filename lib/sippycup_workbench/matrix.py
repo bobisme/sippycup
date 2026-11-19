@@ -272,6 +272,12 @@ def build_plan(
             "srtp_approved": (document.get("features") or {}).get("srtp") is True,
         }
     shared = _shared_ceilings(transports, by_transport, per_profile, shown)
+    for group in _ledger_groups(transports, by_transport, per_profile, shown):
+        for message in guided.ledger_blocking_in(
+            group["directory"], group["approval"], group["ceiling"], group["calls"], "matrix run"
+        ):
+            if message not in blocking:
+                blocking.append(message)
     for item in shared:
         if item["calls"] > item["max_calls"]:
             counted = ", ".join(f"{calls} through {path}" for path, calls in item["profiles"].items())
@@ -348,6 +354,71 @@ def _shared_ceilings(
             }
         )
     return shared
+
+
+def _ledger_groups(
+    transports: Sequence[str],
+    by_transport: dict[str, dict[str, Any]],
+    per_profile: dict[str, int],
+    shown: Callable[[Path], str],
+) -> list[dict[str, Any]]:
+    """The calls this grid places per engagement call ledger (bn-2sfn).
+
+    One group per (engagement directory, approval id); its ceiling is the
+    smallest ``limits.max_calls`` among the group's profiles.
+    """
+    groups: dict[tuple[Path, str], dict[str, Any]] = {}
+    for transport in transports:
+        entry = by_transport[transport]
+        approval, ceiling = guided.ledger_terms(entry["document"])
+        if not approval:
+            continue
+        directory = Path(entry["path"]).parent
+        key = (directory.resolve(), approval)
+        group = groups.setdefault(key, {
+            "directory": directory, "approval": approval, "ceiling": ceiling, "calls": 0,
+            "sources": [],
+        })
+        group["ceiling"] = min(group["ceiling"], ceiling)
+        group["calls"] += per_profile[shown(entry["path"])]
+        group["sources"].append(Path(entry["path"]).name)
+    return list(groups.values())
+
+
+def _reserve_grid(
+    plan: dict[str, Any], profile_paths: dict[str, Path]
+) -> tuple[dict[tuple[Path, str], Any], dict[str, tuple[Path, str] | None], str | None]:
+    """Reserve every cell of the grid in its engagement's call ledger (bn-2sfn)."""
+    from sippycup import call_ledger
+
+    groups: dict[tuple[Path, str], dict[str, Any]] = {}
+    group_of: dict[str, tuple[Path, str] | None] = {}
+    for transport, path in profile_paths.items():
+        approval, ceiling = guided.ledger_terms(load_profile(path))
+        if not approval:
+            group_of[transport] = None
+            continue
+        key = (path.parent.resolve(), approval)
+        group_of[transport] = key
+        group = groups.setdefault(key, {"directory": path.parent, "ceiling": ceiling, "calls": 0, "sources": []})
+        group["ceiling"] = min(group["ceiling"], ceiling)
+        group["sources"].append(path.name)
+    for cell in plan["cells"]:
+        key = group_of.get(cell["transport"])
+        if key is not None:
+            groups[key]["calls"] += 1
+    reservations: dict[tuple[Path, str], Any] = {}
+    for key, group in groups.items():
+        try:
+            reservations[key] = call_ledger.reserve(
+                group["directory"], approval_id=key[1], ceiling=group["ceiling"],
+                calls=group["calls"], command="matrix run", source=", ".join(group["sources"]),
+            )
+        except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
+            for reservation in reservations.values():
+                reservation.release(reservation.calls, "the matrix was refused before its first cell")
+            return {}, group_of, str(error)
+    return reservations, group_of, None
 
 
 def _profile_transports(paths: Sequence[Path]) -> list[dict[str, str]]:
@@ -438,6 +509,15 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
     matrix_root = Path(options.matrix_root) if options.matrix_root else first_profile.parent / "matrix"
     if not guided._within(matrix_root, work_root):
         raise MatrixError(f"the matrix directory must be beneath the work directory ({work_root})")
+    # The owner's call limit holds for the engagement (bn-2sfn): reserve the
+    # whole grid in each engagement's call ledger before the first cell.
+    reservations, group_of, refusal = _reserve_grid(plan, profile_paths)
+    if refusal is not None:
+        plan["state"] = "blocked"
+        plan["ready"] = False
+        plan["blockingErrors"].append(refusal)
+        return EXIT_REFUSED, plan
+    sent: dict[int, bool] = {}
     old_umask = os.umask(0o077)
     try:
         matrix_dir = create_run_directory(matrix_root, guided._slug(f"matrix-{options.destination}"))
@@ -481,8 +561,13 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
             label = f"cell {cell['index']}/{len(plan['cells'])} {cell['transport']}/{cell['codec']}/srtp {cell['srtp']}"
             if deps.progress is not None:
                 deps.progress(f"Matrix: {label}: calling ...")
+            call_deps = deps.call_dependencies(environ)
             try:
-                code, value = deps.execute(call_options, deps.call_dependencies(environ))
+                call_deps.ledger_reserved = True
+            except AttributeError:
+                pass
+            try:
+                code, value = deps.execute(call_options, call_deps)
             except (guided.CallError, ProfileError) as error:
                 cell.update(status="refused", verdict="refused", exitCode=EXIT_REFUSED, reason=str(error))
                 stop = f"refused: {error}"
@@ -490,6 +575,10 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
                     deps.progress(f"Matrix: {label}: refused: {error}")
                 continue
             cell.update(_cell_result(value, code))
+            sent[cell["index"]] = bool(
+                (value.get("timestamps") or {}).get("preflight_sent")
+                or value.get("verdict") == "internal-error"
+            )
             if deps.progress is not None:
                 deps.progress(f"Matrix: {label}: {cell.get('verdict')}")
             if code in (130, 143):
@@ -501,6 +590,13 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
+        # Cells that sent nothing (not run, refused, blocked) do not count.
+        for key, reservation in reservations.items():
+            unsent = sum(
+                1 for cell in plan["cells"]
+                if group_of[cell["transport"]] == key and not sent.get(cell["index"], False)
+            )
+            reservation.release(unsent, "matrix cells that sent nothing")
     run_cells = [cell for cell in plan["cells"] if cell["status"] == "run"]
     if cancelled:
         code = 130 if cancelled[0] in (signal.SIGINT, 130) else 143

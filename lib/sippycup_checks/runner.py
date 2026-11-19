@@ -170,6 +170,10 @@ def build_plan(
         blocking.append(
             f"the selected checks place up to {invites} INVITE attempts, above limits.max_calls {max_calls}"
         )
+    if invites and profile_path is not None:
+        from sippycup_workbench.call import ledger_blocking
+
+        blocking.extend(ledger_blocking(profile_path, document, invites, "checks run"))
     valid_until = (rehearsal.facts.get("authorization") or {}).get("valid_until") if rehearsal.facts else None
     if not blocking and valid_until and now + timedelta(seconds=seconds) >= datetime.fromisoformat(valid_until):
         blocking.append(f"authorization expires before the run's latest possible end ({int(seconds)}s from now)")
@@ -358,6 +362,25 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     if not _within(run_root, work_root):
         raise ChecksError(f"--run-root must be beneath the work directory ({work_root})")
     network_mode = deps.network_mode or deps.environ.get("SIPPYCUP_NETWORK_MODE", "unknown")
+    # INVITE attempts count against the owner's call limit for the whole
+    # engagement (bn-2sfn), reserved in its ledger before anything exists.
+    reservation = None
+    if plan["inviteAttempts"]:
+        from sippycup import call_ledger
+        from sippycup_workbench.call import ledger_terms
+
+        approval, ceiling = ledger_terms(document)
+        try:
+            reservation = call_ledger.reserve(
+                profile_path.parent, approval_id=approval, ceiling=ceiling,
+                calls=plan["inviteAttempts"], command="checks run", source=profile_path.name,
+            )
+        except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
+            return EXIT_REFUSED, {
+                "apiVersion": RESULT_VERSION, "state": "blocked", "exitCode": EXIT_REFUSED,
+                "blockingErrors": [str(error)], "runDirectory": None, "requestsSent": 0,
+                "networkActivity": "none",
+            }
     old_umask = os.umask(0o077)
     run_dir = create_run_directory(run_root, _slug(str(document.get("name", "profile"))))
     timestamps: dict[str, str] = {"started": _utc(deps.now())}
@@ -491,6 +514,10 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     findings = [item for result in results for item in result.findings]
     findings.sort(key=lambda item: (-catalog.SEVERITY_RANK[item["severity"]], item["id"]))
     total = sum(result.requests_sent for result in results)
+    if reservation is not None and not total and not budget.log:
+        # Nothing was sent: the reserved INVITE attempts do not count. Once
+        # any request left, every reserved attempt counts (fail closed).
+        reservation.release(reservation.calls, "nothing was sent")
     findings_document = {
         "apiVersion": FINDINGS_VERSION,
         "target": {"address": host, "port": port, "transport": transport, "serverName": server_name},

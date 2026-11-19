@@ -1447,6 +1447,91 @@ def _exception(code: str, run: str | None, detail: str) -> dict[str, Any]:
     return {"code": code, "run": run, "detail": detail}
 
 
+def _recorded(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file():
+        return {}
+    try:
+        value = read_json(path)
+    except Unreadable:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _run_call_terms(raw: RawRun, model: dict[str, Any]) -> tuple[str, int | None, int]:
+    """(approval id, ceiling recorded with the run, calls the run placed).
+
+    A call counts once its first packet left (an attempted call counts,
+    whatever happened next); a checks run counts its INVITE requests.
+    """
+    sent = model.get("sent") or {}
+    if raw.kind == "campaign":
+        plan = _dict(raw.docs.get("plan.json"))
+        auth = _dict(plan.get("authorization"))
+        approval = _dict(auth.get("approval")).get("id")
+        ceiling = _int(_dict(auth.get("hardMaxima")).get("calls"))
+        calls = _int(sent.get("calls")) or 0
+        return (approval if isinstance(approval, str) else ""), ceiling, calls
+    profile = _recorded(raw.path / "profile.json")
+    approval = _dict(profile.get("authorization")).get("approval_id")
+    ceiling = _int(_dict(profile.get("limits")).get("max_calls"))
+    if raw.kind == "call":
+        result = _dict(raw.docs.get("result.json"))
+        attempted = bool(_dict(result.get("timestamps")).get("preflight_sent")) or bool(_int(sent.get("calls")))
+        calls = 1 if attempted else 0
+    else:
+        result = _recorded(raw.path / "result.json")
+        calls = sum(
+            1 for entry in _list(result.get("requestLog"))
+            if isinstance(entry, dict) and str(entry.get("request", "")).upper().startswith("INVITE")
+            and entry.get("paced") is not False
+        )
+    return (approval if isinstance(approval, str) else ""), ceiling, calls
+
+
+def _engagement_call_check(
+    runs: list[dict[str, Any]], raws: dict[str, RawRun], sources: list[Source]
+) -> list[dict[str, Any]]:
+    """The owner's call limit holds for the engagement, across runs (bn-2sfn).
+
+    Owner runs (not practice runs) are counted per approval id in start
+    order; a run is an exception when the calls placed under its approval,
+    with its own, exceed the limit: the smaller of the ceiling recorded with
+    the run and ``limits.calls`` of a scope file that states the same
+    approval id.
+    """
+    scope_limits: dict[str, int] = {}
+    reviewed = {source.approval_id for source in sources if source.approval_id}
+    for source in sources:
+        calls = source.limits.get("calls")
+        if source.kind == "scope" and source.approval_id and isinstance(calls, int):
+            scope_limits[source.approval_id] = min(calls, scope_limits.get(source.approval_id, calls))
+    exceptions = []
+    placed: dict[str, int] = {}
+    for run in runs:
+        raw = raws.get(run["id"])
+        if raw is None or run.get("practiceApproval") or run["readable"] == "unreadable":
+            continue
+        approval, recorded, calls = _run_call_terms(raw, run)
+        if not calls or approval == "LOCAL-PRACTICE-ONLY":
+            # Practice-bench runs have their own budget per `practice-target up`.
+            continue
+        placed[approval] = placed.get(approval, 0) + calls
+        limits = [value for value in (recorded, scope_limits.get(approval)) if isinstance(value, int)]
+        if not limits:
+            continue
+        limit = min(limits)
+        if placed[approval] > limit:
+            # Only an approval id a reviewed record names is shown; a run's
+            # own text is not repeated in the report.
+            shown = approval if approval in reviewed else "the run's recorded approval"
+            exceptions.append(_exception(
+                "call-limit-exceeded", run["id"],
+                f"this run brought the calls placed under {shown} in this engagement to "
+                f"{placed[approval]}, above the approved limit of {limit}",
+            ))
+    return exceptions
+
+
 def _practice_scopes(root: Path, raws: list[RawRun], scope: _Scope) -> dict[str, _Scope]:
     """Per-run scopes for runs whose recorded profile is an archived practice approval.
 
@@ -2113,6 +2198,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     runs.sort(key=lambda r: (r.get("started") or "9999", r["id"]))
     for index, run in enumerate(runs, 1):
         run["label"] = f"R{index}"
+    exceptions.extend(_engagement_call_check(runs, {raw.name: raw for raw in filtered}, sources))
     for run in runs:
         exceptions.extend(run["integrity"])
         candidate_findings.extend(_observations(run) if run["readable"] != "unreadable" else [])

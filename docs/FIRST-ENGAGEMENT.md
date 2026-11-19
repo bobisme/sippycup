@@ -334,6 +334,15 @@ Stop and send nothing more if one of these happens:
 - `scope check` reports any `ERROR`, or `rehearse` prints `Ready: no`.
 - A call prints `Guided call: BLOCKED`. Nothing was sent. For a destination
   that is not approved, the `BLOCK:` line names the approved ones.
+- A `call limit:` refusal. The owner's `limits.calls` counts every call
+  placed in the engagement, by `call`, `matrix run`, `checks run` and
+  `campaign run` together (the count is in `work/acme/call-ledger.jsonl`).
+  Only the owner can raise it. Do not delete or edit the ledger, and do not
+  copy the engagement directory to send from the copy.
+- A refusal that says a profile or manifest was edited, is stale, or was not
+  recorded by `scope compile`. Put the change in `work/acme/scope.yaml` and
+  run `./bin/sippycup scope compile work/acme` again; never edit a compiled
+  file.
 - The authorization window has ended or has not started yet.
 - `registration-failed` or `call-auth-failed`. Do not try the password again
   without the owner: every attempt is a credentialed attempt on their account.

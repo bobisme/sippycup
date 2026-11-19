@@ -22,7 +22,7 @@ which has no route off the host. No external host was contacted.
 | 3 | Medium | SIGHUP (closing the terminal) killed `call`, `checks`, `matrix` and campaigns at once: no BYE, no unregistration (REGISTER stays for 300 s), no `result.json`. | Fixed |
 | 4 | Low | `approved_addresses` accepted a YAML integer (`2130706433` is 127.0.0.1), non-canonical spellings, and unspecified, multicast or broadcast addresses. | Fixed |
 | 5 | High | `campaign run` has no approval window and no approval status. A frozen plan runs after `valid_until`, after revocation, and a long campaign can cross the window's end. | Fixed (bn-3vxl) |
-| 6 | Medium | Ceilings are per process and per invocation. Two commands at once (two terminals, or the cockpit and a shell) each get the full ceiling, and `max_calls` is not a budget across repeated `call` runs. | Reported |
+| 6 | Medium | Ceilings are per process and per invocation. Two commands at once (two terminals, or the cockpit and a shell) each get the full ceiling, and `max_calls` is not a budget across repeated `call` runs. | Fixed for the call limit (bn-2sfn); other ceilings stay per run |
 | 7 | Medium | Some senders are not bound to a profile at all: `preflight HOST`, `media send`, `shell` and `--`. `media send` took its destination from the session's remote SDP and would send its canary to any literal unicast address (bn-328). | Fixed for `media send`; `preflight` can be bound and says when it is not; `shell` and `--` say UNBOUND (bn-328, bn-3df) |
 | 8 | Medium | No kernel egress filter. Findings 1 and 2 are now caught within one poll interval, but a few packets still leave before the stop, and a host name in a far-end URI or SDP causes a DNS lookup first. | Reported (design) |
 | 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Fixed (bn-3vxl) |
@@ -173,6 +173,51 @@ follows the stop, and the capture holds 4 INVITE packets (two calls, each
 INVITE sent once and once again with credentials). No step was running at
 the stop, so there was no teardown to observe after it.
 
+### 6: the owner's call limit holds for the engagement (bn-2sfn)
+
+The wave-8 rehearsal showed the gap: with `limits.calls: 2`, separate
+commands placed 5 calls, later 17, and `summary` said every run was inside
+the approval. Now every command that places calls under an approval keeps
+count in one ledger, `ENG/call-ledger.jsonl` (mode 0600, append only), in the
+engagement directory that holds the profile or manifest:
+
+- `call`, `matrix run`, `checks run` (its INVITE attempts), `campaign run`
+  and the MCP live one-call tool reserve their calls *before the first
+  packet*, under an exclusive `flock` on `ENG/.call-ledger.lock`. Two
+  commands started at once cannot both pass.
+- A command whose calls would bring the total under that approval id above
+  the limit is refused with exit 2 and sends nothing. The message says how
+  many calls were placed, how many remain, and that only the owner can raise
+  `limits.calls` in `ENG/scope.yaml` (then `scope compile`). `call --dry-run`,
+  `matrix plan` and `checks plan` show the same refusal.
+- An attempted call counts, whatever happened to it. A reserved call that
+  sent nothing (refused at the gate, capture failed, no step started) is
+  released again. A checks run that sent any request keeps its whole
+  reservation.
+- Fail closed: an unreadable, malformed or truncated ledger refuses, and so
+  does a missing ledger while `ENG/calls`, `matrix`, `runs` or `checks` hold
+  runs under the same approval id. The message gives the recovery: restore the
+  ledger from the backup of the engagement directory, or ask the owner for a
+  new approval id. Do not create an empty ledger.
+- `summary` counts the calls of every owner run per approval id, in start
+  order, and raises `call-limit-exceeded` for a run that took the total above
+  the limit (the smaller of the ceiling recorded with the run and
+  `limits.calls` of a scope file with the same approval id). This includes
+  overruns from before this fix. The executive summary then does not say that
+  every run fell inside the approval.
+- The practice bench (`work/practice`, approval `LOCAL-PRACTICE-ONLY`) gets a
+  new approval window on every `practice-target up`, with a budget of 200
+  calls for all practice commands together. Only `up` may write that record,
+  and only there.
+
+What it does not do: the ledger counts per engagement directory. A copied
+engagement directory, a profile copied to another directory, or a second
+checkout keeps its own count. Anyone who can write the engagement directory
+can edit the ledger. It counts calls only: packet, request-rate and duration
+ceilings are still per run, and two commands at once each get their own rate.
+A campaign plan with no approval (`campaign selftest`, hand-written manifests
+without `authorization.approval`) is not counted.
+
 ### 9: campaign artifacts are private
 
 `campaign run` now works with umask 077, creates a new run root with mode
@@ -236,13 +281,12 @@ address is yours and pass `--allow-network ADDRESS/32`.
    before the next step, not inside a running step. The MCP one-call tool
    applies the same gate to `scope.yaml` beside its reviewed manifest
    (bn-wcx2).
-2. **Ceilings are per process (finding 6).** Run one sender at a time, from one
-   terminal, and do not repeat `call` beyond what the owner approved:
-   `max_calls` limits one matrix or campaign run, not the engagement. Within
-   one `matrix run`, the profiles of one approval (the per-target profiles of
-   one scope) share one `max_calls` (bn-28vz); separate invocations are not
-   added up. Recommended fix: a per-approval send ledger under `work/` with an
-   exclusive lock.
+2. **The call ledger counts per engagement directory (finding 6, fixed for
+   calls).** The owner's `limits.calls` now holds across commands through
+   `ENG/call-ledger.jsonl`. Keep one engagement directory per approval, in one
+   checkout; do not copy it or its profiles elsewhere and send from the copy;
+   keep the ledger in the engagement backup. Packet, rate and duration
+   ceilings are still per run: run one sender at a time, from one terminal.
 3. **Unbound senders (finding 7).** `shell` and `-- COMMAND` send wherever they
    are told, and so does `preflight HOST` without `--profile`. Each prints a
    `Scope: UNBOUND` line. Use `preflight --profile PROFILE` and

@@ -258,6 +258,10 @@ class Dependencies:
     work_root: Path | None = None
     network_mode: str | None = None
     install_signal_handlers: bool = True
+    # True when the caller (a matrix run) already reserved this call in the
+    # engagement's call ledger (bn-2sfn); the call then neither reserves nor
+    # releases it itself.
+    ledger_reserved: bool = False
     tools: dict[str, str] = field(
         default_factory=lambda: {
             "tcpdump": shutil.which("tcpdump") or "tcpdump",
@@ -433,6 +437,37 @@ def gate(
                 f"authorization expires before the call's latest possible end ({planned_seconds}s from now)"
             )
     return errors
+
+
+def ledger_terms(document: dict[str, Any]) -> tuple[str, int]:
+    """The approval id and the call ceiling a profile counts its calls against."""
+    authorization = document.get("authorization") if isinstance(document.get("authorization"), dict) else {}
+    limits = document.get("limits") if isinstance(document.get("limits"), dict) else {}
+    return str(authorization.get("approval_id") or ""), int(limits.get("max_calls") or 0)
+
+
+def ledger_blocking(profile_path: str | Path, document: dict[str, Any], calls: int, command: str) -> list[str]:
+    """Read-only: why the engagement's call ledger would refuse ``calls`` more (bn-2sfn).
+
+    For plans and dry runs; the command that sends reserves under the lock.
+    """
+    approval, ceiling = ledger_terms(document)
+    return ledger_blocking_in(Path(profile_path).parent, approval, ceiling, calls, command)
+
+
+def ledger_blocking_in(directory: Path, approval: str, ceiling: int, calls: int, command: str) -> list[str]:
+    from sippycup import call_ledger
+
+    if not approval:
+        return []
+    try:
+        found = call_ledger.check(directory, approval)
+    except call_ledger.LedgerError as error:
+        return [str(error)]
+    limit = call_ledger.effective_ceiling(found, ceiling)
+    if found.used + calls > limit:
+        return [call_ledger.refusal_text(directory, approval, limit, found.used, calls, command)]
+    return []
 
 
 def generate_tone(path: Path, seconds: float = 3.0, rate: int = 8000) -> None:
@@ -739,6 +774,7 @@ def dry_run_plan(
         document, now=now, planned_seconds=planned_wall_seconds(options, duration), work_root=work_root,
         destination=options.destination, profile_path=options.profile,
     )
+    blocking += ledger_blocking(options.profile, document, 1, "call")
     for message in blocking:
         if message not in plan["blocking_errors"]:
             plan["blocking_errors"].append(message)
@@ -1964,6 +2000,28 @@ def _execute(
         raise CallError(str(error)) from error
 
     child_environment = _sanitized_environment(secrets, scrub_names, environ=deps.environ)
+    # The owner's call limit holds for the engagement (bn-2sfn): reserve this
+    # call in the engagement's ledger, under its lock, before anything exists.
+    reservation = None
+    if not deps.ledger_reserved:
+        from sippycup import call_ledger
+
+        approval, ceiling = ledger_terms(document)
+        try:
+            reservation = call_ledger.reserve(
+                profile_path.parent, approval_id=approval, ceiling=ceiling, calls=1,
+                command="call", source=profile_path.name,
+            )
+        except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
+            return EXIT_REFUSED, {
+                "apiVersion": RESULT_VERSION,
+                "state": "blocked",
+                "verdict": "blocked",
+                "exitCode": EXIT_REFUSED,
+                "blockingErrors": [str(error)],
+                "runDirectory": None,
+                "networkActivity": "none",
+            }
     old_umask = os.umask(0o077)
     state["umask"] = old_umask
     run_dir = create_run_directory(run_root, _slug(profile_name))
@@ -2351,6 +2409,9 @@ def _execute(
         media_networks=media_networks,
     )
     notes.insert(0, _network_note(network_mode, host))
+    if reservation is not None and not preflight_sent and stop_reason != "internal-error":
+        # Nothing reached the network: the reserved call does not count.
+        reservation.release(1, f"nothing was sent ({verdict})")
     if verdict == "preflight-failed" and _is_loopback(host) and not str(detail).startswith("tls_"):
         notes.append(_loopback_preflight_note(host))
     if internal_error is not None:

@@ -260,6 +260,12 @@ allowed), and the capture file name. Target, approved addresses, approval id,
 and the four-hour window are identical, and the files are archived with the
 other approvals, so `summary` treats their runs as practice runs.
 
+Every `up` also starts a new practice approval window in the call ledger
+(`work/practice/call-ledger.jsonl`): all practice commands together may place
+200 calls until the next `up`, and each profile's `limits.max_calls` still
+bounds one command. When the budget is used, `call` and the others refuse
+with the counts; `practice-target down` and `up` start a new window.
+
 A matrix takes one profile per transport, so each route is a pair: direct
 (`target-profile-matrix.yaml` + `target-profile-matrix-tls.yaml`) and through
 the proxy (`target-profile-matrix-proxy.yaml` +
