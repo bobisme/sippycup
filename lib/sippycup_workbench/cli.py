@@ -336,7 +336,12 @@ def _render_scope_compile(value: dict[str, Any]) -> None:
         print(f"Skipped {name}:")
         for item in items:
             print(f"  {item['code']} [{item['field'] or '-'}]: {item['message']}")
-    if value["profileStatus"]:
+    if value.get("profileNotUsable"):
+        print(
+            f"Target profile: not usable: {value['profileNotUsable']}. The scope says approved; the profile is "
+            "written as pending only because of that error, and call, rehearse and matrix refuse it."
+        )
+    elif value["profileStatus"]:
         print(f"Target profile authorization status: {value['profileStatus']}")
     for note in value["notes"]:
         print(f"NOTE: {note}")

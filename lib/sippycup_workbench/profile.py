@@ -539,9 +539,16 @@ def rehearse(
             "send nothing; ask the owner for a new written window, record it in scope.yaml, "
             "and run scope compile"
         )
-    if status != "approved":
-        # After the window problems: a scope whose window is over or not open
-        # yet is compiled as pending, and the window is the cause to fix first.
+    window_problem = bool(
+        (valid_from and instant < valid_from) or (valid_until and instant >= valid_until)
+    )
+    if status == "pending" and window_problem:
+        # scope compile writes a profile as pending when its scope has an
+        # error, and a window that is over or not open yet is such an error.
+        # The window line above is the one true cause; a second line saying
+        # "pending" would read as if nobody had recorded the approval.
+        pass
+    elif status != "approved":
         errors.append(f"authorization is {status or 'missing'}, not approved")
     if status == "approved" and valid_until is None:
         errors.append("approved profiles require authorization.valid_until")
