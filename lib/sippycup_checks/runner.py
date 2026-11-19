@@ -95,9 +95,17 @@ def build_plan(
     only: Sequence[str] = (),
     password_available: bool | None = None,
     work_root: Path | None = None,
+    profile_path: str | Path | None = None,
 ) -> dict[str, Any]:
     rehearsal = rehearse(document, now=now, work_root=work_root)
     blocking = list(rehearsal.errors)
+    if profile_path is not None:
+        # A profile scope compile wrote must still be what it wrote (bn-zqe8).
+        from sippycup_workbench.scope_derive import integrity_error
+
+        refusal = integrity_error(profile_path)
+        if refusal:
+            blocking.insert(0, refusal)
     if not host_is_approved_literal(document):
         blocking.append("checks require target.host itself to be one of the literal approved_addresses")
     section = _section(document)
@@ -305,7 +313,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     password_source = bool(options.secret_env or options.secret_file)
     now = deps.now()
     plan = build_plan(document, now=now, only=options.only, password_available=password_source,
-                      work_root=work_root)
+                      work_root=work_root, profile_path=options.profile)
     if options.dry_run:
         return (EXIT_OK if plan["ready"] else EXIT_REFUSED), plan
     if not plan["ready"]:
@@ -660,7 +668,8 @@ def main(argv: Sequence[str] | None = None, deps: Dependencies | None = None) ->
             print("Network activity: none", file=sys.stderr if args.format == "json" else sys.stdout)
             return EXIT_REFUSED
         plan = build_plan(document, now=datetime.now(timezone.utc), only=tuple(args.only),
-                          work_root=(deps.work_root if deps else None) or _work_root(Dependencies()))
+                          work_root=(deps.work_root if deps else None) or _work_root(Dependencies()),
+                          profile_path=args.profile)
         if args.format == "json":
             print(json.dumps(plan, indent=2, sort_keys=True))
         else:

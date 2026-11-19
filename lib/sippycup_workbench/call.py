@@ -399,15 +399,24 @@ def gate(
     planned_seconds: int,
     work_root: Path | None = None,
     destination: str | None = None,
+    profile_path: str | Path | None = None,
 ) -> list[str]:
     """Every reason this profile cannot send a packet right now (empty when ready).
 
     With ``destination`` (every caller that dials passes it) the dial string
     must also be one of the profile's ``target.approved_destinations`` when
-    the profile carries that list.
+    the profile carries that list. With ``profile_path`` (every caller that
+    sends passes it) a profile that ``scope compile`` wrote must still be
+    exactly what it wrote, from the current scope file (bn-zqe8).
     """
     rehearsal = rehearse(document, now=now, work_root=work_root)
     errors = list(rehearsal.errors)
+    if profile_path is not None:
+        from .scope_derive import integrity_error
+
+        refusal = integrity_error(profile_path)
+        if refusal:
+            errors.insert(0, refusal)
     if destination is not None:
         refusal = destination_refusal(document, destination)
         if refusal:
@@ -728,7 +737,7 @@ def dry_run_plan(
     duration, limit = effective_duration(options.duration, document)
     blocking = gate(
         document, now=now, planned_seconds=planned_wall_seconds(options, duration), work_root=work_root,
-        destination=options.destination,
+        destination=options.destination, profile_path=options.profile,
     )
     for message in blocking:
         if message not in plan["blocking_errors"]:
@@ -1860,7 +1869,7 @@ def _execute(
 
     blocking = gate(
         document, now=now, planned_seconds=planned, work_root=work_root,
-        destination=options.destination,
+        destination=options.destination, profile_path=options.profile,
     )
     if blocking:
         return EXIT_REFUSED, {
@@ -2010,6 +2019,7 @@ def _execute(
             now=deps.now(),
             planned_seconds=planned if stage == "preflight" else duration + 30,
             work_root=work_root,
+            profile_path=options.profile,
         )
         if errors:
             stop_reason = "authorization-lapsed"

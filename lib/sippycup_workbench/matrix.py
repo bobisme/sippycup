@@ -256,7 +256,7 @@ def build_plan(
             spacing = max(spacing, 1.0 / rate)
         for message in guided.gate(
             document, now=now, planned_seconds=int(wall_seconds) + 1, work_root=work_root,
-            destination=options.destination,
+            destination=options.destination, profile_path=entry["path"],
         ):
             blocking.append(f"{path}: {message}")
         limits_view[path] = {

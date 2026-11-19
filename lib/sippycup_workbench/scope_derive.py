@@ -855,6 +855,127 @@ def compile_scope(
     return result
 
 
+def operator_path(path: str | Path) -> str:
+    """A path as the operator types it on the host (``work/...``), also inside the image."""
+    text = str(path)
+    if text.startswith("/work/"):
+        return "work/" + text[len("/work/"):]
+    parts = Path(text).parts
+    if "work" in parts:
+        index = len(parts) - 1 - parts[::-1].index("work")
+        return str(Path(*parts[index:]))
+    return text
+
+
+def derivative_integrity(path: str | Path, content: bytes | None = None) -> dict[str, Any]:
+    """Is this the file ``scope compile`` wrote, unchanged, from the current scope? (bn-zqe8)
+
+    The send-time form of the check that ``ready`` and ``scope compile`` make,
+    for a target profile or a campaign manifest about to be used for traffic.
+    ``content`` is the exact bytes the caller will use (read from ``path``
+    when omitted). Returns ``state``:
+
+    - ``compiled-current``: recorded in ``scope-derivatives.json`` beside it,
+      byte for byte as written, and the scope file is unchanged since;
+    - ``not-compiled``: no record beside it and no compile header (a profile
+      written by hand, the practice target's, or a self-test's): nothing ties
+      it to a scope file, as before;
+
+    and for every other state an ``error`` that says what is wrong and the
+    exact command that recovers. Reads only local files; sends nothing.
+    """
+    target = Path(path)
+    shown = operator_path(target)
+    engagement = operator_path(target.parent)
+    value: dict[str, Any] = {"state": None, "path": target.name, "sha256": None, "scopeSha256": None, "error": None}
+
+    def refuse(state: str, why: str, fix: str) -> dict[str, Any]:
+        value["state"] = state
+        value["error"] = (
+            f"{shown} {why}; nothing was sent. Never edit a compiled profile or manifest: "
+            f"{fix}"
+        )
+        return value
+
+    if content is None:
+        try:
+            content = target.read_bytes()
+        except OSError as exc:
+            return refuse("unreadable", f"cannot be read ({exc.strerror or exc})",
+                          f"run ./bin/sippycup scope compile {engagement}")
+    value["sha256"] = _sha256(content)
+    generated = content.startswith(HEADER.encode())
+    sidecar, problem = read_sidecar(target.parent)
+    if problem:
+        return refuse(
+            "record-unreadable",
+            f"cannot be checked against what scope compile wrote ({problem})",
+            f"run ./bin/sippycup scope compile --force {engagement} to write the profiles and "
+            "their record again from scope.yaml",
+        )
+    if sidecar is None:
+        if generated:
+            return refuse(
+                "unrecorded",
+                f"carries the scope compile header, but there is no {SIDECAR_FILE} beside it "
+                "(it was copied from another directory, or the record was removed)",
+                "use the profile in the engagement directory where scope compile wrote it, or run "
+                f"./bin/sippycup scope compile --force {engagement} there",
+            )
+        value["state"] = "not-compiled"
+        return value
+    entry = next(
+        (item for item in sidecar["derivatives"].values() if item.get("path") == target.name),
+        None,
+    )
+    if entry is None:
+        return refuse(
+            "unrecorded",
+            f"was not written by scope compile, but it sits in an engagement directory whose "
+            f"profiles and manifest scope compile manages ({SIDECAR_FILE} does not list it)",
+            "use a profile that scope compile wrote (target-profile.yaml or "
+            f"target-profile-NAME.yaml); to change what is approved, put it in {engagement}/scope.yaml "
+            f"and run ./bin/sippycup scope compile {engagement}",
+        )
+    if value["sha256"] != entry["sha256"]:
+        return refuse(
+            "edited",
+            "was edited after scope compile wrote it (its SHA-256 no longer matches "
+            f"{SIDECAR_FILE})",
+            f"put any change the owner approved in {engagement}/scope.yaml, then run "
+            f"./bin/sippycup scope compile --force {engagement} to replace the edited file",
+        )
+    recorded_scope = (sidecar.get("scope") or {}).get("path")
+    scope_file = target.parent / (recorded_scope if isinstance(recorded_scope, str) and recorded_scope
+                                  and not Path(recorded_scope).is_absolute() else "scope.yaml")
+    current = (
+        _sha256(scope_file.read_bytes())
+        if scope_file.is_file() and not scope_file.is_symlink()
+        else None
+    )
+    value["scopeSha256"] = current
+    if current is None:
+        return refuse(
+            "scope-missing",
+            f"was compiled from {scope_file.name}, which is no longer in {engagement}",
+            f"restore {engagement}/{scope_file.name} with the owner's answers and run "
+            f"./bin/sippycup scope compile {engagement}",
+        )
+    if current != entry["scopeSha256"]:
+        return refuse(
+            "stale",
+            f"no longer matches {engagement}/{scope_file.name}, which changed after the last scope compile",
+            f"run ./bin/sippycup scope compile {engagement}",
+        )
+    value["state"] = "compiled-current"
+    return value
+
+
+def integrity_error(path: str | Path, content: bytes | None = None) -> str | None:
+    """The refusal for a profile or manifest that must not be used for traffic, else None."""
+    return derivative_integrity(path, content)["error"]
+
+
 def derivative_state(
     engagement: str | Path, scope: str | Path | None = None
 ) -> dict[str, Any]:

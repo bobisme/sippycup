@@ -749,6 +749,14 @@ def _execute_campaign(
     )
     if refusal is not None:
         raise AuthorizationLapsed(refusal.message)
+    if manifest_path is not None:
+        # A manifest scope compile wrote must still be what it wrote, from the
+        # current scope file (bn-zqe8); a hand-written one is unaffected.
+        from sippycup_workbench.scope_derive import integrity_error
+
+        problem = integrity_error(manifest_path, manifest_bytes)
+        if problem:
+            raise AuthorizationLapsed(problem)
 
     def step_gate(step: dict[str, Any]) -> tuple[str, str] | None:
         refusal = gate.refusal(

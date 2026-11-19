@@ -376,6 +376,9 @@ class Source:
     assessor: list[str] = field(default_factory=list)
     limits: dict[str, int] = field(default_factory=dict)
     media_ports: tuple[int, int] | None = None
+    # The dial strings this record approves (None: it does not restrict the
+    # destination). Not part of as_dict, so report bytes are unchanged.
+    dial_list: list[str] | None = None
 
     def covers(self, address: str | None, port: int | None, transport: str | None) -> bool:
         if address is None:
@@ -466,6 +469,8 @@ def _scope_source(document: dict[str, Any], ref: str) -> Source:
         for key in ("user", "name"):
             if isinstance(destination.get(key), (str, int)):
                 source.destinations.append(str(destination[key]))
+        if isinstance(destination.get("user"), (str, int)):
+            source.dial_list = (source.dial_list or []) + [str(destination["user"])]
     source.assessor = _str_list(_dict(document.get("client")).get("source_addresses"))
     for key, value in _dict(document.get("limits")).items():
         if _int(value) is not None:
@@ -490,6 +495,8 @@ def _profile_source(document: dict[str, Any], ref: str) -> Source:
     )
     if isinstance(target.get("tls_server_name"), str):
         source.server_names.append(target["tls_server_name"])
+    if isinstance(target.get("approved_destinations"), list):
+        source.dial_list = _str_list(target["approved_destinations"])
     # Owner-approved media networks (media only: Source.covers, the signaling
     # target check, never consults them) and the far end's RTP ports.
     media = _dict(document.get("media"))
@@ -1547,6 +1554,48 @@ def _target_check(scope: _Scope, model: dict[str, Any], target: dict[str, Any] |
     return []
 
 
+def _tampered_record(path: Path) -> str | None:
+    """Why a compiled profile or manifest cannot be an authorization record, or None.
+
+    Only a file ``scope compile`` wrote that was then edited by hand (or a
+    file that sits among compiled ones, or copies the compile header, without
+    a record) is refused; a file compiled from an older scope file is still
+    what the owner's answers produced then.
+    """
+    from .scope_derive import derivative_integrity
+
+    try:
+        state = derivative_integrity(path)["state"]
+    except Exception:  # noqa: BLE001 - an unreadable file is reported elsewhere
+        return None
+    reasons = {
+        "edited": "was edited after scope compile wrote it",
+        "unrecorded": "is not recorded by scope compile (scope-derivatives.json)",
+        "record-unreadable": "cannot be checked: scope-derivatives.json is unreadable",
+    }
+    if state not in reasons:
+        return None
+    return f"{reasons[state]}, so it was not used as an approval record; runs are checked against the other records"
+
+
+def _destination_check(scope: _Scope, model: dict[str, Any], raw: RawRun) -> list[dict[str, Any]]:
+    """A call whose dialed destination is on no approved destination list (bn-zqe8)."""
+    if model["kind"] != "call":
+        return []
+    user = _destination_user(_dict(raw.docs.get("result.json")).get("destinationUri"))
+    lists = [source.dial_list for source in scope.sources if source.dial_list is not None]
+    if user is None or not lists or any(user in item for item in lists):
+        return []
+    return [
+        _exception(
+            "destination-not-approved",
+            model["id"],
+            f"destination {scope.destinations(user)} is not on the approved destination list of "
+            + ", ".join(sorted({source.ref for source in scope.sources if source.dial_list is not None})),
+        )
+    ]
+
+
 def _ceiling_check(model: dict[str, Any], scope: _Scope) -> list[dict[str, Any]]:
     exceptions = []
     sent = model.get("sent", {})
@@ -1877,6 +1926,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     explicit_profiles = [Path(p) for p in options.profiles]
     explicit_manifests = [Path(p) for p in options.manifests]
     profile_paths: list[Path] = []
+    record_exceptions: list[dict[str, Any]] = []
     for path in yaml_files + explicit_profiles + explicit_manifests:
         try:
             document = read_yaml(path)
@@ -1889,6 +1939,12 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             ref = path.resolve().relative_to(root).as_posix()
         except (OSError, ValueError):
             ref = f"external/{path.name}"
+        tampered = _tampered_record(path)
+        if tampered is not None:
+            # A compiled profile or manifest edited by hand approves nothing
+            # (bn-zqe8): it is not used as an authorization record.
+            record_exceptions.append(_exception("approval-record-edited", None, f"{ref} {tampered}"))
+            continue
         if str(document.get("schema_version", "")).startswith("sippycup.dev/target-profile/"):
             sources.append(_profile_source(document, ref))
             profile_paths.append(path.resolve())
@@ -1979,7 +2035,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         filtered.append(raw)
     runs: list[dict[str, Any]] = []
     candidate_findings: list[dict[str, Any]] = []
-    exceptions: list[dict[str, Any]] = []
+    exceptions: list[dict[str, Any]] = list(record_exceptions)
     for raw in filtered:
         model = _base_run(raw)
         prefix = f"runs[{raw.name}]"
@@ -2041,6 +2097,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     )
             model["integrity"].extend(_window_check(run_scope, model, raw_targets))
             model["integrity"].extend(_ceiling_check(model, run_scope))
+            model["integrity"].extend(_destination_check(run_scope, model, raw))
             if model["started"] is None:
                 model["problems"].append("no recorded start time; approval window not checked")
         model.pop("_mediaPeerRaw", None)
