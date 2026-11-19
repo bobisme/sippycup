@@ -261,8 +261,10 @@ scope name, then `-NAME` for the other targets). All of them share the
 approval, the window, `approved_addresses`, the limits, and the media scope
 (`media.codecs`, `media.networks`, `media.port_range`). `security_checks`
 goes only into the first target's profile. The limits are written into each
-profile, so each profile bounds the calls placed through it; the scope's
-totals for the whole engagement are in the campaign manifest.
+profile, but `limits.calls` stays one total: a `matrix run` over several of
+these profiles counts their calls together (they share the approval id) and
+refuses a grid with more calls than `limits.calls`. The scope's totals for
+the whole engagement are in the campaign manifest.
 
 Compile prints which file belongs to which target:
 

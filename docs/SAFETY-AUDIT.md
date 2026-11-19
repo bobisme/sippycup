@@ -218,12 +218,16 @@ careless range; `scope check` still warns above a `/16`.
    `WARNING`. For such a plan, check the written window by hand. A
    revocation reaches a campaign through `scope.yaml` only: set
    `authorization.status: revoked` there, or press Ctrl-C. It takes effect
-   before the next step, not inside a running step.
+   before the next step, not inside a running step. The MCP one-call tool
+   applies the same gate to `scope.yaml` beside its reviewed manifest
+   (bn-wcx2).
 2. **Ceilings are per process (finding 6).** Run one sender at a time, from one
    terminal, and do not repeat `call` beyond what the owner approved:
-   `max_calls` limits one matrix or campaign run, not the engagement.
-   Recommended fix: a per-approval send ledger under `work/` with an exclusive
-   lock.
+   `max_calls` limits one matrix or campaign run, not the engagement. Within
+   one `matrix run`, the profiles of one approval (the per-target profiles of
+   one scope) share one `max_calls` (bn-28vz); separate invocations are not
+   added up. Recommended fix: a per-approval send ledger under `work/` with an
+   exclusive lock.
 3. **Unbound senders (finding 7).** `shell` and `-- COMMAND` send wherever they
    are told, and so does `preflight HOST` without `--profile`. Each prints a
    `Scope: UNBOUND` line. Use `preflight --profile PROFILE` and

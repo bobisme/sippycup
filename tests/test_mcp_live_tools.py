@@ -472,5 +472,130 @@ class LivePreparationToolTests(unittest.TestCase):
             _require_one_call(account_plan)
 
 
+WINDOW_UNTIL = "2030-01-01T00:00:00Z"
+
+
+def scope_yaml(status: str) -> str:
+    return yaml.safe_dump({"authorization": {
+        "status": status, "approval_id": "CHG-MCP-1", "approved_by": "Owner",
+        "valid_from": None, "valid_until": WINDOW_UNTIL,
+    }})
+
+
+class OneCallApprovalGateTests(unittest.TestCase):
+    """bn-wcx2: an MCP one-call run passes the same approval gate as `campaign run`."""
+
+    # The live-tools fixture, without re-running its tests.
+    issue = LivePreparationToolTests.issue
+    tearDown = LivePreparationToolTests.tearDown
+
+    def setUp(self) -> None:
+        LivePreparationToolTests.setUp(self)  # type: ignore[arg-type]
+        manifest = yaml.safe_load(self.one_manifest_bytes)
+        manifest["authorization"]["approval"] = {"id": "CHG-MCP-1", "validUntil": WINDOW_UNTIL}
+        self.engagement = self.inputs / "eng"
+        self.engagement.mkdir(mode=0o700)
+        self.windowed_manifest = yaml.safe_dump(manifest, sort_keys=False).encode()
+        (self.engagement / "campaign.yaml").write_bytes(self.windowed_manifest)
+        document, digest = load_manifest(self.engagement / "campaign.yaml")
+        plan = compile_plan(document, digest)
+        self.windowed_plan = json.dumps(plan, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        (self.engagement / "plan.json").write_bytes(self.windowed_plan)
+
+    def issue_one_call(self, name: str, nonce: str, plan_bytes: bytes) -> None:
+        plan = json.loads(plan_bytes)
+        media = plan["authorization"]["mediaPorts"]
+        self.issue(
+            name, "execute_one_call", nonce, plan_bytes=plan_bytes,
+            endpoints=[
+                {"role": "media", "address": "10.20.30.40", "port": media["start"],
+                 "portEnd": media["end"], "transport": "udp"},
+                {"role": "signaling", "address": "10.20.30.40", "port": 5060, "transport": "udp"},
+            ],
+            ceilings=dict(plan["authorization"]["hardMaxima"]),
+        )
+
+    def run_windowed(self, name: str = "win.cap") -> dict:
+        return self.tools.execute_one_call(name, "profile.yaml", "eng/plan.json", "eng/campaign.yaml")
+
+    def test_a_revoked_scope_refuses_before_the_capability_or_the_helper(self) -> None:
+        self.issue_one_call("win.cap", "99999999999999999999999999999991", self.windowed_plan)
+        (self.engagement / "scope.yaml").write_text(scope_yaml("revoked"))
+        result = self.run_windowed()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["networkActivity"])
+        self.assertEqual(self.process_runner.calls, [])
+        message = result["errors"][0]["message"]
+        self.assertIn("revoked, not approved", message)
+        self.assertIn("Nothing was sent", message)
+        self.assertIn("the capability was not used", message)
+        # Re-approved: the same capability is still unused and the call proceeds.
+        (self.engagement / "scope.yaml").write_text(scope_yaml("approved"))
+        result = self.run_windowed()
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(result["warnings"], [])
+
+    def test_the_helper_is_told_where_the_scope_file_is(self) -> None:
+        self.issue_one_call("win.cap", "99999999999999999999999999999992", self.windowed_plan)
+        (self.engagement / "scope.yaml").write_text(scope_yaml("approved"))
+        self.assertTrue(self.run_windowed()["ok"])
+        argv = self.process_runner.calls[0]
+        self.assertIn(f"--scope-manifest={self.inputs.resolve() / 'eng' / 'campaign.yaml'}", argv)
+        self.assertEqual(argv[-1], str(self.evidence))
+
+    def test_a_plan_without_a_window_runs_with_the_campaign_warning(self) -> None:
+        from sippycup.approval import UNBOUND_WARNING
+
+        self.issue_one_call("plain.cap", "99999999999999999999999999999993", self.one_plan_bytes)
+        result = self.tools.execute_one_call("plain.cap", "profile.yaml", "one-plan.json", "one-manifest.yaml")
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(result["warnings"], [UNBOUND_WARNING])
+
+    def test_a_revocation_seen_by_the_helper_reports_no_traffic(self) -> None:
+        self.issue_one_call("win.cap", "99999999999999999999999999999994", self.windowed_plan)
+        (self.engagement / "scope.yaml").write_text(scope_yaml("approved"))
+
+        class LapsedRunner:
+            def __init__(self) -> None:
+                self.calls: list[list[str]] = []
+
+            def run_json(self, argv: list[str]) -> tuple[int, object, str]:
+                self.calls.append(argv)
+                return 1, {"state": "failed", "error": "AuthorizationLapsed",
+                           "detail": "the scope file says the approval is revoked, not approved"}, ""
+
+        self.tools.process_runner = LapsedRunner()  # type: ignore[assignment]
+        result = self.run_windowed()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["networkActivity"])
+        self.assertIn("revoked, not approved", result["errors"][0]["message"])
+        self.assertIn("Nothing was sent", result["errors"][0]["message"])
+
+    def test_the_helper_itself_rereads_the_scope_file_and_sends_nothing(self) -> None:
+        """The real helper entry point with the real executor: no capture, preflight, or run directory."""
+        import contextlib
+        import io
+
+        from sippycup_mcp import one_call
+
+        (self.engagement / "scope.yaml").write_text(scope_yaml("revoked"))
+        frozen = self.root / "frozen"
+        frozen.mkdir()
+        (frozen / "reviewed-manifest.yaml").write_bytes(self.windowed_manifest)
+        (frozen / "reviewed-plan.json").write_bytes(self.windowed_plan)
+        runs = self.root / "one-call-runs"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = one_call.main([
+                f"--scope-manifest={self.engagement / 'campaign.yaml'}",
+                str(frozen / "reviewed-plan.json"), str(frozen / "reviewed-manifest.yaml"), str(runs),
+            ])
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt["error"], "AuthorizationLapsed")
+        self.assertIn("revoked, not approved", receipt["detail"])
+        self.assertFalse(runs.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

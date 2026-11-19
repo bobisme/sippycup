@@ -232,7 +232,8 @@ triage, and assertions, with a new private run directory:
 
 See `docs/GUIDED-CALL.md` for credentials, verdicts, and the emergency stop.
 `docs/SAFETY-AUDIT.md` lists which guardrails were tested and how, and the
-residual risks to manage by procedure (ceilings are per process and per profile;
+residual risks to manage by procedure (ceilings are per process; the profiles
+of one scope share its call ceiling within one matrix run;
 `shell` and `--` are not bound to any approval).
 
 `checks` runs owner-approved, low-volume posture checks (banners, TLS,
