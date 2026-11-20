@@ -53,10 +53,19 @@ The registry makes execution location explicit:
   the other run and sends nothing. `SIPPYCUP_ALLOW_OVERLAP=NAME[,NAME]` names
   the runs it may knowingly run beside; the run then records `overlap` in its
   result, and `diagnose` and the owner report call its verdict unreliable.
+  Commands started at the same instant are held apart too: the check runs
+  under a file lock and leaves a claim (`work/.sender-claims/`) that the next
+  start sees before any container exists; exactly one starts, the others are
+  refused naming `launcher-PID`. A claim ends with its process, so a crashed
+  run never blocks the next one; do not edit or delete that directory.
 - `SIPPYCUP_ROUTED_PRACTICE=CONTAINER` (set by `make routed-rehearsal`) joins
   the routed practice target: the launcher checks the container and fails
   closed, then maps its link-local address to host loopback in every
-  networked container. Nothing else may target a link-local address.
+  networked container. Nothing else may target a link-local address. If the
+  variable is left set after that target is gone, every sender still refuses;
+  `stop` and the host-side commands that only read (`summary`, `report`,
+  `rehearse`, `ready`, `go`, `journal`, `diagnose`, `explain`) print a note
+  and run as if it were unset.
 - `call` always runs in the prepared image with a private network namespace,
   where rootless capture works, and rewrites `work/...` paths to `/work/...`.
   It rejects `--admin`. `call --dry-run` and `call --help` run from the

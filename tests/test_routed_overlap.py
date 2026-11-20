@@ -279,8 +279,17 @@ class LauncherTests(unittest.TestCase):
     def run_cli(self, *arguments, env):
         environment = {key: value for key, value in os.environ.items()
                        if key not in {"SIPPYCUP_ROUTED_PRACTICE", "SIPPYCUP_ROUTED_ADDRESS", "SIPPYCUP_OVERLAP"}}
-        return subprocess.run([str(LAUNCHER), *arguments], cwd=ROOT, env={**environment, **env}, text=True,
-                              capture_output=True, timeout=30, check=False)
+        # A throwaway checkout (this one's bin, lib and config, a work/ of its
+        # own): the launcher claims each sender start under its checkout's
+        # work/ (wave 11), and a test must neither leave a claim in this
+        # checkout nor be refused by a run that is really active in it.
+        from test_wave11_guard import throwaway_checkout
+
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = throwaway_checkout(Path(directory))
+            return subprocess.run([str(checkout / "bin" / "sippycup"), *arguments], cwd=checkout,
+                                  env={**environment, **env}, text=True, capture_output=True, timeout=30,
+                                  check=False)
 
     def test_documented_campaign_run_goes_into_a_private_container(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -232,7 +232,13 @@ engagement directory that holds the profile or manifest:
   while the run directories show calls. A run from before the ledger existed
   names no reservation, so outside the practice bench it is unaccounted for
   too. The recovery, in the message: restore `ENG/call-ledger.jsonl` from the
-  backup of the engagement directory, or ask the owner for a new approval id.
+  backup of the engagement directory; only if that is impossible, tell the
+  owner how many calls the run directories show and ask for a new written
+  approval with a new approval id. Calls stay counted under the reference
+  they were placed under: `rehearse`, `ready`, dry runs and plans name every
+  other reference this directory holds calls under, and every sibling
+  directory whose ledger counts calls under the same reference (`ready` is
+  `NO-GO` for that, except for the practice benches' own references).
   The message says what happens otherwise: an empty, shortened or new ledger
   is refused the same way. Runs placed with `--run-root` outside those four
   directories are not read: the ledger counted them when they were placed,
