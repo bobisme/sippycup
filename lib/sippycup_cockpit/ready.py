@@ -814,11 +814,14 @@ def authorizes(model: dict[str, Any], document: dict[str, Any] | None, zone: Any
     lines = [
         f"Target         {target.get('host')} port {target.get('port')}/{target.get('transport')}"
         + (f" (TLS name {target['tls_server_name']})" if target.get("tls_server_name") else ""),
-        f"Approved addrs {', '.join(str(item) for item in target.get('approved_addresses') or []) or 'none'}"
-        + (" (signaling and media)" if not isinstance(media.get("addresses"), list) else
-           f" (media only at {', '.join(str(item) for item in media['addresses']) or 'none of them'}: "
-           "the owner's media answer)"),
     ]
+    # Finding 17: the same lines rehearse prints (Signaling and media /
+    # Signaling only / Media at / Media only / Media ports), so the two
+    # commands cannot describe the owner's media answer differently.
+    from sippycup_workbench.media_scope import GUARD_STATEMENT, where_lines
+
+    lines.extend(where_lines(document))
+    lines.append(f"Media stop: {GUARD_STATEMENT}")
     approved_dial = target.get("approved_destinations")
     lines.append("Destinations   " + (
         "NOT RESTRICTED by this profile: check every --dial against the owner's written approval"
@@ -829,11 +832,6 @@ def authorizes(model: dict[str, Any], document: dict[str, Any] | None, zone: Any
         lines.append(f"Other profile  {Path(str(item['path'])).name}: target {item.get('target')} "
                      f"{item.get('host')} port {item.get('port')}/{item.get('transport')}; destinations "
                      + ("NOT RESTRICTED" if also is None else ", ".join(also) or "none approved"))
-    networks = model["target"].get("mediaNetworks") or []
-    ports = model["target"].get("mediaPorts")
-    lines.append(f"Media only     {', '.join(networks) if networks else 'no extra networks'}"
-                 + (f"; RTP ports {ports.get('start')}-{ports.get('end')}" if isinstance(ports, dict) else
-                    f"; RTP ports {ports}" if ports else ""))
     if isinstance(media.get("codecs"), list):
         lines.append(f"Codecs         {', '.join(str(item) for item in media['codecs'])}")
     transports = sorted({target.get("transport")} | set((plan.get("authorization") or {}).get("transports") or []))

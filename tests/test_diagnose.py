@@ -326,6 +326,37 @@ class DiagnoseCallTests(unittest.TestCase):
         self.assertIn("Give it to the owner in your own message", steps)
         self.assertNotIn("do not paste it into the owner report", steps)
 
+    def test_media_stop_counts_rtcp_and_names_the_media_rules(self) -> None:
+        # Rehearsal 3, findings 3 and 17: the stop said "no media was exchanged
+        # beyond the first packets" (RTCP uncounted) and "1 approved
+        # address(es), 0 media network(s)" for an address approved for media.
+        scope = {"peer": "203.0.113.200:20000", "inScope": False, "admittedBy": None,
+                 "rules": {"approvedAddresses": APPROVED, "mediaNetworks": None, "mediaPorts": [20000, 20019]}}
+        soft = {"answered": True, "final_status": 200, "error": "media_peer_outside_scope",
+                "media_peer": "203.0.113.200:20000", "rtp_tx_packets": 1}
+        guard = {"active": True, "blocked": {"rtp": 1, "rtcp": 4, "other": 0},
+                 "destinations": ["203.0.113.200:20000"], "listTruncated": False}
+        self.fx.call("media-outside-scope", softphone=soft, result={"mediaScope": scope, "mediaGuard": guard})
+        text = json.dumps(self.fx.diagnose())
+        self.assertIn("media guard dropped the 1 RTP and 4 RTCP packets addressed to it before they left", text)
+        self.assertIn("no media was sent there", text)
+        self.assertNotIn("beyond the first packets", text)
+        self.assertIn(f"Rules in force for media: {len(APPROVED)} address(es) approved for media ({', '.join(APPROVED)}), "
+                      "0 media network(s), media ports 20000-20019", text)
+        self.assertIn("dropped before they left: 1 RTP, 4 RTCP", text)
+
+    def test_media_stop_without_an_active_guard_does_not_claim_zero(self) -> None:
+        scope = {"peer": "203.0.113.200:20000", "inScope": False, "admittedBy": None,
+                 "rules": {"approvedAddresses": APPROVED, "mediaNetworks": None}}
+        self.fx.call("media-outside-scope", softphone={"answered": True, "final_status": 200,
+                                                       "error": "media_peer_outside_scope",
+                                                       "media_peer": "203.0.113.200:20000"},
+                     result={"mediaScope": scope})
+        text = json.dumps(self.fx.diagnose())
+        self.assertIn("the media guard was not active for this run", text)
+        self.assertIn("RTP and RTCP packets", text)
+        self.assertIn("may have reached it", text)
+
     def test_authorization_lapsed_says_only_the_owner_can_renew(self) -> None:
         self.fx.call("authorization-lapsed")
         data = self.fx.diagnose()

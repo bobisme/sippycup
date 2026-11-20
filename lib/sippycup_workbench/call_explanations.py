@@ -66,7 +66,7 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
     ),
     "call.media-outside-scope": (
         "The negotiated media peer is not an approved address",
-        "The far end's media address is outside the profile's approved addresses and outside every owner-approved media network (media.networks), or its port is outside media.port_range, so Sippycup hung the call up. This is a safety stop, not a target failure. Review the SDP in the capture, then ask the owner for the media-server addresses or range (see ./bin/sippycup scope questions) before changing the scope.",
+        "The far end's media address is outside the profile's approved addresses and outside every owner-approved media network (media.networks), or its port is outside media.port_range, so Sippycup hung the call up. The softphone's media guard drops the RTP and RTCP packets PJSUA addresses there before they leave (PJSUA sends RTCP as soon as it reads the answer and again as it hangs up); the Media guard line and result.json (mediaGuard) count them, and none is sent. This is a safety stop, not a target failure. Review the SDP in the capture, then ask the owner for the media-server addresses or range (see ./bin/sippycup scope questions) before changing the scope.",
     ),
     "call.signaling-outside-scope": (
         "PJSUA sent SIP to an address that is not the approved target",

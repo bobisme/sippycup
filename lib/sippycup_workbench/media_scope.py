@@ -290,3 +290,57 @@ def describe(networks: Sequence[str]) -> str:
         count = ipaddress.ip_network(text).num_addresses
         parts.append(f"{text} ({count} address{'es' if count != 1 else ''})")
     return ", ".join(parts)
+
+
+# bn-3l8o: what enforces the media rules. The softphone's media guard
+# (lib/sippycup_softphone/media_guard.c, preloaded into PJSUA) drops every RTP
+# and RTCP packet addressed outside them before it leaves, and the driver hangs
+# the call up. One sentence, so rehearse, ready and call --dry-run agree.
+GUARD_STATEMENT = (
+    "RTP and RTCP for any other address, or RTP for a port outside the media ports, are dropped "
+    "before they leave (the softphone's media guard) and the call is ended at once"
+)
+
+
+def where_lines(document: Any) -> list[str]:
+    """Where signaling and media may go, in the words ``rehearse`` uses.
+
+    One line per rule: ``Signaling and media:`` / ``Signaling only:`` for the
+    target host, ``Media at:`` for the other literal addresses of the owner's
+    media answer, ``Media only:`` for owner-approved media networks, and
+    ``Media ports:``. ``rehearse``, ``ready`` and ``call --dry-run`` all
+    print these lines, so they cannot say different things. Invalid entries
+    are left out, as in :func:`profile_media` and :func:`media_addresses`.
+    """
+    target = document.get("target") if isinstance(document, dict) else None
+    target = target if isinstance(target, dict) else {}
+    section = document.get("media") if isinstance(document, dict) else None
+    approved = target.get("approved_addresses")
+    networks, ports = profile_media(document)
+    lines: list[str] = []
+    if isinstance(approved, list) and isinstance(section, dict) and isinstance(section.get("addresses"), list):
+        # The owner answered the media question: media goes only where that
+        # answer lists, even when it is not the signaling address.
+        try:
+            host = str(ipaddress.ip_address(str(target.get("host"))))
+        except ValueError:
+            host = str(target.get("host"))
+        media = list(media_addresses(document))
+        if host in media:
+            lines.append(f"Signaling and media: {host} (the target host; the owner also listed it for media)")
+        else:
+            lines.append(f"Signaling only: {host} (the target host; the owner did not list it for media, "
+                         "so a call stops if media is offered there)")
+        elsewhere = [item for item in media if item != host]
+        if elsewhere:
+            lines.append(f"Media at: {', '.join(elsewhere)} (literal addresses from the owner's media answer; "
+                         "never a signaling target)")
+    elif isinstance(approved, list):
+        lines.append(f"Signaling and media: {', '.join(str(item) for item in approved) or 'none'} "
+                     "(literal approved addresses; signaling goes only to the target host)")
+    if networks:
+        lines.append(f"Media only: {describe(networks)} "
+                     "(owner-approved media networks; never a signaling target)")
+    if ports is not None:
+        lines.append(f"Media ports: {ports[0]}-{ports[1]} (the far end's RTP ports)")
+    return lines

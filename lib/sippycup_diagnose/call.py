@@ -140,6 +140,16 @@ def add_common(d: Diagnosis, run: CallRun) -> None:
         if isinstance(types, dict):
             text += "; capture payload types out " + _pts(types.get("outbound")) + ", in " + _pts(types.get("inbound"))
         d.evidence("RTP", text)
+    guard = run.result.get("mediaGuard") if isinstance(run.result.get("mediaGuard"), dict) else {}
+    dropped = guard.get("blocked") if isinstance(guard.get("blocked"), dict) else {}
+    if guard.get("active") is True and any(dropped.values()):
+        # bn-3l8o: PJSUA counts a packet the guard dropped as sent.
+        d.evidence(
+            "media guard",
+            f"dropped before they left: {int(dropped.get('rtp') or 0)} RTP, {int(dropped.get('rtcp') or 0)} RTCP"
+            + (f", {int(dropped.get('other') or 0)} other" if dropped.get("other") else "")
+            + " (PJSUA's counters above include them)",
+        )
     scope = run.result.get("mediaScope") or {}
     if scope.get("peer"):
         text = f"media peer {scope['peer']}: "
@@ -149,7 +159,7 @@ def add_common(d: Diagnosis, run: CallRun) -> None:
         elif scope.get("inScope") is False:
             text += "refused (no scope rule admits it)"
             rules = scope.get("rules") or {}
-            text += f"; rules: approved addresses {len(rules.get('approvedAddresses') or [])}, media networks {len(rules.get('mediaNetworks') or [])}"
+            text += f"; rules: addresses approved for media {len(rules.get('approvedAddresses') or [])}, media networks {len(rules.get('mediaNetworks') or [])}"
             if scope.get("portAdmitted") is False:
                 text += ", port outside the approved media port range"
         d.evidence("media scope", text)
@@ -1044,7 +1054,21 @@ def h_scope_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
         why = "its port is outside the approved media port range"
     else:
         why = "its address is neither an approved address nor inside an owner-approved media network"
-    d.outcome(f"Safety stop: the far end's media peer {d.red.text(scope.get('peer') or soft.get('media_peer'))} was refused because {why}; no media was exchanged beyond the first packets.")
+    # bn-3l8o: say what happened to the packets PJSUA addressed there, RTCP
+    # included (PJSUA sends RTCP as it starts the stream and as it hangs up).
+    guard = run.result.get("mediaGuard") if isinstance(run.result.get("mediaGuard"), dict) else {}
+    dropped = guard.get("blocked") if isinstance(guard.get("blocked"), dict) else {}
+    if guard.get("active") is True:
+        packets = (
+            f"the softphone's media guard dropped the {int(dropped.get('rtp') or 0)} RTP and "
+            f"{int(dropped.get('rtcp') or 0)} RTCP packets addressed to it before they left, so no media was sent there."
+        )
+    else:
+        packets = (
+            "the media guard was not active for this run, so the first RTP and RTCP packets "
+            "(sent as the call was answered and as it was hung up) may have reached it."
+        )
+    d.outcome(f"Safety stop: the far end's media peer {d.red.text(scope.get('peer') or soft.get('media_peer'))} was refused because {why}; {packets}")
     d.attribute(
         OUR, MEDIUM,
         [
@@ -1054,7 +1078,17 @@ def h_scope_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
                 if port_only
                 else "the far end's SDP named a media address that was never approved."
             ),
-            f"Rules in force: {len(rules.get('approvedAddresses') or [])} approved address(es), {len(rules.get('mediaNetworks') or [])} media network(s)"
+            # Finding 17: these are the addresses approved FOR MEDIA (the
+            # owner's media answer), named so the count cannot be misread.
+            "Rules in force for media: "
+            + (
+                "any address"
+                if rules.get("approvedAddresses") is None and rules.get("mediaNetworks") is None
+                else f"{len(rules.get('approvedAddresses') or [])} address(es) approved for media"
+                + (f" ({', '.join(d.red.text(str(item)) for item in rules['approvedAddresses'])})" if rules.get("approvedAddresses") else "")
+                + f", {len(rules.get('mediaNetworks') or [])} media network(s)"
+                + (f" ({', '.join(str(item) for item in rules['mediaNetworks'])})" if rules.get("mediaNetworks") else "")
+            )
             + (f", media ports {rules['mediaPorts'][0]}-{rules['mediaPorts'][1]}" if rules.get("mediaPorts") else ", no media port range")
             + ".",
         ],

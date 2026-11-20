@@ -828,6 +828,11 @@ def run(
             setup=result.setup,
             localRtpPort=result.local_rtp_port,
             mediaScope=media_scope_record(result.media_scope, context),
+            # bn-3l8o: what the media guard dropped before it left (RTP, RTCP).
+            mediaGuard=(
+                None if result.media_guard is None
+                else {key: result.media_guard.get(key) for key in ("active", "blocked", "listTruncated")}
+            ),
             srtp={
                 key: (result.srtp or {}).get(key)
                 for key in ("requested", "active", "suite", "answerProfile")

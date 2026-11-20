@@ -118,6 +118,9 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
             if facts.get("media_ports"):
                 ports = facts["media_ports"]
                 print(f"Media ports: {ports['start']}-{ports['end']} (the far end's RTP ports)")
+            from .media_scope import GUARD_STATEMENT
+
+            print(f"Media stop: {GUARD_STATEMENT}")
         tls = value.get("facts", {}).get("tls")
         if tls:
             print(tls_summary(tls))

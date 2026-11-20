@@ -86,6 +86,18 @@ RUN cd /src/pjproject \
         -exec cp '{}' /build-pjsua ';' \
     && test -x /build-pjsua
 
+# Media guard (bn-3l8o): preloaded into PJSUA by the softphone driver so that
+# no RTP or RTCP datagram leaves for an address or port outside the approved
+# media scope. It interposes sendto() and send(); the check below fails the
+# build if a PJSIP update starts sending through any other call.
+COPY lib/sippycup_softphone/media_guard.c /src/media_guard.c
+RUN gcc -O2 -fPIC -shared -Wall -Wextra -Werror \
+        -o /build-media-guard.so /src/media_guard.c -ldl \
+    && nm -D --undefined-only /build-pjsua > /tmp/pjsua-imports \
+    && grep -q ' sendto@' /tmp/pjsua-imports \
+    && ! grep -E ' (sendmsg|sendmmsg|write|writev|pwrite|pwritev|sendfile|splice)@' /tmp/pjsua-imports \
+    && rm /tmp/pjsua-imports
+
 FROM ${DEBIAN_IMAGE}
 
 ARG SIPP_VERSION=v3.7.7
@@ -182,6 +194,8 @@ RUN python3 -m venv /opt/voip-tools \
 
 COPY --from=sipp-builder /build/sipp/sipp /usr/local/bin/sipp
 COPY --from=pjsip-builder /build-pjsua /usr/local/bin/pjsua
+COPY --from=pjsip-builder /build-media-guard.so /usr/local/lib/sippycup-media-guard.so
+ENV SIPPYCUP_MEDIA_GUARD_LIBRARY=/usr/local/lib/sippycup-media-guard.so
 COPY bin/campaign /usr/local/bin/campaign
 COPY bin/campaign-sipp-runner /usr/local/bin/campaign-sipp-runner
 COPY bin/campaign-softphone-runner /usr/local/bin/campaign-softphone-runner

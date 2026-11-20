@@ -25,7 +25,7 @@ which has no route off the host. No external host was contacted.
 | 6 | Medium | Ceilings are per process and per invocation. Two commands at once (two terminals, or the cockpit and a shell) each get the full ceiling, and `max_calls` is not a budget across repeated `call` runs. | Fixed for the call limit (bn-2sfn); other ceilings stay per run |
 | R2-4 | Low | Rehearsal 2: a copied profile with its compile header removed, or a profile edited together with its recorded hash, is sent from; the first starts a new count in a subdirectory. Both are deliberate rewrites of the engagement's own files. | Documented: the checks stop honest mistakes, not deliberate rewrites |
 | 7 | Medium | Some senders are not bound to a profile at all: `preflight HOST`, `media send`, `shell` and `--`. `media send` took its destination from the session's remote SDP and would send its canary to any literal unicast address (bn-328). | Fixed for `media send`; `preflight` can be bound and says when it is not; `shell` and `--` say UNBOUND (bn-328, bn-3df) |
-| 8 | Medium | No kernel egress filter. Findings 1 and 2 are now caught within one poll interval, but a few packets still leave before the stop, and a host name in a far-end URI or SDP causes a DNS lookup first. | Reported (design) |
+| 8 | Medium | No kernel egress filter. Findings 1 and 2 are now caught within one poll interval, but a few packets still leave before the stop, and a host name in a far-end URI or SDP causes a DNS lookup first. | Media: fixed for the softphone (bn-3l8o, the media guard inside PJSUA drops RTP/RTCP for unapproved destinations before they leave). Signaling (one ACK) and the DNS lookup: reported (design) |
 | 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Fixed (bn-3vxl) |
 | 10 | Low | Campaign `authorization.networks` has no size limit (`0.0.0.0/0` is accepted); media networks are capped at 1024 addresses. | Fixed (bn-3vxl) |
 | 11 | Low | A profile with unquoted timestamps (which `scope` documents as fine) makes `call` stop with `internal-error` (`datetime is not JSON serializable`) before any packet. Fails closed. | Reported |
@@ -74,6 +74,15 @@ the approved target 127.0.0.2, and PJSUA 2.17 from the image):
 | Session-level `c=` .88, media-level `c=` .2 | nothing to .88 (correct) | unchanged |
 | 302 redirect to 127.0.0.77 | not followed (`--accept-redirect=0`) | unchanged |
 | REFER to `sip:victim@127.0.0.77` | 202 accepted, no INVITE sent (`--max-calls=1`) | unchanged |
+
+Since bn-3l8o (2026-11-20) the three media rows read 0 packets received at
+.88 and .99: the media guard inside PJSUA drops them (the run records, for
+the media-level `c=` row, 1 RTP and 4 RTCP dropped). Timeline of that row
+before the guard, from the probe's own listeners: 200 OK sent at t; RTCP at
+t+0.2 ms and again before the ACK (PJSUA creates and starts the stream while
+it processes the answer); first RTP at t+2.6 ms; the driver's hang-up about
+10 ms later, during which PJSUA sent two more RTCP packets (receiver report
+with BYE, sender report) and then the SIP BYE.
 
 Tests: `tests/test_scope_watch.py` (12 tests; they failed on the old code).
 The fake PJSUA now logs its TX destination from the configured route and has
@@ -395,13 +404,19 @@ address is yours and pass `--allow-network ADDRESS/32`.
    `media send --profile PROFILE`, set `SIPPYCUP_REQUIRE_PROFILE=1` for the
    engagement, and use `shell` and `--` only with addresses copied from the
    approved profile.
-4. **Detection, not prevention (finding 8).** With a hostile or misconfigured far
-   end, a few packets (one ACK, up to about 5 RTP/RTCP packets) can reach an
-   address the far end named before Sippycup stops. A host name in a far-end
-   URI or SDP causes one DNS lookup first. The run says so
-   (`signaling-outside-scope` or `media-outside-scope`). Report it to the owner
-   as an integrity exception. The robust fix is an nftables egress allowlist
-   inside the call's private network namespace.
+4. **Detection, not prevention, for signaling (finding 8).** With a hostile or
+   misconfigured far end, one ACK can reach an address the far end named
+   before Sippycup stops (`signaling-outside-scope`). A host name in a far-end
+   URI or SDP causes one DNS lookup first. Report it to the owner as an
+   integrity exception. Media is prevented since bn-3l8o: the softphone's
+   media guard (`lib/sippycup_softphone/media_guard.c`, preloaded into PJSUA)
+   drops RTP and RTCP for a destination outside the call's media rules inside
+   `sendto()`, so the 1 RTP and 4 RTCP packets of the table above no longer
+   leave (`media-outside-scope`, `mediaGuard` in `result.json`). The guard
+   covers PJSUA only (guided calls, the matrix, campaign softphone steps and
+   `srtp-policy`); it is a library inside one process, not a namespace-wide
+   filter. The robust fix for everything else is still an nftables egress
+   allowlist inside the call's private network namespace.
 5. **The window uses the wall clock.** Changing the host clock moves the window.
    Keep NTP on and do not change the time during an engagement.
 6. **Editing the profile during a run has no effect.** `call` and `matrix` keep the

@@ -206,3 +206,38 @@ if ! printf '%s\n' "${pjsua_version}" | grep -q 'PJ_HAS_SSL_SOCK[[:space:]]*: 1'
     printf 'PJSUA was built without required TLS support.\n' >&2
     exit 1
 fi
+
+# bn-3l8o: the media guard preloaded into PJSUA. Loopback only: an RTP-shaped
+# datagram for an address outside the rules must not arrive, one inside must.
+printf '\nMedia guard:\n'
+guard_library="${SIPPYCUP_MEDIA_GUARD_LIBRARY:-/usr/local/lib/sippycup-media-guard.so}"
+if [[ ! -f "${guard_library}" ]]; then
+    printf 'The media guard library %s is missing from the image.\n' "${guard_library}" >&2
+    exit 1
+fi
+if ! LD_PRELOAD="${guard_library}" SIPPYCUP_MEDIA_GUARD_RULES='v1;addr=127.0.0.2/32;ports=*' \
+    python3 -c '
+import socket, sys
+def listener(address):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((address, 0))
+    sock.settimeout(0.5)
+    return sock
+def arrives(sock, data):
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sender.sendto(data, sock.getsockname())
+    try:
+        sock.recvfrom(2000)
+        return True
+    except socket.timeout:
+        return False
+inside, outside = listener("127.0.0.2"), listener("127.0.0.9")
+rtp, rtcp = bytes([0x80, 0]) + bytes(170), bytes([0x81, 201]) + bytes(58)
+facts = (arrives(inside, rtp), arrives(inside, rtcp), arrives(outside, rtp), arrives(outside, rtcp),
+         arrives(outside, b"OPTIONS sip:smoke SIP/2.0\r\n\r\n"))
+sys.exit(0 if facts == (True, True, False, False, True) else 1)
+' 2>/dev/null; then
+    printf 'The media guard did not drop media for an unapproved address (or dropped approved media).\n' >&2
+    exit 1
+fi
+printf 'ok       media guard drops RTP and RTCP for an unapproved address, passes approved media and SIP\n'

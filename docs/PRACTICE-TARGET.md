@@ -572,21 +572,24 @@ engagement, `DIR-stop`, so the main engagement's owner report stays clean.
 Its answers make the most likely owner mistake: media "on the same address
 as signaling", so only the proxy `127.0.0.3` is approved and the real media
 address `127.0.0.2` is not. The cockpit's guided call must end
-`media-outside-scope` (exit 1) with the media peer on `127.0.0.2` and at most
-10 RTP packets sent there before the hangup (typically 3). Then:
+`media-outside-scope` (exit 1) with the media peer on `127.0.0.2`, the media
+guard active and recording the RTP and RTCP packets it dropped (typically 1
+RTP and 4 RTCP), and no RTP or RTCP packet to that address in the call's
+capture. Then:
 
 - the cockpit lists the run as `[stop]` with the reason "safety stop, not a
   target failure: the media peer ... is not an approved address or inside an
-  approved media network, so the call was hung up after N RTP packets; add
+  approved media network, so the call was hung up (the media guard dropped
+  the N RTP and M RTCP packets addressed there; none were sent); add
   the owner's media addresses or media network to the scope and compile
   again";
 - the owner report of `DIR-stop` lists it as an `info` observation titled
   "Safety stop: media was negotiated to an address outside the approved
   scope", no oracle observation, the executive summary row "1 run was ended
   by a Sippycup safety stop (media-outside-scope), not a target failure", and
-  exactly one integrity exception, `media-peer-not-approved`, that discloses
-  the packets sent before the stop. `summary` therefore exits 1 there, which
-  the stage requires.
+  exactly one integrity exception, `media-peer-not-approved`, that states the
+  RTP and RTCP packets the media guard dropped and that no media was sent to
+  the address. `summary` therefore exits 1 there, which the stage requires.
 
 The direct variant uses the same stop leg (only the proxy has a media address
 that differs from its signaling address).
@@ -809,8 +812,11 @@ gate) for every path through the practice proxy. Evidence is kept in
   `--no-register`, with DTMF `159#` (sent and echoed), to `drop` (the server
   BYE arrives from the proxy), and over TLS pinned to `sippycup-proxy` with
   `--srtp mandatory`;
-- requires `media-outside-scope` with at most 10 RTP packets to the media
-  address when a copy of the profile approves only the proxy;
+- requires `media-outside-scope` when a copy of the profile approves only the
+  proxy, with the media guard active and at least two dropped RTCP packets on
+  record; and the same on the direct target with a media answer that lists no
+  address, where the call's capture covers the unlisted address and must hold
+  no RTP or RTCP packet to it;
 - runs `campaign-proxy.yaml` (one-call ceiling: the capture watchdog counts
   the INVITE re-sent after the 407 as the same call) and a SIPp-runner
   campaign whose unauthenticated call fails on the 407, which SIPp ACKs;

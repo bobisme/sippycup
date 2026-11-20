@@ -238,9 +238,12 @@ class StopLegTests(unittest.TestCase):
     REPORT = {
         "integrityExceptions": [{"code": "media-peer-not-approved", "run": "R",
                                  "detail": "media peer unapproved-address-1 is not an approved address; the "
-                                           "media-scope stop hung the call up after 3 RTP packets were sent to it"}],
+                                           "media guard dropped the 1 RTP and 4 RTCP packets addressed to it "
+                                           "before they left, so no media was sent to it, and the media-scope "
+                                           "stop hung the call up"}],
         "runs": [{"kind": "call", "verdict": "media-outside-scope",
-                  "details": {"media": {"toPeerPackets": 3, "peerApproved": False}}}],
+                  "details": {"media": {"toPeerPackets": 0, "peerApproved": False,
+                                        "guardDropped": {"rtp": 1, "rtcp": 4, "other": 0}}}}],
         "findings": [{"id": "obs-media-outside-scope", "severity": "info",
                       "title": "Safety stop: media was negotiated to an address outside the approved scope"}],
         "executiveSummary": {"rows": [{"title": "1 run was ended by a Sippycup safety stop (media-outside-scope), "
@@ -251,11 +254,16 @@ class StopLegTests(unittest.TestCase):
         return rehearsal.Rehearsal(Path("."), runner=lambda *a: None, out=io.StringIO())
 
     def test_a_correctly_presented_stop_passes(self) -> None:
-        self.assertEqual(3, self.driver().stop_report(json.loads(json.dumps(self.REPORT))))
+        self.assertEqual(0, self.driver().stop_report(json.loads(json.dumps(self.REPORT))))
 
     def test_misleading_presentations_fail(self) -> None:
         cases = {
-            "too many packets": lambda r: r["runs"][0]["details"]["media"].update(toPeerPackets=40),
+            # bn-3l8o: not one packet may reach the unapproved address, and
+            # the report must carry the guard's RTP and RTCP counts.
+            "one packet sent": lambda r: r["runs"][0]["details"]["media"].update(toPeerPackets=1),
+            "no guard record": lambda r: r["runs"][0]["details"]["media"].pop("guardDropped"),
+            "packets not explained": lambda r: r["integrityExceptions"][0].update(
+                detail="the media-scope stop hung the call up after 1 RTP packet was sent to it"),
             "a target finding": lambda r: r["findings"][0].update(severity="low"),
             "an oracle observation": lambda r: r["findings"].append({"id": "obs-oracle-assertion-failed"}),
             "no exception": lambda r: r.update(integrityExceptions=[]),

@@ -123,6 +123,25 @@
         "inScope": {"type": ["boolean", "null"]}
       }
     },
+    "mediaGuard": {
+      "type": ["object", "null"],
+      "description": "The softphone's media guard (preloaded into PJSUA): whether it was active for this call and how many RTP, RTCP and other media datagrams addressed outside the media scope it dropped before they left. null when the call had no media scope or was not placed. With active true, no media datagram left for an address or RTP port outside the rules.",
+      "properties": {
+        "active": {"type": "boolean"},
+        "library": {"type": ["string", "null"]},
+        "rules": {"type": ["string", "null"]},
+        "blocked": {
+          "type": "object",
+          "properties": {
+            "rtp": {"type": "integer", "minimum": 0},
+            "rtcp": {"type": "integer", "minimum": 0},
+            "other": {"type": "integer", "minimum": 0}
+          }
+        },
+        "destinations": {"type": "array", "items": {"type": "string"}},
+        "listTruncated": {"type": "boolean"}
+      }
+    },
     "preflight": {
       "type": ["object", "null"],
       "properties": {

@@ -88,9 +88,11 @@ UDP_CHECKS = (
 CHECKS = (*UDP_CHECKS, "srtp-policy")
 MIN_WINDOW = timedelta(minutes=20)
 COCKPIT_COMPLETE = "Next: every stage is complete"
-# The stop leg: RTP packets the softphone may send to the unapproved media
-# address before the media-scope stop hangs up (the proxy gate's bound).
-STOP_MAX_PACKETS = 10
+# The stop leg (bn-3l8o): no RTP and no RTCP packet may leave for the
+# unapproved media address. The softphone's media guard drops what PJSUA
+# addresses there (PJSUA sends RTCP as it starts the stream and as it hangs
+# up, and one RTP packet in between), and the media-scope stop hangs up.
+STOP_MAX_PACKETS = 0
 
 
 class RehearsalError(RuntimeError):
@@ -995,6 +997,7 @@ class Rehearsal:
                              f"the stopped call's media scope record does not show the refusal: {record}")
                 self.fact(f"media peer {media} is outside the owner's media answer "
                           f"{', '.join(stop_shape.media_answer)}: refused, recorded admittedBy null")
+            dropped = self.require_nothing_sent(result, media)
             self.journal_call(result)
             model = self.cockpit("first-call")
             self.require_stop_presented(model)
@@ -1013,8 +1016,9 @@ class Rehearsal:
             sent = self.stop_report(report)
             leaked = files_containing(self.engagement, self.secret)
             self.require(not leaked, f"the practice password appears in {leaked}")
-            self.fact(f"verdict media-outside-scope (exit 1): media peer {peer} not approved; "
-                      f"{sent} RTP packets sent there (at most {STOP_MAX_PACKETS})")
+            self.fact(f"verdict media-outside-scope (exit 1): media peer {peer} not approved; the media guard "
+                      f"dropped {dropped['rtp']} RTP and {dropped['rtcp']} RTCP packets addressed there; "
+                      f"{sent} RTP or RTCP packets sent there (the call's capture and the owner report)")
             self.cockpit("first-call")
             self.fact("cockpit: [stop] safety stop, not a target failure; owner report: one informational "
                       "safety-stop observation and the packets disclosed as the one integrity exception")
@@ -1042,12 +1046,40 @@ class Rehearsal:
         self.require(str(run.get("reason") or "").startswith("safety stop, not a target failure"),
                      f"the cockpit's reason for the stop is {run.get('reason')!r}")
 
+    def require_nothing_sent(self, result: dict[str, Any], media: str) -> dict[str, int]:
+        """No RTP or RTCP left for the unapproved media address; return what the guard dropped.
+
+        Two independent sources: the softphone's media guard record
+        (``mediaGuard`` in result.json: active, and it dropped the packets
+        PJSUA addressed there, so the stop was really exercised) and the
+        call's own capture, which must hold no media-port packet to that
+        address. (Where the capture filter does not cover the unapproved
+        address, as behind the practice proxy, only the guard record speaks.)
+        """
+        from .capture_scope import media_flows
+
+        guard = result.get("mediaGuard") if isinstance(result.get("mediaGuard"), dict) else {}
+        blocked = guard.get("blocked") if isinstance(guard.get("blocked"), dict) else {}
+        dropped = {key: int(blocked.get(key) or 0) for key in ("rtp", "rtcp")}
+        self.require(guard.get("active") is True,
+                     f"the softphone's media guard was not active for the stopped call: {guard}")
+        self.require(dropped["rtp"] + dropped["rtcp"] >= 1 and guard.get("listTruncated") is not True,
+                     f"the media guard recorded no dropped packet, so the stop was not exercised: {guard}")
+        capture = self.project / str(result.get("runDirectory")) / "capture.pcap"
+        self.require(capture.is_file(), f"the stopped call has no capture at {capture}")
+        _, flows = media_flows(capture.read_bytes(), practice.RTP_PORTS, (5060, 5061, 5071))
+        sent = sum(count for (_, destination), count in flows.items() if destination == media)
+        self.require(sent <= STOP_MAX_PACKETS,
+                     f"the capture holds {sent} RTP/RTCP packets to the unapproved media address {media} "
+                     f"(at most {STOP_MAX_PACKETS})")
+        return dropped
+
     def stop_report(self, report: dict[str, Any]) -> int:
         """Check how the owner report presents the stop; return the RTP packets sent.
 
-        The few RTP packets sent before the stop did reach an address the
-        scope does not approve, so the report must disclose them as an
-        integrity exception (exactly that one); the stop itself is an
+        No media reached the address the scope does not approve (the media
+        guard dropped it), and the report must say so, with the RTP and RTCP
+        counts, in its one integrity exception; the stop itself is an
         informational observation, never a target finding, and the oracle
         failures it causes are not reported as a target observation.
         """
@@ -1058,12 +1090,17 @@ class Rehearsal:
         sent = media.get("toPeerPackets")
         self.require(isinstance(sent, int) and sent <= STOP_MAX_PACKETS,
                      f"{sent!r} RTP packets were sent to the unapproved media address (at most {STOP_MAX_PACKETS})")
+        guard = media.get("guardDropped")
+        self.require(isinstance(guard, dict),
+                     f"the report does not carry what the media guard dropped: {media}")
         self.require(media.get("peerApproved") is False, f"the report does not mark the media peer unapproved: {media}")
         exceptions = report.get("integrityExceptions") or []
         self.require([item.get("code") for item in exceptions] == ["media-peer-not-approved"],
                      f"expected exactly the media-peer-not-approved integrity exception, got {exceptions}")
-        self.require(f"after {sent} RTP packet" in str(exceptions[0].get("detail")),
-                     f"the integrity exception does not say how many packets reached the peer: {exceptions[0]}")
+        self.require(f"the media guard dropped the {guard.get('rtp')} RTP and {guard.get('rtcp')} RTCP packets"
+                     in str(exceptions[0].get("detail"))
+                     and "no media was sent to it" in str(exceptions[0].get("detail")),
+                     f"the integrity exception does not say what happened to the packets: {exceptions[0]}")
         findings = {item["id"]: item for item in report.get("findings", [])}
         stop = findings.get("obs-media-outside-scope") or {}
         self.require(stop.get("severity") == "info" and "safety stop" in str(stop.get("title", "")).lower(),

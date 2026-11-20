@@ -307,6 +307,12 @@ def _call_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
         peer = (softphone or {}).get("media_peer") or "an unapproved address"
         sent = (softphone or {}).get("rtp_tx_packets")
         packets = f" after {sent} RTP packet{'s' if sent != 1 else ''}" if isinstance(sent, int) else ""
+        guard = document.get("mediaGuard") if isinstance(document.get("mediaGuard"), dict) else {}
+        if guard.get("active") is True:
+            # bn-3l8o: the media guard dropped those packets before they left.
+            dropped = guard.get("blocked") if isinstance(guard.get("blocked"), dict) else {}
+            packets = (f" (the media guard dropped the {int(dropped.get('rtp') or 0)} RTP and "
+                       f"{int(dropped.get('rtcp') or 0)} RTCP packets addressed there; none were sent)")
         reason = (f"safety stop, not a target failure: the media peer {peer} is not an approved address "
                   f"or inside an approved media network, so the call was hung up{packets}; add the owner's "
                   "media addresses or media network to the scope and compile again")
