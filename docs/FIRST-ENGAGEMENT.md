@@ -66,6 +66,29 @@ Rehearse the real step: run `scope answer` and type the example's values
 | 17 to 19 | `40`, `2`, `1`; `200`, `200000`, `50000000`; `60`, `3600` |
 | 20 to 23 | `3`, `yes`, `20`; `options, call`, `none`; `you`, `this terminal`, `yes`; `7`, `private` |
 
+**Proxy shape (practice proxy at `127.0.0.3`).** Answer the same questions with
+these rows changed; every other row is as in the table above. This was run
+end to end on the practice target: `scope answer` ended `Scope: COMPLETE and
+CONSISTENT`, `rehearse` printed `Ready: yes`, and a call placed with the
+resulting profile passed.
+
+| Question | Type |
+|---|---|
+| 4 | `127.0.0.3` (the proxy: the only address SIP goes to) |
+| 5 | `5060, 5061`, `udp, tls`; target `practice` `127.0.0.3` `udp` `5060`, `y`; target `tls` `127.0.0.3` `tls` `5061`, certificate name `sippycup-proxy`, CA `work/practice/ca.crt`, `n` |
+| 8 to 10 | `yes`; `practice`, `sippycup-proxy` (the realm); `practice-password`, `other` |
+| 12 to 16 | `127.0.0.2/31` (the media servers' range, as an owner gives a pool; the literal `127.0.0.2` also works); then `20000`, `20019`; `rtp, sdes-srtp`; `PCMU, PCMA`, `rfc4733`; `yes` |
+
+After `scope compile`, `rehearse` prints `Signaling and media: 127.0.0.3 ...`
+and `Media only: 127.0.0.2/31 (2 addresses) (owner-approved media networks;
+never a signaling target)`. The call prints `Media scope: peer 127.0.0.2:20014
+admitted by the approved media network 127.0.0.2/31 (media only)`. (The port
+differs from call to call.) If you leave the media answer out, or give the
+signaling address as the only media address, the call stops
+`MEDIA-OUTSIDE-SCOPE`; that is the stop to rehearse, not a fault of the
+proxy. Question numbers follow `scope questions`; `scope answer` prints the
+one it is asking.
+
 It ends with `Scope: COMPLETE and CONSISTENT` and
 `Next: ./bin/sippycup scope compile work/acme`. A typing mistake is refused
 with the reason and asked again; `quit` stops and keeps what you typed, and
@@ -493,6 +516,32 @@ Clean up at the end:
 ./bin/sippycup doctor --cleanup     # dry run; add --apply only for images you own
 ./bin/sippycup practice-target down
 ```
+
+## Practice only: rehearse the failures
+
+Before the engagement, see each failure once. The drill places the guided call
+against the practice target's fault destinations (no answer, silence, 503, 403,
+busy, a wrong password, a closed port, and the others) and checks that the
+verdict you would read on the day is the one Sippycup reports:
+
+```sh
+./bin/sippycup practice-target up      # "container ... already exists" means it is already up: carry on
+./bin/sippycup practice-target drill --list     # what it will do and for how long; sends nothing
+./bin/sippycup practice-target drill            # about 2 minutes
+```
+
+- When it is right: one block for each scenario with its verdict and the
+  `explain` text, then a table whose `result` column says `PASS` for every
+  scenario, and `Drill: PASS in 124.1 s; evidence work/practice/drills/...`
+  (exit 0). `MISMATCH` and exit 1 mean a verdict was not what was expected;
+  exit 2 means it could not start and nothing was sent.
+- It reaches only the practice target and cannot be pointed anywhere else.
+  Leave the practice target alone while it runs: a call, a campaign, or the
+  cockpit placing a call at the same time spoils both verdicts. Wait for
+  `Drill: PASS`.
+- Read the page for a scenario you expect to meet, for example
+  `./bin/sippycup explain call.call-forbidden`. `PRACTICE-TARGET.md`,
+  "Rehearse failures", lists the scenarios.
 
 ## Stop conditions
 
