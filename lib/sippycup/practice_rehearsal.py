@@ -822,7 +822,7 @@ class Rehearsal:
         reference = (model["files"].get("planFacts") or {}).get("credentialRefs") or []
         self.require(reference == [CREDENTIAL_REF], f"plan credential references {reference!r}")
         before = set((self.engagement / "runs").glob("*")) if (self.engagement / "runs").exists() else set()
-        completed = self.command([*action["argv"], "--secret-env", f"{CREDENTIAL_REF}={SECRET_ENV}"],
+        completed = self.command([*self.campaign_run_argv(action), "--secret-env", f"{CREDENTIAL_REF}={SECRET_ENV}"],
                                  env={SECRET_ENV: self.password()}, timeout=300)
         printed = completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else ""
         self.require(printed.startswith(f"{self.eng}/runs/"),
@@ -835,6 +835,10 @@ class Rehearsal:
         self.fact(f"campaign succeeded: 4 steps (UDP and TLS OPTIONS, UDP and TLS calls); run {printed}")
         self.campaign_media(runs[0], result)
         self.cockpit("checks")
+
+    def campaign_run_argv(self, action: dict[str, Any]) -> list[str]:
+        """The `campaign run` command of this rehearsal: the cockpit's action (the routed rehearsal overrides)."""
+        return list(action["argv"])
 
     def campaign_media(self, run: Path, result: dict[str, Any]) -> None:
         """The campaign capture holds the calls' RTP both ways, and the watchdog counted it.

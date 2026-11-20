@@ -50,7 +50,7 @@ CALL_EXPLANATIONS: dict[str, tuple[str, str]] = {
     ),
     "call.registration-failed": (
         "Registration was refused or timed out; no call was placed",
-        "PJSUA could not register the account (wrong password, wrong realm or user, or the registrar did not answer). The driver quits after the first failure so a wrong password costs one challenged attempt. Fix the credentials; use --no-register if the target does not need a REGISTER.",
+        "PJSUA could not register the account (wrong password, wrong realm or user, or the registrar did not answer). The driver quits after the first failure so a wrong password costs one challenged attempt. Stop: do not try again without the owner, because every attempt is a credentialed attempt on their account. Check the password file, the username and the realm with the owner first; --no-register is only for a target the owner says needs no REGISTER. (Practice target only: the password is new after every practice-target up; copy work/practice/account.password again.)",
     ),
     "call.call-not-answered": (
         "The far end never answered before the answer timeout",

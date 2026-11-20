@@ -188,6 +188,27 @@ def _profile_facts(path: Path, repo: Path, now: datetime) -> dict[str, Any]:
     return facts
 
 
+def _documented_practice_call(run: dict[str, Any], journal: dict[str, Any]) -> bool:
+    """A passing, journalled call to the practice address with the engagement's own profile.
+
+    FIRST-ENGAGEMENT.md rehearses with `--practice call ENG/target-profile.yaml`,
+    whose runs land in ``calls/``, not ``practice-calls/`` (the cockpit's own
+    practice action). A loopback target is reachable only inside the practice
+    namespace, so such a run is a practice call (rehearsal 3, finding 20).
+    """
+    if run.get("kind") != "call" or not run.get("passed"):
+        return False
+    try:
+        import ipaddress
+
+        loopback = ipaddress.ip_address(str((run.get("target") or {}).get("host"))).is_loopback
+    except ValueError:
+        return False
+    relative = str(run.get("relative") or "")
+    return loopback and bool(relative) and any(
+        str(reference).startswith(relative + "/") for reference in journal.get("evidence", []))
+
+
 def _approved_checks(document: dict[str, Any]) -> list[str]:
     section = document.get("security_checks")
     approved = section.get("approved") if isinstance(section, dict) else None
@@ -472,7 +493,8 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
     files = model["files"]
     go_no_go = model["readiness"].get("goNoGo") or {}
     image_ok = None if image.get("present") is None else bool(image.get("present") and not image.get("stale"))
-    practice_pass = any(run["kind"] == "practice-call" and run["passed"] for run in runs)
+    practice_pass = any(run["kind"] == "practice-call" and run["passed"] for run in runs) or any(
+        _documented_practice_call(run, journal) for run in runs)
     live_runs = [run for run in runs if run["kind"] not in {"practice-call"}]
     call_pass = any(run["kind"] == "call" and run["passed"] for run in runs)
     call_any = any(run["kind"] == "call" for run in runs)

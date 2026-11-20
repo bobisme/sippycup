@@ -609,8 +609,10 @@ def refusal_text(
         f"(limits.calls in {engagement}/scope.yaml); {used} already counted in "
         f"{engagement}/{LEDGER_FILE} (calls placed, and calls reserved by a command that may still "
         f"be running), {remaining} remain, and this {command} would place {calls}; nothing was "
-        f"sent.{narrow} Only the owner can raise the limit: ask them, record the new limits.calls "
-        f"in {engagement}/scope.yaml, and run ./bin/sippycup scope compile {engagement}"
+        f"sent.{narrow} Only the owner can raise the limit: ask them, record the new number with "
+        f"./bin/sippycup scope answer {engagement} limits.calls (that sets the approval back to pending), "
+        f"record the approval again with ./bin/sippycup scope answer {engagement} 2, and then run "
+        f"./bin/sippycup scope compile {engagement}"
     )
 
 

@@ -1060,6 +1060,18 @@ def derivative_integrity(path: str | Path, content: bytes | None = None) -> dict
             f"restore {engagement}/{scope_file.name} with the owner's answers and run "
             f"./bin/sippycup scope compile {engagement}",
         )
+    if current != entry["scopeSha256"] and (sidecar.get("scope") or {}).get("sha256") == current:
+        # scope compile ran on this scope and did not write this file again (a
+        # pending approval, or another scope error): "run scope compile" alone
+        # would send the operator round in a circle (rehearsal 3, finding 14).
+        return refuse(
+            "stale",
+            f"no longer matches {engagement}/{scope_file.name}: the last scope compile did not write it again, "
+            "because the scope is not approved or has an error, so this file is from an earlier scope",
+            f"run ./bin/sippycup scope check {engagement} and fix what it reports (a pending approval is "
+            f"recorded with ./bin/sippycup scope answer {engagement} 2), then run "
+            f"./bin/sippycup scope compile {engagement}",
+        )
     if current != entry["scopeSha256"]:
         return refuse(
             "stale",

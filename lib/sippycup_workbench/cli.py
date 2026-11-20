@@ -66,6 +66,22 @@ EXPLANATIONS = {
 EXPLANATIONS.update(CALL_EXPLANATIONS)
 
 
+def _window_seconds_left(value: dict[str, Any]) -> float | None:
+    """Seconds until the profile's valid_until, from a rehearsal's facts (None when it has none)."""
+    from datetime import datetime, timezone
+
+    until = ((value.get("facts") or {}).get("authorization") or {}).get("valid_until")
+    if not isinstance(until, str):
+        return None
+    try:
+        end = datetime.fromisoformat(until.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if end.tzinfo is None:
+        return None
+    return (end - datetime.now(timezone.utc)).total_seconds()
+
+
 def _emit(value: dict[str, Any], output_format: str) -> None:
     if output_format == "json":
         print(json.dumps(value, indent=2, sort_keys=True))
@@ -76,6 +92,12 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
             print(f"ERROR: {error}")
         for warning in value.get("warnings", []):
             print(f"WARN:  {warning}")
+        left = _window_seconds_left(value)
+        if value["ready"] and left is not None and left < 300:
+            # Ready is about now; a sender also needs the window to outlast its run (finding 27).
+            print(f"WARN:  the approval window ends in {int(left)} s. A sending command refuses to start when it "
+                  "could still be running at the end of the window (one default call needs about 95 s, a matrix "
+                  "or a campaign more), so it may refuse although this says Ready: yes")
         target = value.get("facts", {}).get("target")
         if target:
             print(f"Target: {target['host']}:{target['port']} ({target['transport']})")
@@ -204,6 +226,10 @@ def rehearse_file(profile_path: str | Path) -> Any:
     refusal = integrity_error(profile_path)
     if refusal:
         rehearsal = Rehearsal(False, (refusal, *rehearsal.errors), rehearsal.warnings, rehearsal.facts)
+    from .profile import with_next_command
+
+    rehearsal = Rehearsal(rehearsal.ready, tuple(with_next_command(list(rehearsal.errors), profile_path)),
+                          rehearsal.warnings, rehearsal.facts)
     # The owner's call limit (bn-y3er): the same read-only count, and the same
     # refusal, that a call makes before it reserves. A profile with no call
     # left, or whose ledger cannot be trusted, is not ready.
@@ -344,7 +370,7 @@ def _render_scope_check(value: dict[str, Any], engagement: str | None = None) ->
     print("Network activity: none")
 
 
-def _render_scope_compile(value: dict[str, Any]) -> None:
+def _render_scope_compile(value: dict[str, Any], engagement: str | None = None) -> None:
     print(f"Scope file: {value['scope']['path']}")
     for item in value["invalidScope"]:
         print(f"ERROR {item['code']} [{item['field'] or '-'}]: {item['message']}")
@@ -374,7 +400,64 @@ def _render_scope_compile(value: dict[str, Any]) -> None:
         print(f"NOTE: {note}")
     if value["generated"]:
         print("Derivative hashes recorded in scope-derivatives.json")
+    for line in compile_next_lines(value, engagement):
+        print(line)
     print("Network activity: none")
+
+
+def compile_next_lines(value: dict[str, Any], engagement: str | None) -> list[str]:
+    """What `scope compile` wrote is good for, and the next command (rehearsal 3, findings 14 and 30).
+
+    A compile of a scope that is not approved still writes files: say plainly
+    that nothing can be sent with them, name an earlier file it left on disk,
+    and give the command that recovers. Reads only local files.
+    """
+    if engagement is None or value["invalidScope"] or value["refused"]:
+        return []
+    from .scope_derive import FILENAMES
+
+    eng = shlex.quote(engagement)
+    lines: list[str] = []
+    skipped = value["skipped"]
+    for name in skipped:
+        file_name = FILENAMES.get(name)
+        if file_name and (Path(engagement) / file_name).is_file():
+            lines.append(
+                f"STALE: {eng}/{file_name} is from an earlier scope compile and was NOT written again. It no "
+                f"longer matches scope.yaml, and {'campaign plan and campaign run refuse' if name == 'campaign' else 'every command refuses'}"
+                " it; do not use it until scope compile writes it again."
+            )
+    profiles = [item["path"] for item in value["generated"] if str(item["artifact"]).startswith("profile")]
+    codes = {item["code"] for items in skipped.values() for item in items}
+    status = value["profileStatus"]
+    check_first = (f"Next: ./bin/sippycup scope check {eng}   (fix what it reports; one answer: ./bin/sippycup "
+                   f"scope answer {eng} QUESTION), then ./bin/sippycup scope compile {eng} again")
+    if status == "approved" and not value.get("profileNotUsable"):
+        if profiles:
+            rest = (f"   (the skipped file(s) above need ./bin/sippycup scope check {eng} to be clean first)"
+                    if skipped else "")
+            lines.append(f"Next: ./bin/sippycup rehearse {shlex.quote(profiles[0])}{rest}")
+        return lines
+    if not value["generated"] and not skipped:
+        return lines
+    lines.append(
+        "NOTHING CAN BE SENT with what this wrote: "
+        + (f"the target profile is {status}, not approved, and " if status else "no approved target profile was written, and ")
+        + "call, matrix, checks, preflight --profile and campaign refuse to send."
+    )
+    if value.get("profileNotUsable") or codes - {"scope.authorization_not_approved"} or not status:
+        lines.append(check_first)
+    elif status == "pending":
+        lines.append(
+            f"Next: ./bin/sippycup scope answer {eng} 2   (record the approval: only with the owner's written "
+            f"approval of the summary it shows), then ./bin/sippycup scope compile {eng} again"
+        )
+    else:
+        lines.append(
+            f"Next: nothing to run while the approval is {status}: ask the owner. A new written approval is "
+            f"recorded with ./bin/sippycup scope answer {eng} 2, then ./bin/sippycup scope compile {eng}"
+        )
+    return lines
 
 
 def _read_text_argument(
@@ -742,7 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.format == "json":
                     _emit(value, "json")
                 else:
-                    _render_scope_compile(value)
+                    _render_scope_compile(value, args.engagement)
                 return outcome.exit_code
         if args.command == "status":
             value = assess(

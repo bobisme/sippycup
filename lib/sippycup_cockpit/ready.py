@@ -238,7 +238,8 @@ def check_calls(model: dict[str, Any], profile_path: Path, document: dict[str, A
     if status.left == 0:
         return Check("calls", title, NOGO, ["none left: every command that places a call will refuse",
                                             status.line()],
-                     f"only the owner can approve more calls: record the new limits.calls in {eng}/scope.yaml, "
+                     f"only the owner can approve more calls: record the new number with {LAUNCHER} scope answer "
+                     f"{eng} limits.calls, record the approval again with {LAUNCHER} scope answer {eng} 2, "
                      f"then run {LAUNCHER} scope compile {eng}")
     return Check("calls", title, GO, [status.line()])
 
@@ -330,9 +331,9 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
         # as pending, and an expired window is one of those errors).
         if end is not None and now >= end:
             return Check("window", "Approval window", NOGO, lines + ["EXPIRED"],
-                         f"get a renewed written approval, record it with {LAUNCHER} scope answer {eng} "
-                         f"authorization.window (or edit authorization in {eng}/scope.yaml), then "
-                         f"{LAUNCHER} scope compile {eng}")
+                         f"get a renewed written approval, record the new window with {LAUNCHER} scope answer "
+                         f"{eng} authorization.window, record the approval again with {LAUNCHER} scope answer "
+                         f"{eng} 2, then {LAUNCHER} scope compile {eng}")
         if start is not None and now < start:
             return Check("window", "Approval window", NOGO,
                          lines + [f"not open yet: opens in {_duration((start - now).total_seconds())}"],
@@ -354,9 +355,9 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
     remaining = (end - now).total_seconds()
     if remaining <= 0:
         return Check("window", "Approval window", NOGO, lines + ["EXPIRED"],
-                     f"get a renewed written approval, record it with {LAUNCHER} scope answer {eng} "
-                     f"authorization.window (or edit authorization in {eng}/scope.yaml), then "
-                     f"{LAUNCHER} scope compile {eng}")
+                     f"get a renewed written approval, record the new window with {LAUNCHER} scope answer "
+                     f"{eng} authorization.window, record the approval again with {LAUNCHER} scope answer "
+                     f"{eng} 2, then {LAUNCHER} scope compile {eng}")
     lines.append(f"remaining  {_duration(remaining)}")
     need = f"margin {margin_minutes} min" + (f" + the frozen campaign plan's {planned} s" if planned else "")
     if remaining < required:

@@ -43,6 +43,48 @@ class CaptureStartFailed(RuntimeError):
     """
 
 
+def capture_start_failure_text(said: str) -> str:
+    """Why the capture did not start, from what the capture tool wrote, and what to do.
+
+    Two causes look alike from outside and need opposite fixes: an interface
+    name that does not exist where the command runs (leave out --interface),
+    and a missing capture permission (run through the launcher).
+    """
+    lines = [line.strip() for line in said.splitlines() if line.strip()]
+    text = " ".join(lines).lower()
+    last = lines[-1][:200] if lines else ""
+    if last.startswith("(") and last.endswith(")"):
+        last = last[1:-1]  # the capture tool's own last line is often "(No such device exists)"
+    head = (
+        "packet capture could not start"
+        + (f" ({last})" if last else "")
+        + ". Nothing was sent, and the run directory was removed. "
+    )
+    interface = (
+        "No such interface: no network interface has the name given to --interface where the "
+        "command runs (the launcher's container does not have your host's interfaces, and `lo` is "
+        "right only with --practice). Leave out --interface (the default, `any`, captures on every "
+        "interface) and give the same command again"
+    )
+    permission = (
+        "Packet capture needs CAP_NET_RAW, which an unprivileged host or "
+        "a rootless host-network container lacks: give the same command "
+        "through the launcher, `./bin/sippycup campaign run ...`, which "
+        "runs it in the image's private network namespace"
+    )
+    if "no such device" in text or "no such interface" in text or "siocgifhwaddr" in text:
+        return head + interface
+    if "permission" in text or "not permitted" in text or "cap_net_raw" in text:
+        return head + permission
+    return (
+        head + "The capture tool did not give a reason this command knows. If you gave --interface, "
+        "leave it out (a name that does not exist where the command runs stops the capture). "
+        "If you did not start this through the launcher: packet capture needs CAP_NET_RAW, which an "
+        "unprivileged host or a rootless host-network container lacks; give the same command "
+        "through `./bin/sippycup campaign run ...`"
+    )
+
+
 class AuthorizationLapsed(RuntimeError):
     """The approval does not cover this run; raised before anything exists."""
 
@@ -1156,15 +1198,7 @@ def _execute_campaign(
                         said = (run_dir / "capture.log").read_text(errors="replace").strip()
                     except OSError:
                         said = ""
-                    raise CaptureStartFailed(
-                        "packet capture could not start"
-                        + (f" ({said.splitlines()[-1][:200]})" if said else "")
-                        + ". Nothing was sent, and the run directory was removed. "
-                        "Packet capture needs CAP_NET_RAW, which an unprivileged host or "
-                        "a rootless host-network container lacks: give the same command "
-                        "through the launcher, `./bin/sippycup campaign run ...`, which "
-                        "runs it in the image's private network namespace"
-                    )
+                    raise CaptureStartFailed(capture_start_failure_text(said))
                 if time.monotonic() >= ready_deadline:
                     raise RuntimeError("capture process did not become ready")
                 time.sleep(0.02)

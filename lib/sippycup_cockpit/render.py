@@ -206,6 +206,29 @@ def action_line(index: int, action: dict[str, Any]) -> list[str]:
     return lines
 
 
+def calls_line(model: dict[str, Any]) -> str | None:
+    """``Calls: N of M used, K left`` for the dashboard (rehearsal 3, finding 20).
+
+    The same read-only count the LIVE panel, ``rehearse`` and ``ready`` print
+    (``calls_status``); None when there is no profile with an approval and a
+    call limit to count against, or the count cannot be made here.
+    """
+    approval = (model.get("authorization") or {}).get("approvalId")
+    path = (model.get("engagement") or {}).get("path")
+    limits = (model.get("profile") or {}).get("limits") or {}
+    if not approval or not path or not (model.get("profile") or {}).get("present") or limits.get("max_calls") is None:
+        return None
+    try:
+        from pathlib import Path
+
+        from sippycup_workbench.call import calls_status
+
+        document = {"authorization": {"approval_id": approval}, "limits": {"max_calls": limits.get("max_calls")}}
+        return calls_status(Path(path) / "target-profile.yaml", document).line()
+    except Exception:  # noqa: BLE001 - a dashboard line never stops the dashboard
+        return None
+
+
 def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, question_limit: int = 5,
                      action_limit: int | None = None, all_steps: bool = False) -> list[str]:
     engagement = model["engagement"]
@@ -222,6 +245,9 @@ def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, ques
     lines.append(f"Authorization  {auth.get('marker', '[??]')} {auth.get('text')}; approval id: {approval}")
     if auth.get("source"):
         lines.append(f"               from {auth['source']}")
+    calls = calls_line(model)
+    if calls:
+        lines.append(f"Call limit     {calls}")
     scope_lines = _scope_lines(model["scope"], limit=question_limit)
     lines.append(f"Scope          {scope_lines[0]}")
     lines.extend(scope_lines[1:])

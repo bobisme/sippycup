@@ -651,7 +651,9 @@ owner-facing chain on exactly that path, with every command as
 | scope | `169.254.77.2` is written into `scope.yaml` as an owner's address would be; the approval id is `ROUTED-REHEARSAL`, not a practice approval, so the owner report judges the runs like a real engagement's. |
 
 The stages: scope and compile, rehearse and `ready`, preflight (UDP and
-verified TLS), a guided call and a DTMF call, a TLS+SRTP call and a 2x2
+verified TLS, each as `preflight --profile` of its compiled profile), a
+guided call and a DTMF call (the stage prints the `NAT:` fact: the address
+the target saw), a TLS+SRTP call and a 2x2
 matrix, `campaign plan` and the documented `campaign run` (no `--isolated`),
 `checks run`, a wire check (every captured packet has `169.254.77.2` on one
 side; the address the target saw is recorded as `natAddresses`; `evidence
@@ -666,6 +668,8 @@ NAT"): the toolbox's SDP and Via carry the host's own address (pasta copies
 it); the target sees the rootless port forwarder's address and a new source
 port; PJSUA reads the registrar's `received`/`rport`, moves its Contact there
 and re-registers; media returns only because the target sends symmetric RTP.
+The rehearsal's last lines say the same three things to expect on the real
+engagement.
 
 Safety: a link-local address is never forwarded beyond the local segment, but
 a send to one from the host network would still leave on the default route's

@@ -232,8 +232,8 @@ def _span(seconds: float) -> str:
 
 
 NEW_WINDOW = (
-    "ask the owner for a new written window, record it in scope.yaml, run scope compile, "
-    "then campaign plan again"
+    "ask the owner for a new written window, record it in scope.yaml, record the approval again "
+    "(scope answer DIR 2), run scope compile, then campaign plan again"
 )
 
 

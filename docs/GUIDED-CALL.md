@@ -208,7 +208,7 @@ started, no run directory is made, and no packet is sent:
 ```text
 $ ./bin/sippycup call work/ENGAGEMENT/target-profile.yaml --dial ecoh --username 1001 --secret-file work/ENGAGEMENT/account.password
 Guided call: BLOCKED
-BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml, and run scope compile
+BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml (scope answer DIR destinations), record the approval again (scope answer DIR 2), and run scope compile
 Nothing was started and no packets were sent.
 Network activity: none
 ```

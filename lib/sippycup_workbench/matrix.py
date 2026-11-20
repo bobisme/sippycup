@@ -309,7 +309,8 @@ def build_plan(
                 f"more than its limits.max_calls {item['max_calls']} ({counted}); the profiles of one "
                 "approval (one scope) share one call ceiling, it is not a ceiling per profile; "
                 + narrow
-                + "the owner to approve more calls (limits.calls in scope.yaml) and run scope compile"
+                + "the owner to approve more calls (limits.calls in scope.yaml), record the approval again "
+                "(scope answer DIR 2), and run scope compile"
             )
     value: dict[str, Any] = {
         "apiVersion": MATRIX_VERSION,
