@@ -9,6 +9,7 @@ a run Sippycup knows, 5 internal error or privacy lint refusal.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -158,6 +159,7 @@ def diagnose(path: Path, arguments: argparse.Namespace, width: int):
 
         d, red = diagnose_checks(path, arguments)
     d.finalize()
+    _mark_overlap(d.data, path)
     d.data["runRef"] = work_relative(path.resolve())
     d.data["redaction"] = {
         "addresses": "operator copy: addresses shown, not for an owner report" if arguments.show_addresses
@@ -165,6 +167,26 @@ def diagnose(path: Path, arguments: argparse.Namespace, width: int):
         "never": "credentials, nonces, crypto keys, user parts, Call-IDs, message bodies",
     }
     return d, red
+
+
+def _mark_overlap(data: dict, path: Path) -> None:
+    """A run started beside another run of this checkout (result ``overlap``, finding 6).
+
+    Its capture, ladder, and oracle may hold the other run's packets, so the
+    diagnosis says first that its verdict is unreliable.
+    """
+    try:
+        result = json.loads((path / "result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    overlap = result.get("overlap") if isinstance(result, dict) else None
+    if not isinstance(overlap, dict):
+        return
+    runs = [str(item.get("name")) for item in overlap.get("activeRuns") or [] if isinstance(item, dict)]
+    beside = f" (beside {', '.join(runs)})" if runs else ""
+    data["overlap"] = {"activeRuns": runs, "unreliable": True}
+    data["outcome"] = (f"Another run was active; this verdict is unreliable{beside}: its capture and "
+                       f"ladder may hold the other run's packets. Repeat it alone. " + str(data.get("outcome") or ""))
 
 
 def lint_output(text: str, red, show: bool) -> list:

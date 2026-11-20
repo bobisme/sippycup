@@ -57,6 +57,7 @@ from sippycup_softphone.driver import (
     SRTP_MODES,
     SUPPORTED_CODECS,
     canonical_codec,
+    nat_addresses,
     registrar_uri,
 )
 from sippycup_softphone import evidence as softphone_evidence
@@ -339,6 +340,12 @@ def srtp_mode(options: "CallOptions", document: dict[str, Any]) -> str:
     if features.get("srtp") is True and target.get("transport") == "tls":
         return "optional"
     return "off"
+
+
+def _overlap_field() -> dict[str, Any]:
+    from sippycup.overlap_record import field
+
+    return field()
 
 
 def generate_expectations(
@@ -2015,9 +2022,13 @@ def _execute(
     approved = list(target["approved_addresses"])
     # Owner-approved media networks and the far end's RTP port range: MEDIA
     # ONLY. Signaling still goes only to the literal target.host (gate()).
-    from .media_scope import profile_media
+    from .media_scope import media_addresses, profile_media
 
     media_networks, media_ports = profile_media(document)
+    # Where media may go: the owner's media answer when the profile has one
+    # (media.addresses), so the signaling address receives media only when
+    # it was listed for media too; otherwise every literal approved address.
+    media_approved = list(media_addresses(document))
     profile_name = str(document["name"])
     server_name = target.get("tls_server_name") if transport == "tls" else None
     ca_reference = target.get("tls_ca_file") if transport == "tls" else None
@@ -2229,7 +2240,7 @@ def _execute(
             exclusive_codecs=options.exclusive_codecs,
             answer_timeout_seconds=options.answer_timeout,
             registration_timeout_seconds=REGISTRATION_TIMEOUT_SECONDS,
-            allowed_media_addresses=tuple(approved),
+            allowed_media_addresses=tuple(media_approved),
             allowed_media_networks=media_networks or None,
             allowed_media_ports=media_ports,
             advertised_address=local,
@@ -2514,7 +2525,7 @@ def _execute(
         recording=recording,
         requested_seconds=duration,
         setup=setup,
-        approved=approved,
+        approved=media_approved,
         remote_media=remote_sdp_addresses(log_text),
         srtp_media=srtp_media,
         dtmf=dtmf_report,
@@ -2522,6 +2533,20 @@ def _execute(
         media_networks=media_networks,
     )
     notes.insert(0, _network_note(network_mode, host))
+    # Behind NAT the target answers our Via with the address it saw; PJSUA
+    # logs the change and moves its Contact there (docs/FIRST-ENGAGEMENT.md,
+    # "Testing from behind NAT"). That address is our own, not a third party.
+    translated = nat_addresses(log_text)
+    if translated:
+        # The address itself is in natAddresses (and printed by render_human),
+        # not in the note: the target chose it, and notes reach the owner
+        # report, which names only approved addresses.
+        notes.append(
+            "NAT: the target saw this call's source at another address than our own; the softphone "
+            "moved its Contact there (the target's Via received/rport). That address (natAddresses in "
+            "result.json) is the one the owner must allow. The SDP still names our own address, so "
+            "media returned only because the target sends symmetric RTP to where our RTP comes from."
+        )
     # One rule for every command (bn-y3er): a reserved call that no INVITE
     # can have left for does not count; from the first INVITE on, it counts.
     counted = call_counts(call_attempted, softphone_result)
@@ -2594,6 +2619,9 @@ def _execute(
             else {}
         ),
         "localAddress": local,
+        **({"natAddresses": [item["address"] for item in translated]} if translated else {}),
+        # Started beside another run of this checkout (finding 6).
+        **_overlap_field(),
         "networkMode": network_mode,
         "durationSeconds": {"requested": options.duration, "limit": limit, "effective": duration},
         "captureFilter": scope,
@@ -2951,6 +2979,9 @@ def render_human(value: dict[str, Any]) -> str:
         )
     for note in value.get("notes", []):
         lines.append(f"NOTE: {note}")
+    if value.get("natAddresses"):
+        lines.append(f"NAT:          the target saw our source as {', '.join(value['natAddresses'])} "
+                     f"(our own address: {value.get('localAddress')})")
     if value["verdict"] != "pass":
         lines.append(f"Explain: ./bin/sippycup explain call.{value['verdict']}")
         if value.get("runDirectory"):

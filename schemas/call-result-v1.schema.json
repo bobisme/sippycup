@@ -98,6 +98,8 @@
       }
     },
     "localAddress": {"type": "string"},
+    "natAddresses": {"type": "array", "items": {"type": "string"}, "description": "Optional, behind NAT: where the target saw this call's source (PJSUA's address-change line, which repeats the registrar's Via received/rport). The evidence lint accepts it only as text, never as a packet address."},
+    "overlap": {"type": "object", "description": "Optional: the run started beside another run of this checkout (SIPPYCUP_ALLOW_OVERLAP); its verdict is unreliable.", "properties": {"activeRuns": {"type": "array", "items": {"type": "object"}}, "note": {"type": "string"}}},
     "networkMode": {"enum": ["private", "host", "none", "unknown"]},
     "durationSeconds": {
       "type": "object",

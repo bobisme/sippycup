@@ -305,7 +305,7 @@ class LauncherRoutingTests(unittest.TestCase):
             root = Path(root_name)
             runtime = root / "runtime"
             runtime.write_text(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+                "#!/bin/sh\nif [ \"$1\" = ps ]; then echo '[]'; exit 0; fi\nprintf '%s\\n' \"$@\"\n",
                 encoding="utf-8",
             )
             runtime.chmod(runtime.stat().st_mode | stat.S_IXUSR)

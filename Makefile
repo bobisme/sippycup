@@ -216,6 +216,16 @@ dress-rehearsal-proxy-cidr-gate:
 		SIPPYCUP_DRESS_REHEARSAL_GATE=proxy-cidr SIPPYCUP_PRACTICE_GATE_REQUIRE_IMAGES=1 \
 		PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_dress_rehearsal_gate -v
 
+# Routed rehearsal: the same chain across the toolbox's own network path
+# (private namespace, NAT, a real capture interface) to the practice image on
+# an internal network, with the commands a real target gets (no --practice).
+# Nothing leaves this host (about 5 minutes; needs both images; publishes the
+# target's SIP and RTP ports on 127.0.0.1 only). See docs/PRACTICE-TARGET.md.
+.PHONY: routed-rehearsal
+routed-rehearsal:
+	SIPPYCUP_IMAGE="$(IMAGE)" SIPPYCUP_PRACTICE_IMAGE="$(PRACTICE_IMAGE)" \
+		PYTHONDONTWRITEBYTECODE=1 python3 tools/routed_rehearsal.py
+
 # Live, loopback-only softphone checks (DTMF, SRTP, registration status,
 # media scope) against the practice target plus one isolated PJSUA peer.
 # Opt-in like practice-gate; needs both images. See docs/PRACTICE-TARGET.md.

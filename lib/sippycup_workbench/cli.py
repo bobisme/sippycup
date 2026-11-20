@@ -95,7 +95,21 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
             from .media_scope import describe
 
             approved = target.get("approved_addresses") if isinstance(target, dict) else None
-            if isinstance(approved, list):
+            media = facts.get("media_addresses")
+            if isinstance(approved, list) and isinstance(media, list):
+                # The owner answered the media question: media goes only where
+                # that answer lists, even when it is not the signaling address.
+                host = str(target.get("host"))
+                if host in media:
+                    print(f"Signaling and media: {host} (the target host; the owner also listed it for media)")
+                else:
+                    print(f"Signaling only: {host} (the target host; the owner did not list it for media, "
+                          "so a call stops if media is offered there)")
+                elsewhere = [str(item) for item in media if item != host]
+                if elsewhere:
+                    print(f"Media at: {', '.join(elsewhere)} (literal addresses from the owner's media answer; "
+                          "never a signaling target)")
+            elif isinstance(approved, list):
                 print(f"Signaling and media: {', '.join(str(item) for item in approved) or 'none'} "
                       "(literal approved addresses; signaling goes only to the target host)")
             if facts.get("media_networks"):

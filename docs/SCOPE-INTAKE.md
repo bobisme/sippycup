@@ -529,6 +529,19 @@ a media range is refused before any packet. Each run records which rule
 admitted the media peer (`result.json` `mediaScope.admittedBy`:
 `approved-address` or `media-network` with the range).
 
+Media goes only where the owner's media answer says. `scope compile` also
+records the answer: the profile's `media.addresses` lists its single
+addresses (possibly none, when the answer is ranges only), and the manifest's
+`authorization.mediaAllowed` lists the whole answer. When they are present, a
+call admits media only there, even at its own signaling address: if the
+signaling address is not in `media.networks`, an SDP that names it stops the
+call `media-outside-scope`. Answer the signaling address under
+`media.networks` too when it also carries media (the direct shape). A
+hand-written profile or manifest without these fields keeps the older rule
+(every literal approved address may carry media); both fields can only
+narrow what is admitted, and `rehearse` refuses a `media.addresses` entry
+that is not a literal approved address.
+
 Breadth rule. A media range in the profile holds at most 1024 addresses
 (IPv4 `/22` or narrower, IPv6 `/118` or narrower), at most 1024 in total and
 at most 16 ranges, with no host bits set, and none containing unspecified,

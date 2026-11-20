@@ -292,6 +292,7 @@ def _profile_media(doc: dict[str, Any]) -> dict[str, Any] | None:
         if names:
             section["codecs"] = names
     networks: list[str] = []
+    addresses: list[str] = []
     for text in media.get("networks") or []:
         try:
             network = canonical_network(str(text).strip())
@@ -299,6 +300,14 @@ def _profile_media(doc: dict[str, Any]) -> dict[str, Any] | None:
             continue
         if network.prefixlen != network.max_prefixlen and str(network) not in networks:
             networks.append(str(network))
+        elif network.prefixlen == network.max_prefixlen and str(network.network_address) not in addresses:
+            addresses.append(str(network.network_address))
+    if isinstance(media.get("networks"), list) and media["networks"]:
+        # The owner's media answer (question 12) promises media only there:
+        # the single addresses it lists, possibly none (ranges only). A call
+        # admits media at no other literal approved address, not even the
+        # signaling address (media_scope.media_addresses).
+        section["addresses"] = addresses
     if networks:
         section["networks"] = networks
     port_range = media.get("port_range")
@@ -472,6 +481,14 @@ def _build_campaign(doc: dict[str, Any]) -> dict[str, Any] | list[tuple[str, str
     authorization: dict[str, Any] = {"networks": networks}
     if media_networks:
         authorization["mediaNetworks"] = media_networks
+    # The owner's media answer (question 12): media goes only there, so a
+    # call step admits media at its own signaling address only when the
+    # owner listed it for media too (campaign.py, mediaAllowed).
+    authorization["mediaAllowed"] = sorted(
+        {str(canonical_network(str(text).strip())) for text in doc["media"]["networks"]},
+        key=lambda text: (ipaddress.ip_network(text).version, int(ipaddress.ip_network(text).network_address),
+                          ipaddress.ip_network(text).prefixlen),
+    )
     # The approval window (bn-3vxl): campaign plan freezes it and campaign run
     # sends nothing outside it. The manifest is generated only for an approved
     # scope with a complete window, so these answers exist.

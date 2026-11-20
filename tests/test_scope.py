@@ -512,6 +512,8 @@ class CompileTests(ScopeTestCase):
         self.assertFalse(profile["features"]["dtls_srtp"])
         self.assertEqual(profile["media"], {
             "codecs": ["PCMU", "PCMA"],
+            # The owner's media answer: its single addresses (media only there).
+            "addresses": ["10.20.30.40"],
             "networks": ["10.20.31.0/28"],
             "port_range": {"start": 10000, "end": 10100},
         })

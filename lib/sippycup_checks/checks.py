@@ -50,6 +50,9 @@ class Context:
     # profile's media section): they admit a media peer, never a signaling target.
     media_networks: tuple[str, ...] = ()
     media_ports: tuple[int, int] | None = None
+    # The owner's literal media answer (profile media.addresses); None when the
+    # profile has none, and then every literal approved address admits media.
+    media_addresses: tuple[str, ...] | None = None
     recheck: Callable[[], str | None] = lambda: None
     cancel: Any = None
     place_call: Callable[..., Any] | None = None

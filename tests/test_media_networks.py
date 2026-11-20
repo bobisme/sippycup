@@ -181,7 +181,8 @@ class ProfileTests(unittest.TestCase):
     def test_schema_describes_the_new_fields(self):
         schema = json.loads((ROOT / "schemas" / "target-profile-v1.schema.json").read_text())
         media = schema["properties"]["media"]
-        self.assertEqual(set(media["properties"]), {"codecs", "networks", "port_range"})
+        # addresses: the owner's media answer, written by scope compile (wave 10).
+        self.assertEqual(set(media["properties"]), {"codecs", "networks", "port_range", "addresses"})
         self.assertNotIn("required", media)
         self.assertIn("MEDIA ONLY", media["description"])
 

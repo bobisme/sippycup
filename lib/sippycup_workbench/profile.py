@@ -32,7 +32,7 @@ _TOP_LEVEL_FIELDS = {
     # media networks and media port range (media only, never signaling).
     "media",
 }
-MEDIA_FIELDS = {"codecs", "networks", "port_range"}
+MEDIA_FIELDS = {"codecs", "networks", "port_range", "addresses"}
 # Optional target.approved_destinations: the dial strings the owner approved
 # for this target (the scope's destinations[].user). The same characters the
 # scope accepts (scope.DEST_USER_PATTERN), at most MAX_APPROVED_DESTINATIONS.
@@ -400,7 +400,7 @@ def approved_media(document: dict[str, Any], errors: list[str]) -> dict[str, Any
     networks are a MEDIA-ONLY rule: they never make an address a signaling
     target (``target.host`` must still be a literal approved address).
     """
-    from .media_scope import validate_networks, validate_ports
+    from .media_scope import validate_addresses, validate_networks, validate_ports
 
     media = document.get("media")
     facts: dict[str, Any] = {}
@@ -414,6 +414,12 @@ def approved_media(document: dict[str, Any], errors: list[str]) -> dict[str, Any
         ports = validate_ports(media["port_range"], errors)
         if ports is not None:
             facts["media_ports"] = {"start": ports[0], "end": ports[1]}
+    if "addresses" in media:
+        target = document.get("target") if isinstance(document.get("target"), dict) else {}
+        approved = target.get("approved_addresses") if isinstance(target.get("approved_addresses"), list) else []
+        addresses = validate_addresses(media["addresses"], [str(item) for item in approved], errors)
+        if addresses is not None:
+            facts["media_addresses"] = addresses
     return facts
 
 
@@ -501,6 +507,15 @@ def rehearse(
                 break
         if len(set(approved_addresses)) != len(approved_addresses):
             errors.append("approved_addresses must be unique")
+    # A link-local target is only the routed practice target (sippycup.link_local).
+    from sippycup.link_local import problems as link_local_problems
+
+    media_section = document.get("media") if isinstance(document.get("media"), dict) else {}
+    errors.extend(link_local_problems([
+        *([host] if isinstance(host, str) else []),
+        *approved_addresses,
+        *(media_section.get("networks") if isinstance(media_section.get("networks"), list) else []),
+    ]))
 
     status = authorization.get("status")
     if status not in {"pending", "approved", "revoked", "expired"}:

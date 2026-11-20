@@ -975,7 +975,7 @@ class LauncherTests(unittest.TestCase):
         canary = "checks-launcher-canary-55"
         with tempfile.TemporaryDirectory() as root_name:
             runtime = Path(root_name) / "runtime"
-            runtime.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+            runtime.write_text("#!/bin/sh\nif [ \"$1\" = ps ]; then echo '[]'; exit 0; fi\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
             runtime.chmod(0o755)
             result = subprocess.run(
                 [ROOT / "bin" / "sippycup", "checks", "run", "work/engagement/profile.yaml",

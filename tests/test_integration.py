@@ -267,6 +267,55 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse((run_dir / "events.jsonl").exists())
         self.assertEqual(json.loads((run_dir / "result.json").read_text())["completedSteps"], 0)
 
+    def test_capture_that_cannot_start_leaves_no_run_directory_and_names_the_launcher(self):
+        # Finding 5 (wave 10): tcpdump without permission exits at once. No
+        # step ran, so no run directory may stay for the owner report to list
+        # as a failed campaign, and the hint names the documented command.
+        plan, manifest_bytes = one_call_plan()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        order = root / "order.txt"
+        failing = [sys.executable, "-c",
+                   "import sys; print(\"tcpdump: any: You don't have permission\", file=sys.stderr); sys.exit(1)"]
+        with self.assertRaises(RuntimeError) as raised:
+            execute_campaign(
+                plan,
+                manifest_bytes=manifest_bytes,
+                run_root=root / "runs",
+                runner=[sys.executable, str(TOOL), "runner", str(order)],
+                capture_command=failing,
+                report_command=[sys.executable, str(TOOL), "report", "{capture}"],
+                preflight=lambda _destination: (True, "SIP/2.0 200 OK"),
+                allow_test_runner=True,
+            )
+        message = str(raised.exception)
+        self.assertIn("./bin/sippycup campaign run", message)
+        self.assertNotIn("campaign execute", message)
+        self.assertIn("Nothing was sent", message)
+        self.assertIn("You don't have permission", message)
+        self.assertEqual(list((root / "runs").iterdir()) if (root / "runs").exists() else [], [])
+        self.assertFalse(order.exists(), "the runner must never start")
+
+    def test_unresolved_credentials_are_refused_before_a_run_directory_exists(self):
+        plan, manifest_bytes = one_call_plan(credential=True)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        with self.assertRaisesRegex(RuntimeError, "unresolved credential references"):
+            execute_campaign(
+                plan,
+                manifest_bytes=manifest_bytes,
+                run_root=root / "runs",
+                runner=[sys.executable, str(TOOL), "runner", str(root / "order.txt")],
+                capture_command=[sys.executable, str(TOOL), "capture", "{capture}", str(root / "order.txt")],
+                report_command=[sys.executable, str(TOOL), "report", "{capture}"],
+                preflight=lambda _destination: (True, "SIP/2.0 200 OK"),
+                secret_values={},
+                allow_test_runner=True,
+            )
+        self.assertEqual(list((root / "runs").iterdir()) if (root / "runs").exists() else [], [])
+
     def test_fixture_secret_never_appears_in_artifacts_or_argv(self):
         secret = "correct horse fixture battery staple"
         result, run_dir, _order = self.execute(

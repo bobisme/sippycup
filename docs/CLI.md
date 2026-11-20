@@ -40,7 +40,23 @@ The registry makes execution location explicit:
 - Host workflows such as scoped capture and reporting retain their existing
   wrappers and privilege boundaries.
 - Preflight and the closed-loop self-test run in the prepared image. Self-test
-  always selects the isolated network.
+  always selects the isolated network. Preflight sends from the same private
+  network namespace as `call` (same route and source address); only
+  `--admin preflight` keeps the host network.
+- `campaign run` and `campaign execute` always run in the prepared image with
+  a private network namespace, where their own `tcpdump` works rootless (on
+  the host it has no permission). They reject `--admin`; `--practice`
+  composes. `campaign plan` and the other subcommands run from the checkout.
+- A sending command (`call`, `matrix run`, `checks run`, `campaign run`,
+  `campaign execute`, `preflight`, `media send`) refuses to start while another
+  sender of this checkout is active, found the way `stop` finds them; it names
+  the other run and sends nothing. `SIPPYCUP_ALLOW_OVERLAP=NAME[,NAME]` names
+  the runs it may knowingly run beside; the run then records `overlap` in its
+  result, and `diagnose` and the owner report call its verdict unreliable.
+- `SIPPYCUP_ROUTED_PRACTICE=CONTAINER` (set by `make routed-rehearsal`) joins
+  the routed practice target: the launcher checks the container and fails
+  closed, then maps its link-local address to host loopback in every
+  networked container. Nothing else may target a link-local address.
 - `call` always runs in the prepared image with a private network namespace,
   where rootless capture works, and rewrites `work/...` paths to `/work/...`.
   It rejects `--admin`. `call --dry-run` and `call --help` run from the

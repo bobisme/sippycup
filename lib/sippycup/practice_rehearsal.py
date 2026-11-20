@@ -447,6 +447,19 @@ class Rehearsal:
         self.current: Stage | None = None
         self.counter = 0
         self.facts: dict[str, Any] = {}
+        # What the routed rehearsal (routed_rehearsal.py) changes: where the
+        # password and target files live, the launcher route of live
+        # commands, and what the summary must count.
+        self.password_file = PASSWORD_FILE
+        self.route: tuple[str, ...] = ("--practice",)
+        self.network_text = "loopback inside the practice namespace only"
+        self.expected_calls = 3
+        self.expected_practice_runs = 1
+        self.program = "practice-target rehearsal"
+        self.approval_id = APPROVAL_ID
+        # The engagement's copy of the target's CA certificate.
+        self.ca_name = "practice-ca.crt"
+        self.label = ""
 
     # -- plumbing -------------------------------------------------------
     def _run(self, argv: list[str], env: dict[str, str] | None, timeout: float) -> Completed:
@@ -472,7 +485,7 @@ class Rehearsal:
         """Run one public command, print it, and keep its output as evidence."""
         line = shlex.join(argv)
         if env:
-            line = " ".join(f"{name}=<from {PASSWORD_FILE}>" for name in env) + " " + line
+            line = " ".join(f"{name}=<from {self.password_file}>" for name in env) + " " + line
         if not quiet and self.current is not None:
             self.current.commands.append(line)
             self.say(f"    $ {line}")
@@ -545,8 +558,12 @@ class Rehearsal:
         self.current = None
         return stage.status == "PASS"
 
+    def state_root(self) -> Path:
+        """Where the target's public files (CA) live and rehearsals are kept."""
+        return practice.state_dir(self.project)
+
     def password(self) -> str:
-        return (self.project / PASSWORD_FILE).read_text(encoding="utf-8").strip()
+        return (self.project / self.password_file).read_text(encoding="utf-8").strip()
 
     def run_result(self, completed: Completed) -> dict[str, Any]:
         try:
@@ -608,7 +625,7 @@ class Rehearsal:
 
     def create_engagement(self) -> None:
         stamp = self.now().strftime("%Y%m%dt%H%M%Sz")
-        parent = practice.state_dir(self.project) / "rehearsals"
+        parent = self.state_root() / "rehearsals"
         parent.mkdir(mode=0o700, exist_ok=True)
         kind = "dress-proxy-cidr" if self.media_cidr else "dress-proxy" if self.proxy else "dress"
         self.engagement = parent / f"{kind}-{stamp}-{os.getpid()}"
@@ -638,11 +655,11 @@ class Rehearsal:
 
     def write_answers(self, shape: Shape | None, *, checks: tuple[str, ...] = CHECKS) -> None:
         assert self.engagement is not None
-        ca = self.engagement / "practice-ca.crt"
+        ca = self.engagement / self.ca_name
         # On a real engagement this is the owner's private CA certificate.
-        ca.write_bytes((practice.state_dir(self.project) / "ca.crt").read_bytes())
+        ca.write_bytes((self.state_root() / "ca.crt").read_bytes())
         ca.chmod(0o600)
-        answers = scope_answers(self.facts, now=self.now(), name=SCOPE_NAME, ca_file=f"{self.eng}/practice-ca.crt",
+        answers = scope_answers(self.facts, now=self.now(), name=SCOPE_NAME, ca_file=f"{self.eng}/{self.ca_name}",
                                 shape=shape, checks=checks)
         practice.write_private(self.engagement / "scope.yaml", answers)
         assert shape is not None
@@ -694,7 +711,7 @@ class Rehearsal:
     def go_no_go(self, model: dict[str, Any] | None = None) -> None:
         """The cockpit's go/no-go action, with the password source the calls will use."""
         argv = list(find_action(model, "ready")["argv"]) if model is not None else [LAUNCHER, "ready", self.eng]
-        result = self.command([*argv, "--secret-file", PASSWORD_FILE])
+        result = self.command([*argv, "--secret-file", self.password_file])
         self.require("VERDICT: GO" in result.stdout, f"ready did not say GO: {result.stdout.strip()[-600:]}")
         marks = [line.split("]", 1)[0] + "]" for line in result.stdout.splitlines() if line.startswith("[")]
         self.fact(f"ready: GO ({len(marks)} lines: {marks.count('[GO]')} GO, {marks.count('[WARN]')} WARN, "
@@ -705,18 +722,18 @@ class Rehearsal:
         address, name = self.shape.signaling, self.shape.server_name
         # Bound to the compiled profile, as in a real engagement: the target
         # comes from the profile and the approval is checked first.
-        udp = self.command([LAUNCHER, "--practice", "preflight", "--profile", f"{self.eng}/target-profile.yaml"])
+        udp = self.command([LAUNCHER, *self.route, "preflight", "--profile", f"{self.eng}/target-profile.yaml"])
         self.require("Result: PASS" in udp.stdout, "UDP preflight did not PASS")
         self.require(
             f"Target:    {address}:{practice.SIGNALING_PORTS['udp']}" in udp.stdout
-            and "Scope: profile " in udp.stdout and f"approval {APPROVAL_ID}" in udp.stdout,
+            and "Scope: profile " in udp.stdout and f"approval {self.approval_id}" in udp.stdout,
             "the profile-bound preflight did not show the profile's target and approval",
         )
         # The compiled profile is the UDP target; the TLS endpoint is probed
         # with an operator-supplied target, which the output labels UNBOUND.
         tls = self.command([
-            LAUNCHER, "--practice", "preflight", address, str(practice.SIGNALING_PORTS["tls"]), "tls",
-            "--tls-ca", f"{self.eng}/practice-ca.crt", "--tls-server-name", name,
+            LAUNCHER, *self.route, "preflight", address, str(practice.SIGNALING_PORTS["tls"]), "tls",
+            "--tls-ca", f"{self.eng}/{self.ca_name}", "--tls-server-name", name,
         ])
         self.require("Result: PASS" in tls.stdout and f"TLS: verified for name '{name}'" in tls.stdout,
                      "TLS preflight did not PASS with a verified server name")
@@ -728,7 +745,7 @@ class Rehearsal:
         model = self.cockpit("first-call")
         action = find_action(model, "call")
         # The cockpit adds the password source the operator chooses.
-        argv = [*action["argv"], "--secret-file", PASSWORD_FILE, "--format", "json"]
+        argv = [*action["argv"], "--secret-file", self.password_file, "--format", "json"]
         result = self.run_result(self.command(argv, timeout=180))
         self.require(result.get("verdict") == "pass", f"guided call verdict {result.get('verdict')!r}")
         self.fact(f"guided call to echo: pass; {self.shape_seen(result)}; run {result.get('runDirectory')}")
@@ -738,7 +755,7 @@ class Rehearsal:
             self.signaling_not_widened(route)
         dtmf = self.run_result(self.command([
             *route, "call", f"{self.eng}/target-profile.yaml", "--dial", "dtmf", "--dtmf", DTMF_DIGITS,
-            "--duration", "8", "--username", practice.ACCOUNT, "--secret-file", PASSWORD_FILE, "--format", "json",
+            "--duration", "8", "--username", practice.ACCOUNT, "--secret-file", self.password_file, "--format", "json",
         ], timeout=180))
         facts = dtmf.get("dtmf") if isinstance(dtmf.get("dtmf"), dict) else {}
         wire = facts.get("wire") if isinstance(facts.get("wire"), dict) else {}
@@ -786,7 +803,7 @@ class Rehearsal:
         relative = path.relative_to(self.project).as_posix()
         refused = self.run_result(self.command([
             *route, "call", relative, "--dial", "echo", "--username", practice.ACCOUNT,
-            "--secret-file", PASSWORD_FILE, "--format", "json",
+            "--secret-file", self.password_file, "--format", "json",
         ], timeout=120, expect=(2,)))
         errors = " ".join(str(item) for item in refused.get("blockingErrors") or [])
         self.require(refused.get("state") == "blocked" and refused.get("runDirectory") is None
@@ -878,7 +895,7 @@ class Rehearsal:
         self.command(list(find_action(model, "checks-plan")["argv"]))
         action = find_action(model, "checks-run")
         result = self.run_result(self.command(
-            [*action["argv"], "--secret-file", PASSWORD_FILE, "--format", "json"], timeout=300, expect=(0, 1)))
+            [*action["argv"], "--secret-file", self.password_file, "--format", "json"], timeout=300, expect=(0, 1)))
         statuses = {row["id"]: row["status"] for row in (result.get("findings") or {}).get("checks", [])}
         self.require(result.get("state") == "completed", f"checks state {result.get('state')!r}")
         self.require(all(statuses.get(item) in {"passed", "finding"} for item in CHECKS),
@@ -917,15 +934,16 @@ class Rehearsal:
         assert self.engagement is not None and self.secret is not None
         model = self.cockpit("report")
         action = find_action(model, "summary")
-        self.command([*action["argv"], "--forbid-file", PASSWORD_FILE])
+        self.command([*action["argv"], "--forbid-file", self.password_file])
         report = json.loads((self.engagement / "report" / "report.json").read_text(encoding="utf-8"))
         self.require(report.get("integrityExceptions") == [],
                      f"integrity exceptions: {report.get('integrityExceptions')}")
         kinds = report.get("runCounts") or {}
-        self.require(kinds.get("call") == 3 and kinds.get("campaign") == 1 and kinds.get("check") == 1,
+        self.require(kinds.get("call") == self.expected_calls and kinds.get("campaign") == 1 and kinds.get("check") == 1,
                      f"report run counts {kinds}")
         practice_runs = [run["id"] for run in report.get("runs", []) if run.get("practiceApproval")]
-        self.require(len(practice_runs) == 1, f"expected the practice call labelled as practice, got {practice_runs}")
+        self.require(len(practice_runs) == self.expected_practice_runs,
+                     f"expected {self.expected_practice_runs} practice call(s) labelled as practice, got {practice_runs}")
         reported = sorted(item["id"] for item in report.get("findings", []) if item.get("checkId"))
         self.require(sorted(self.check_findings) == reported,
                      f"the owner report's check findings {reported} differ from the checks run's {self.check_findings}")
@@ -952,7 +970,7 @@ class Rehearsal:
         """
         assert self.engagement is not None and self.secret is not None
         main = self.engagement
-        stop_shape = shape_for(self.facts, proxy=True, media_approved=False, media_cidr=self.media_cidr)
+        stop_shape = self.stop_shape()
         self.engagement = main.parent / f"{main.name}-stop"
         try:
             self.command([LAUNCHER, "journal", "init", self.eng, "--title",
@@ -963,7 +981,7 @@ class Rehearsal:
             self.rehearse_only()
             model = self.cockpit("practice")
             action = find_action(model, "call")
-            argv = [*action["argv"], "--secret-file", PASSWORD_FILE, "--format", "json"]
+            argv = [*action["argv"], "--secret-file", self.password_file, "--format", "json"]
             result = self.run_result(self.command(argv, timeout=180, expect=(1,)))
             softphone = result.get("softphone") if isinstance(result.get("softphone"), dict) else {}
             peer = str(softphone.get("media_peer") or "")
@@ -975,7 +993,7 @@ class Rehearsal:
                 record = result.get("mediaScope") if isinstance(result.get("mediaScope"), dict) else {}
                 self.require(record.get("admittedBy") is None and record.get("inScope") is False,
                              f"the stopped call's media scope record does not show the refusal: {record}")
-                self.fact(f"media peer {media} is just outside the approved range "
+                self.fact(f"media peer {media} is outside the owner's media answer "
                           f"{', '.join(stop_shape.media_answer)}: refused, recorded admittedBy null")
             self.journal_call(result)
             model = self.cockpit("first-call")
@@ -990,7 +1008,7 @@ class Rehearsal:
             model = self._model()
             # summary exits 1 when the report has integrity exceptions; here
             # exactly one is required (the packets sent before the stop).
-            self.command([*find_action(model, "summary")["argv"], "--forbid-file", PASSWORD_FILE], expect=(1,))
+            self.command([*find_action(model, "summary")["argv"], "--forbid-file", self.password_file], expect=(1,))
             report = json.loads((self.engagement / "report" / "report.json").read_text(encoding="utf-8"))
             sent = self.stop_report(report)
             leaked = files_containing(self.engagement, self.secret)
@@ -1004,6 +1022,10 @@ class Rehearsal:
         finally:
             self.stop_engagement = self.engagement
             self.engagement = main
+
+    def stop_shape(self) -> Shape:
+        """The stop leg's answers: the proxy shape with the media address left out."""
+        return shape_for(self.facts, proxy=True, media_approved=False, media_cidr=self.media_cidr)
 
     def rehearse_only(self) -> None:
         result = self.command([LAUNCHER, "rehearse", f"{self.eng}/target-profile.yaml"])
@@ -1061,24 +1083,31 @@ class Rehearsal:
             self.current = None
             self.say("Practice target taken down again (it was down when the rehearsal started).")
 
-    def execute(self) -> int:
-        started = time.monotonic()
+    def plan(self) -> list[tuple[str, Callable[[], None]]]:
+        """The stages in order: (title, body)."""
+        bodies = (
+            self.target_up, self.create_engagement, self.practice_call, self.scope, self.rehearse,
+            self.preflight, self.calls, self.campaign, self.checks, self.evidence, self.summary,
+            self.safety_stop,
+        )
+        return list(zip(stage_titles(self.proxy, self.media_cidr), bodies, strict=True))
+
+    def announce(self) -> None:
         shape = ("the proxy shape (signaling to the practice proxy, media from the practice address)"
                  if self.proxy else "the practice target directly")
         if self.media_cidr:
             shape += " with media answered as a range"
         self.say(f"Dress rehearsal: the owner-facing chain against {shape} "
                  "(loopback inside the practice namespace only).")
-        bodies = (
-            self.target_up, self.create_engagement, self.practice_call, self.scope, self.rehearse,
-            self.preflight, self.calls, self.campaign, self.checks, self.evidence, self.summary,
-            self.safety_stop,
-        )
+
+    def execute(self) -> int:
+        started = time.monotonic()
+        self.announce()
         try:
-            for title, body in zip(stage_titles(self.proxy, self.media_cidr), bodies, strict=True):
+            for title, body in self.plan():
                 self.stage(title, body)
         except CannotStart as error:
-            self.say(f"practice-target rehearsal: {error}")
+            self.say(f"{self.program}: {error}")
             self.say("Nothing was sent to the practice target by the chain.")
             self.teardown()
             return 2
@@ -1096,7 +1125,7 @@ class Rehearsal:
                                if self.stop_engagement else None),
             "stages": [stage.__dict__ for stage in self.stages],
             "practiceTargetStartedHere": self.started_target,
-            "network_activity": "loopback inside the practice namespace only",
+            "network_activity": self.network_text,
         }
         if self.engagement is not None and (self.engagement / "rehearsal").is_dir():
             practice.write_private(self.engagement / "rehearsal" / "summary.json",
@@ -1105,8 +1134,8 @@ class Rehearsal:
         for stage in self.stages:
             self.say(f"  {stage.status:<4} {stage.number:>2}. {stage.title} ({stage.seconds} s)")
         verdict = "PASS" if ok else "FAIL"
-        label = ("Dress rehearsal (proxy shape, media range)" if self.media_cidr
-                 else "Dress rehearsal (proxy shape)" if self.proxy else "Dress rehearsal")
+        label = self.label or ("Dress rehearsal (proxy shape, media range)" if self.media_cidr
+                               else "Dress rehearsal (proxy shape)" if self.proxy else "Dress rehearsal")
         self.say(f"{label}: {verdict} in {elapsed} s "
                  f"({sum(1 for s in self.stages if s.status == 'PASS')}/{len(self.stages)} stages)")
         if self.engagement is not None:
@@ -1116,7 +1145,7 @@ class Rehearsal:
         if self.stop_engagement is not None and self.stop_engagement.is_dir():
             self.say(f"Stop leg: {self.stop_engagement.relative_to(self.project).as_posix()} "
                      "(throwaway engagement; its own owner report shows the safety stop)")
-        self.say("Network activity: loopback inside the practice namespace only")
+        self.say(f"Network activity: {self.network_text}")
         return 0 if ok else 1
 
 

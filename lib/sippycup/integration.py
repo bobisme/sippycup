@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from sippycup import approval as approval_rules
-from sippycup import capture_scope, options
+from sippycup import capture_scope, options, overlap_record
 from sippycup.campaign import ManifestError, verify_frozen_plan
 from sippycup.runtime import RunResult, RuntimeError, run_plan, validate_plan
 
@@ -32,6 +32,15 @@ PROVIDER_TIMEOUT_SECONDS = 2.0
 
 class _FinishExecution(Exception):
     """Internal non-error control flow used so cleanup can update the result."""
+
+
+class CaptureStartFailed(RuntimeError):
+    """Packet capture never started, so no step ran and nothing was sent.
+
+    ``execute`` removes the run directory (it holds only this tool's own
+    copies of the plan and manifest) so a failed start is not reported as a
+    failed campaign run against the target.
+    """
 
 
 class AuthorizationLapsed(RuntimeError):
@@ -722,6 +731,22 @@ def _stop_group(process: subprocess.Popen[bytes], grace: float = 2.0) -> None:
         time.sleep(0.01)
 
 
+def _nat_addresses(run_dir: Path) -> list[str]:
+    """Addresses the target saw as our source, from the call steps' PJSUA logs."""
+    from sippycup_softphone.driver import nat_addresses
+
+    found: list[str] = []
+    for log in sorted(run_dir.glob("steps/*/softphone.log")):
+        try:
+            text = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for item in nat_addresses(text):
+            if item["address"] not in found:
+                found.append(item["address"])
+    return found
+
+
 def _make_private(run_dir: Path) -> None:
     """Run artifacts are evidence: directories 0700 and files 0600."""
     for directory, _names, files in os.walk(run_dir):
@@ -780,6 +805,15 @@ def execute_campaign(
             manifest_path=manifest_path,
             clock=clock,
         )
+    except CaptureStartFailed:
+        # No step started, so nothing was sent: keep no run directory that
+        # the owner report would list as a failed run against the target.
+        run_dir = ledger.pop("run_dir", None)
+        if run_dir is not None and not (Path(run_dir) / "events.jsonl").exists():
+            shutil.rmtree(run_dir, ignore_errors=True)
+        elif run_dir is not None:
+            ledger["run_dir"] = run_dir
+        raise
     finally:
         os.umask(old_umask)
         reservation = ledger.get("reservation")
@@ -976,6 +1010,18 @@ def _execute_campaign(
             )
         except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
             raise AuthorizationLapsed(str(error)) from error
+    # Before the run directory exists: a run refused here leaves nothing behind.
+    secret_values = dict(secret_values or {})
+    references = sorted(
+        {
+            step["credentialRef"]
+            for step in plan["steps"]
+            if step.get("credentialRef") is not None
+        }
+    )
+    missing = sorted(set(references) - set(secret_values))
+    if missing:
+        raise RuntimeError("unresolved credential references: " + ", ".join(missing))
     run_dir = create_run_directory(run_root, name)
     ledger["run_dir"] = run_dir
     from sippycup.call_ledger import write_run_record
@@ -989,17 +1035,6 @@ def _execute_campaign(
     manifest_copy.chmod(0o600)
     _write_json(run_dir / "plan.json", plan)
     _write_json(run_dir / "timestamps.json", {"started": started, "finished": None})
-    secret_values = dict(secret_values or {})
-    references = sorted(
-        {
-            step["credentialRef"]
-            for step in plan["steps"]
-            if step.get("credentialRef") is not None
-        }
-    )
-    missing = sorted(set(references) - set(secret_values))
-    if missing:
-        raise RuntimeError("unresolved credential references: " + ", ".join(missing))
 
     capture_path = run_dir / "capture.pcap"
     # The frozen filter, extended for an older plan with the authorized media
@@ -1116,12 +1151,19 @@ def _execute_campaign(
                     result = RunResult(code, "cancelled", 0)
                     raise _FinishExecution
                 if capture.poll() is not None:
-                    raise RuntimeError(
-                        "capture process failed during startup; see capture.log "
-                        "in the run directory. Packet capture needs CAP_NET_RAW, "
-                        "which an unprivileged host or a rootless host-network "
-                        "container lacks: run `./bin/sippycup --isolated "
-                        "campaign execute ...` instead"
+                    capture_log.flush()
+                    try:
+                        said = (run_dir / "capture.log").read_text(errors="replace").strip()
+                    except OSError:
+                        said = ""
+                    raise CaptureStartFailed(
+                        "packet capture could not start"
+                        + (f" ({said.splitlines()[-1][:200]})" if said else "")
+                        + ". Nothing was sent, and the run directory was removed. "
+                        "Packet capture needs CAP_NET_RAW, which an unprivileged host or "
+                        "a rootless host-network container lacks: give the same command "
+                        "through the launcher, `./bin/sippycup campaign run ...`, which "
+                        "runs it in the image's private network namespace"
                     )
                 if time.monotonic() >= ready_deadline:
                     raise RuntimeError("capture process did not become ready")
@@ -1268,6 +1310,12 @@ def _execute_campaign(
                             if "mediaNetworks" in plan["authorization"]
                             else {}
                         ),
+                        # The owner's media answer, only when the plan has it.
+                        **(
+                            {"mediaAllowed": plan["authorization"]["mediaAllowed"]}
+                            if "mediaAllowed" in plan["authorization"]
+                            else {}
+                        ),
                     },
                     "expectations": plan["expectations"],
                     "evidence": {"retainPayload": plan["evidence"]["retainPayload"]},
@@ -1401,6 +1449,11 @@ def _execute_campaign(
                 # The run's own source addresses (route lookup, nothing sent),
                 # so the privacy lint does not report them as unexpected.
                 "localAddresses": local_addresses,
+                # Behind NAT: the address the target saw as our source, from
+                # each softphone's own log (PJSUA's address-change line).
+                **({"natAddresses": translated} if (translated := _nat_addresses(run_dir)) else {}),
+                # Started beside another run of this checkout (finding 6).
+                **overlap_record.field(),
             },
         )
         _write_json(

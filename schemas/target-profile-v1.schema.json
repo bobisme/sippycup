@@ -113,7 +113,7 @@
     },
     "media": {
       "type": "object",
-      "description": "Optional. What the owner approved for media; at least one field. codecs: calls offer only these, and a requested codec outside the list is refused. networks: owner-approved media networks, MEDIA ONLY (they admit a negotiated media peer, never a signaling target; target.host must still be a literal approved address); rehearse refuses host bits, a network of more than 1024 addresses (IPv4 wider than /22, IPv6 wider than /118), more than 1024 addresses in total, more than 16 networks, and unspecified, multicast, reserved, or broadcast ranges. port_range: the far end's approved RTP ports; a negotiated media port outside it stops the call.",
+      "description": "Optional. What the owner approved for media; at least one field. codecs: calls offer only these, and a requested codec outside the list is refused. networks: owner-approved media networks, MEDIA ONLY (they admit a negotiated media peer, never a signaling target; target.host must still be a literal approved address); rehearse refuses host bits, a network of more than 1024 addresses (IPv4 wider than /22, IPv6 wider than /118), more than 1024 addresses in total, more than 16 networks, and unspecified, multicast, reserved, or broadcast ranges. port_range: the far end's approved RTP ports; a negotiated media port outside it stops the call. addresses: the owner's media answer, its single addresses (written by scope compile); when present, media is admitted only at these and in networks, even at the signaling address; each must be a literal approved address.",
       "additionalProperties": false,
       "minProperties": 1,
       "properties": {
@@ -129,6 +129,11 @@
           "maxItems": 16,
           "uniqueItems": true,
           "items": {"type": "string", "description": "CIDR network with no host bits set, for example 198.51.100.0/27"}
+        },
+        "addresses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "description": "a literal IP address in canonical form, also in target.approved_addresses"}
         },
         "port_range": {
           "type": "object",

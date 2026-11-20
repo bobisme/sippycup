@@ -382,6 +382,10 @@ class Source:
     # A campaign manifest's own copy of the approval (id, window) it was
     # compiled with. Shown to the reader; never a window or approval source.
     held_approval: dict[str, Any] | None = None
+    # The owner's media answer, where it promises media only (scope
+    # media.networks, profile media.addresses plus media.networks, manifest
+    # mediaAllowed); None when the record has none. Not part of as_dict.
+    media_answer: list[str] | None = None
 
     def covers(self, address: str | None, port: int | None, transport: str | None) -> bool:
         if address is None:
@@ -454,6 +458,7 @@ def _scope_source(document: dict[str, Any], ref: str) -> Source:
         valid_until=parse_time(auth.get("valid_until")),
         networks=_str_list(signaling.get("networks")),
         media_networks=_str_list(media.get("networks")),
+        media_answer=[n for n in _str_list(media.get("networks")) if _is_network(n)] or None,
         ports=_int_list(signaling.get("ports")),
         transports=[t for t in _str_list(signaling.get("transports")) if t in {"udp", "tcp", "tls"}],
     )
@@ -506,6 +511,8 @@ def _profile_source(document: dict[str, Any], ref: str) -> Source:
     # target check, never consults them) and the far end's RTP ports.
     media = _dict(document.get("media"))
     source.media_networks = [n for n in _str_list(media.get("networks")) if _is_network(n)]
+    if isinstance(media.get("addresses"), list):
+        source.media_answer = [a for a in _str_list(media["addresses"]) if _is_ip(a)] + source.media_networks
     port_range = _dict(media.get("port_range"))
     if _int(port_range.get("start")) and _int(port_range.get("end")):
         source.media_ports = (port_range["start"], port_range["end"])
@@ -553,6 +560,8 @@ def _manifest_source(document: dict[str, Any], ref: str) -> Source:
     # Media-only networks (authorization.mediaNetworks): approved for media
     # and evidence, never as a signaling target.
     source.media_networks = [n for n in _str_list(auth.get("mediaNetworks")) if _is_network(n)]
+    if isinstance(auth.get("mediaAllowed"), list):
+        source.media_answer = [n for n in _str_list(auth["mediaAllowed"]) if _is_network(n)]
     media_ports = _dict(auth.get("mediaPorts"))
     if _int(media_ports.get("start")) and _int(media_ports.get("end")):
         source.media_ports = (media_ports["start"], media_ports["end"])
@@ -959,6 +968,25 @@ def _media_rule(scope: "_Scope", peer: str | None) -> str | None:
     return "approved-address"
 
 
+def _media_answer_admits(scope: "_Scope", peer: str) -> bool:
+    """False when the records state the owner's media answer and none of them lists ``peer``.
+
+    Question 12 promises media only at the listed addresses and ranges, even
+    when the signaling address is elsewhere approved; records without a media
+    answer (hand-written profiles, older compiles) keep the address rule.
+    """
+    answers = [source.media_answer for source in scope.sources if source.media_answer is not None]
+    if not answers:
+        return True
+    for answer in answers:
+        book = AddressBook()
+        for network in answer:
+            book.add_network(network)
+        if book.approved(peer):
+            return True
+    return False
+
+
 def _destination_user(uri: Any) -> str | None:
     if not isinstance(uri, str):
         return None
@@ -1073,7 +1101,8 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
             "codec": san.identifier(softphone.get("codec"), f"{prefix}.details.media.codec", limit=32),
             "direction": _ident(softphone.get("media_direction")),
             "peer": scope.addresses.label(media_peer) if media_peer else None,
-            "peerApproved": bool(media_peer and scope.addresses.approved(media_peer)),
+            "peerApproved": bool(media_peer and scope.addresses.approved(media_peer)
+                                 and _media_answer_admits(scope, media_peer)),
             "peerApprovedBy": _media_rule(scope, media_peer),
             "peerRecordedRule": _ident(_dict(result.get("mediaScope")).get("admittedBy")),
             "peerPort": media_port,
@@ -2418,6 +2447,11 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                 "checked against the approval that was in force when it ran (a copy of that approval was kept at the time)"
             )
             model["approvalInForce"] = _in_force(run_scope.sources[0])
+        overlap = _dict(_dict(raw.docs.get("result.json")).get("overlap"))
+        if overlap:
+            # Started beside another run of this checkout (finding 6).
+            model["overlap"] = True
+            model["reasons"].append("another run was active; this verdict is unreliable")
         if raw.name in practice_scopes:
             model["practiceApproval"] = run_scope.sources[0].ref
             model["reasons"].append(
@@ -2442,8 +2476,14 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is not an approved address or inside an approved media network"
                                + _stop_detail(model))
                 )
+            elif peer and not _media_answer_admits(run_scope, peer):
+                model["integrity"].append(
+                    _exception("media-peer-not-approved", raw.name, f"media peer {addresses.label(peer)} is approved for "
+                               "signaling, but the owner's media answer does not list it"
+                               + _stop_detail(model))
+                )
             for step_number, campaign_peer in model.pop("_mediaPeersRaw", None) or []:
-                if not addresses.approved(campaign_peer):
+                if not addresses.approved(campaign_peer) or not _media_answer_admits(run_scope, campaign_peer):
                     model["integrity"].append(
                         _exception("media-peer-not-approved", raw.name,
                                    f"step {step_number} media peer {addresses.label(campaign_peer)} is not an approved "
@@ -2550,6 +2590,14 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     "practice profile against the local practice target (a loopback address inside a network namespace "
                     "with no other interface). They are rehearsal runs, not assessment traffic: they are not counted in "
                     "the totals and were re-checked against the archived practice approval each one used.",
+        })
+    overlapped = [r for r in runs if r.get("overlap")]
+    if overlapped:
+        limitations.append({
+            "code": "overlapping-runs",
+            "text": f"{len(overlapped)} run(s) ({', '.join(r['label'] for r in overlapped)}) started while another "
+                    "run of this checkout was active (the operator allowed it): another run was active; this "
+                    "verdict is unreliable. Their captures and verdicts may mix both runs' traffic.",
         })
     stale_judged = [
         r for r in owner_runs if r["id"] in set(unrecorded_runs) and r["readable"] != "unreadable"
