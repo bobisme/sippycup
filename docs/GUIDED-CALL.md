@@ -142,9 +142,25 @@ while the call runs (bn-2jg, `docs/SAFETY-AUDIT.md`):
   media destination outside the scope, the call is hung up and the verdict is
   `media-outside-scope`. A media-level `c=` overrides the session-level one,
   `a=rtcp` with an address counts, and the RTP port must be in
-  `media.port_range`. The address PJSUA receives RTP from is checked too. Only
-  the first few RTP/RTCP packets reach the unapproved address before the
-  hang-up.
+  `media.port_range`. The address PJSUA receives RTP from is checked too.
+- No RTP or RTCP packet is sent to such a destination. PJSUA starts its media
+  stream while it reads the answer (two RTCP packets before the ACK, the first
+  RTP packet 2-3 ms later) and sends two more RTCP packets as it hangs up, all
+  before or because of the stop. The softphone's **media guard** therefore
+  runs inside PJSUA (`lib/sippycup_softphone/media_guard.c`, preloaded with
+  `LD_PRELOAD`; it needs no capability and no packet filter): it gets the
+  call's media rules and drops, in `sendto()`, every RTP, RTCP, SRTP or other
+  non-SIP datagram whose destination address is not approved for media, or
+  whose RTP port is outside `media.port_range`. Signaling is never touched.
+  The driver does not dial until PJSUA's console shows the guard active with
+  exactly this call's rules (`call-not-placed` otherwise, nothing dialed), and
+  it hangs up as soon as the guard drops anything. The call prints
+  `Media guard: dropped 1 RTP and 4 RTCP packets addressed to ... before they
+  left; no media was sent there.`, and `result.json` records it as
+  `mediaGuard` (`active`, `rules`, `blocked.rtp`, `blocked.rtcp`,
+  `blocked.other`, `destinations`). PJSUA's own `RTP (PJSUA): sent N` counts a
+  dropped packet as sent; the Media guard line says how many of them never
+  left. `make smoke` checks the guard in the image.
 
 Behind a proxy or SBC the media address usually differs from the signaling
 address; approve both (see the practice proxy in `docs/PRACTICE-TARGET.md`).

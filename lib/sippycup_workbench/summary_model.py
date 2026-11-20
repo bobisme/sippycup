@@ -1170,7 +1170,11 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
             "peerApprovedBy": _media_rule(scope, media_peer),
             "peerRecordedRule": _ident(_dict(result.get("mediaScope")).get("admittedBy")),
             "peerPort": media_port,
-            "toPeerPackets": _int(tls_media.get("outbound")) if tls_media else rtp_tx,
+            "toPeerPackets": _int(tls_media.get("outbound")) if tls_media else _sent_after_guard(rtp_tx, result),
+            # bn-3l8o: RTP and RTCP the softphone's media guard dropped before
+            # they left (addressed outside the media scope); None when the
+            # guard was not active for the run.
+            "guardDropped": _guard_dropped(result),
             "fromPeerPackets": _int(tls_media.get("inbound")) if tls_media else rtp_rx,
             "countSource": "packet capture (decoded TLS media)" if tls_media else "test softphone call statistics",
             "stopPackets": _stop_packets(result),
@@ -1327,7 +1331,8 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
             "expectedStatus": _int(_dict(step.get("expectations")).get("finalStatus")),
             "met": _bool(output.get("met")),
             "registered": _bool(output.get("registered")),
-            "rtpToPeer": _int(rtp.get("txPackets")),
+            "rtpToPeer": _sent_after_guard(_int(rtp.get("txPackets")), output),
+            "guardDropped": _guard_dropped(output),
             "rtpFromPeer": _int(rtp.get("rxPackets")),
             "setupSeconds": _num(output.get("setupSeconds")),
             "codec": san.identifier(output.get("codec"), f"{case_prefix}.codec", limit=32) if output.get("codec") else None,
@@ -2234,6 +2239,32 @@ def _ceiling_check(model: dict[str, Any], scope: _Scope) -> list[dict[str, Any]]
 # Observations, findings, limitations
 
 
+def _guard_dropped(result: dict[str, Any]) -> dict[str, int] | None:
+    """``{"rtp": n, "rtcp": m}`` the media guard dropped, when it was active (result.json ``mediaGuard``)."""
+    guard = _dict(result.get("mediaGuard"))
+    if guard.get("active") is not True:
+        return None
+    blocked = _dict(guard.get("blocked"))
+    return {key: _int(blocked.get(key)) or 0 for key in ("rtp", "rtcp", "other")}
+
+
+def _sent_after_guard(rtp_tx: int | None, result: dict[str, Any]) -> int | None:
+    """The softphone's RTP count less what the media guard dropped before it left."""
+    dropped = _guard_dropped(result)
+    if rtp_tx is None or dropped is None:
+        return rtp_tx
+    return max(0, rtp_tx - dropped["rtp"])
+
+
+def _guard_sentence(dropped: Any) -> str | None:
+    if not isinstance(dropped, dict):
+        return None
+    return (
+        f"the media guard dropped the {dropped.get('rtp', 0)} RTP and {dropped.get('rtcp', 0)} RTCP packets "
+        "addressed to it before they left, so no media was sent to it"
+    )
+
+
 def _stop_detail(model: dict[str, Any]) -> str:
     """How much media reached an unapproved peer before the media-scope stop.
 
@@ -2243,6 +2274,8 @@ def _stop_detail(model: dict[str, Any]) -> str:
     """
     media = (model.get("details") or {}).get("media") or {}
     sent = media.get("toPeerPackets")
+    if model.get("verdict") == "media-outside-scope" and _guard_sentence(media.get("guardDropped")):
+        return f"; {_guard_sentence(media.get('guardDropped'))}, and the media-scope stop hung the call up"
     if model.get("verdict") != "media-outside-scope" or not isinstance(sent, int):
         return ""
     noun = "RTP packet was" if sent == 1 else "RTP packets were"
@@ -2287,6 +2320,9 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
                 f"RTP packets sent to that address before the stop: {sent}{_rtcp_words(details.get('media') or {})}."
                 if isinstance(sent, int) else None
             )
+            guarded = _guard_sentence((details.get("media") or {}).get("guardDropped"))
+            if guarded:
+                detail = guarded[0].upper() + guarded[1:] + "."
             found.append(_observation(verdict, run, detail))
         elif verdict in OBSERVATIONS:
             found.append(_observation(verdict, run))
@@ -2322,7 +2358,9 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
                 sent = case.get("rtpToPeer")
                 found.append(_observation(
                     "media-outside-scope", run,
-                    f"Step {case['step']}" + (f"; RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else "."),
+                    f"Step {case['step']}" + (
+                        f"; {_guard_sentence(case.get('guardDropped'))}." if _guard_sentence(case.get("guardDropped"))
+                        else f"; RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else "."),
                 ))
                 break
         if run.get("state") not in (None, "succeeded") and not run.get("notStarted") and not run.get("operatorStop"):

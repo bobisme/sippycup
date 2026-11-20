@@ -56,6 +56,25 @@ def main():
         "pid": os.getpid(),
     }
     codec = os.environ.get("FAKE_PJSUA_CODEC", "PCMU")
+    # bn-3l8o: stand in for the media guard library the driver preloads. With
+    # rules in the environment the real library prints one "active" line as
+    # PJSUA starts and one "blocked" line per datagram it drops.
+    # FAKE_PJSUA_GUARD: "loaded" (default), "absent" (prints nothing),
+    # "otherprog" or "otherrules" (an active line that is not this PJSUA's).
+    guard_rules = os.environ.get("SIPPYCUP_MEDIA_GUARD_RULES")
+    guard_mode = os.environ.get("FAKE_PJSUA_GUARD", "loaded")
+    guard_on = guard_rules is not None and guard_mode != "absent"
+    if guard_on:
+        shown = guard_rules[3:].replace(";", " ")
+        program = "sh" if guard_mode == "otherprog" else os.path.basename(sys.argv[0])
+        say(f"sippycup-media-guard: active v1 prog={program} "
+            + ("addr=* ports=*" if guard_mode == "otherrules" else shown))
+
+    def guard_drops(*items):
+        if guard_on:
+            for kind, address, port in items:
+                say(f"sippycup-media-guard: blocked {kind} to {address} port {port}")
+
     log_path = options["--log-file"][0]
     duration = int(options["--duration"][0])
     password = options.get("--password", [""])[0]
@@ -224,7 +243,8 @@ def main():
                     request(3, True)
                 disconnect("407 (Proxy Authentication Required)")
                 continue
-            if mode in ("answer", "outside", "badport", "oneway", "silent", "steer", "sdpsteer", "rtcpsteer"):
+            if mode in ("answer", "outside", "badport", "oneway", "silent", "steer", "sdpsteer", "rtcpsteer",
+                        "guardswitch"):
                 log_message(f"TX 900 bytes Request msg INVITE/cseq=1 (tdta0x1) to {transport_name} {outbound_hop}:",
                             [f"INVITE {command} SIP/2.0", "Content-Type: application/sdp", "", *offer_sdp()])
                 if use_srtp == 2 and srtp_peer == "plain":
@@ -247,6 +267,16 @@ def main():
                                 ["ACK sip:far@198.51.100.77:5060 SIP/2.0", "Content-Length: 0"])
                     record["ack_to"] = steer_host
                     save()
+                # What PJSUA does as it processes the answer: two RTCP packets
+                # at once and the first RTP packet, all to the SDP's address.
+                if mode == "sdpsteer":
+                    guard_drops(("RTCP", "198.51.100.88", 4001), ("RTCP", "198.51.100.88", 4001),
+                                ("RTP", "198.51.100.88", 4000))
+                elif mode == "rtcpsteer":
+                    guard_drops(("RTCP", "198.51.100.99", 4001), ("RTCP", "198.51.100.99", 4001))
+                elif mode == "guardswitch":
+                    # In-scope SDP, but PJSUA then addresses RTP elsewhere.
+                    guard_drops(("RTP", "198.51.100.55", 4000))
                 if srtp_active:
                     log_line(f"{stamp()} srtp0x1  .SRTP started, keying=SDES, crypto=AES_CM_128_HMAC_SHA1_80")
                 log_line("Incoming Response msg 200/INVITE/cseq=1 (rdata0x1) in state Proceeding")
@@ -284,6 +314,12 @@ def main():
         elif command == "h":
             if state["dialed"] and not state["disconnected"]:
                 record.setdefault("hangups", []).append("BYE" if state["confirmed"] else "CANCEL")
+                if state["confirmed"] and mode in ("sdpsteer", "rtcpsteer"):
+                    # The hang-up itself sends two more RTCP packets (RTCP BYE).
+                    where = ("198.51.100.88", 4001) if mode == "sdpsteer" else ("198.51.100.99", 4001)
+                    # The first of them lands behind PJSUA's prompt, on one line.
+                    sys.stdout.write(">>> ")
+                    guard_drops(("RTCP", *where), ("RTCP", *where))
                 save()
                 disconnect("200 (OK)" if state["confirmed"] else "487 (Request Terminated)")
         elif command == "q":

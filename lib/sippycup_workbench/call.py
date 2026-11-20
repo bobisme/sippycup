@@ -856,6 +856,9 @@ def dry_run_plan(
         "capture_filter": scope,
         "capture_interface": str(document.get("capture", {}).get("interface", "any")),
         "executor": "./bin/sippycup call runs these steps in one isolated container",
+        # Finding 17: where media may go, in rehearse's words, and what
+        # happens to media for any other address (bn-3l8o).
+        "media_where": _media_where(document),
         # The same read-only count the reservation makes (bn-y3er).
         "calls": calls.as_dict(),
         "calls_line": calls.line(1, "call"),
@@ -1074,18 +1077,50 @@ def _peer_unknown_but_approved(
     return all(scope.admits(item) for item in remote_media)
 
 
+def media_guard_text(guard: Any, *, name_destinations: bool = False) -> str | None:
+    """What the softphone's media guard did, in one sentence; ``None`` without a record.
+
+    ``guard`` is the driver's ``media_guard`` (result.json ``mediaGuard``):
+    the RTP, RTCP and other media datagrams it dropped before they left.
+    The destinations are named only for the operator's terminal
+    (``name_destinations``): a result note reaches the owner report, which
+    never shows an address that is not approved.
+    """
+    if not isinstance(guard, dict):
+        return None
+    if guard.get("active") is not True:
+        return (
+            "The media guard was NOT active for this call (it is part of the toolbox image), so the "
+            "packets PJSUA sent before the hang-up may have reached that address."
+        )
+    blocked = guard.get("blocked") if isinstance(guard.get("blocked"), dict) else {}
+    rtp, rtcp, other = (int(blocked.get(key) or 0) for key in ("rtp", "rtcp", "other"))
+    if not rtp + rtcp + other:
+        return None
+    where = (", ".join(str(item) for item in guard.get("destinations") or []) if name_destinations else "") \
+        or "that address"
+    return (
+        f"The media guard dropped {rtp} RTP and {rtcp} RTCP packet{'s' if rtp + rtcp != 1 else ''}"
+        + (f" and {other} other media datagram{'s' if other != 1 else ''}" if other else "")
+        + (" (at least; the list was cut)" if guard.get("listTruncated") else "")
+        + f" addressed to {where} before they left; no media was sent there."
+    )
+
+
 def _scope_stop_note(softphone: dict[str, Any], media_networks: Sequence[str]) -> str:
     decision = softphone.get("media_scope") if isinstance(softphone.get("media_scope"), dict) else {}
     ports = (decision.get("rules") or {}).get("mediaPorts")
+    guard = media_guard_text(softphone.get("media_guard"))
+    guard = f" {guard}" if guard else ""
     if decision.get("admittedBy") and decision.get("portAdmitted") is False and ports:
         return (
             f"The negotiated media port is outside the approved media port range {ports[0]}-{ports[1]}; "
-            "the call was hung up."
+            "the call was hung up." + guard
         )
     return (
         "The negotiated media peer is not an approved address"
         + (" and not inside an approved media network" if media_networks else "")
-        + "; the call was hung up."
+        + "; the call was hung up." + guard
     )
 
 
@@ -1295,6 +1330,20 @@ def _classify_core(
             else "TLS verification was not confirmed by PJSUA."
         )
         return "failed", "tls-not-verified", EXIT_NOT_PASS, notes
+    if error in ("media_guard_unavailable", "media_guard_not_active"):
+        # bn-3l8o: never dial without the guard that keeps media in scope.
+        notes.append(
+            "The softphone's media guard, which drops RTP and RTCP for addresses outside the approved "
+            "media scope, "
+            + (
+                "is missing from this image, so PJSUA was not started and nothing was sent by it."
+                if error == "media_guard_unavailable"
+                else "did not report itself active inside PJSUA, so the call was not dialed: no INVITE "
+                "and no media were sent (PJSUA may have registered with the approved target)."
+            )
+            + " Rebuild the image (make build), run ./bin/sippycup doctor, and repeat the call."
+        )
+        return "failed", "call-not-placed", EXIT_NOT_PASS, notes
     if error in ("tls_name_pinning_unavailable", "tls_name_pinning_mismatch"):
         notes.append(
             "The reviewed TLS server name could not be pinned to the literal address in a private "
@@ -1880,7 +1929,17 @@ def _network_activity(
             # signaling target; say where the RTP really went.
             peer = str(softphone.get("media_peer") or "")
             peer_host = peer.rsplit(":", 1)[0].strip("[]") if peer else ""
-            if rtp and softphone.get("error") == "media_peer_outside_scope":
+            guard = softphone.get("media_guard") if isinstance(softphone.get("media_guard"), dict) else {}
+            if softphone.get("error") == "media_peer_outside_scope" and guard.get("active") is True:
+                # bn-3l8o: the guard dropped that media before it left. Never
+                # name an unapproved address in the activity statement.
+                dropped = sum(int(value or 0) for value in (guard.get("blocked") or {}).values())
+                media_elsewhere = (
+                    ", no RTP or RTCP to the media peer outside the approved addresses (the media guard "
+                    f"dropped {dropped} packet{'s' if dropped != 1 else ''} before they left; "
+                    "the call was hung up),"
+                )
+            elif rtp and softphone.get("error") == "media_peer_outside_scope":
                 # Never name an unapproved address in the activity statement;
                 # the result's softphone facts record it for review.
                 media_elsewhere = ", RTP with a media peer outside the approved addresses until the media-scope stop,"
@@ -2631,6 +2690,8 @@ def _execute(
         "durationSeconds": {"requested": options.duration, "limit": limit, "effective": duration},
         "captureFilter": scope,
         "mediaScope": _media_scope_record(softphone_call, softphone_result),
+        # bn-3l8o: what the media guard dropped before it left (RTP and RTCP).
+        "mediaGuard": (softphone_result or {}).get("media_guard"),
         "preflight": None if preflight_ok is None else {"ok": preflight_ok, "detail": _read_preflight(run_dir)},
         "softphone": None if softphone_result is None else {
             key: softphone_result.get(key)
@@ -2667,6 +2728,16 @@ def _execute(
     except Exception as error:  # evidence failure must not hide the call verdict
         value["evidencePrivacy"] = f"manifest-error: {type(error).__name__}"
     return exit_code, value
+
+
+def _media_where(document: dict[str, Any]) -> list[str]:
+    from .media_scope import GUARD_STATEMENT, where_lines
+
+    try:
+        lines = where_lines(document)
+    except (ValueError, TypeError, AttributeError):
+        return []
+    return [*lines, f"Media stop: {GUARD_STATEMENT}"] if lines else []
 
 
 def _media_scope_parameters(document: dict[str, Any]) -> dict[str, Any]:
@@ -2806,6 +2877,9 @@ def render_human(value: dict[str, Any]) -> str:
                 "(no SIP INFO or in-band fallback)"
             )
         )
+        if value.get("media_where"):
+            lines.append("Where signaling and media may go:")
+            lines.extend(f"  {line}" for line in value["media_where"])
         lines.append(f"Capture filter: {value['capture_filter']}")
         lines.append(value["executor"] + " (capture, preflight, call, report, triage, assert).")
         lines.append("This command sent no packets.")
@@ -2877,6 +2951,11 @@ def render_human(value: dict[str, Any]) -> str:
             "  RTP (PJSUA):  "
             + f"sent {tx if tx is not None else 'unknown'}, received {rx if rx is not None else 'unknown'}"
             + (f", codec {softphone['codec']}" if softphone["codec"] else "")
+            + (
+                " (PJSUA's own count; the media guard dropped what was addressed outside the scope, see Media guard)"
+                if any(((value.get("mediaGuard") or {}).get("blocked") or {}).values())
+                else ""
+            )
         )
     codec = value.get("codec")
     if codec and (codec.get("offered") or codec.get("answered")):
@@ -2961,6 +3040,10 @@ def render_human(value: dict[str, Any]) -> str:
             )
             + ("; port outside the approved media port range" if scope_record.get("portAdmitted") is False else "")
         )
+    guard_line = media_guard_text(value.get("mediaGuard"), name_destinations=True)
+    if guard_line and (value.get("verdict") == "media-outside-scope"
+                       or (value.get("mediaGuard") or {}).get("active") is True):
+        lines.append(f"  Media guard:  {guard_line.removeprefix('The media guard ')}")
     recording = value.get("recording")
     if recording and recording.get("present") and recording.get("readable"):
         silent = recording.get("silent")

@@ -50,9 +50,10 @@ from practice_gate import LAUNCHER, GateFailure  # noqa: E402
 from sippycup import practice  # noqa: E402
 
 CALL_SECONDS = "3"
-# The media-scope stop must hang up within this many RTP packets sent to the
-# unapproved media address (it was about 27 before the early call dump).
-SCOPE_STOP_MAX_PACKETS = 10
+# bn-3l8o: the media-scope stop lets no RTP and no RTCP packet leave for the
+# unapproved media address. (Before the media guard PJSUA got 1 RTP and 4 RTCP
+# packets out: two RTCP before the ACK, two more as it hung up.)
+SCOPE_STOP_MAX_PACKETS = 0
 # The calls the whole gate may place under the practice approval from its own
 # directory: the signaling-only call, the legacy campaign and the INVITE
 # attempts of both checks runs share one count (bn-2sfn), about 8 in all.
@@ -362,19 +363,57 @@ class ProxyGate(practice_gate.Gate):
             "--dial", "echo", "--duration", CALL_SECONDS,
             "--username", "practice", "--secret-file", "work/practice/account.password",
         )
+        self.record_stop(
+            "only the proxy approved: media-outside-scope stops the call; the media guard dropped the RTP and "
+            "RTCP addressed to the unapproved media address (this capture's filter does not cover that address)",
+            status, value,
+        )
+        # The owner's media answer lists no address at all, on the direct
+        # target: signaling and (unlisted) media are the same address, so the
+        # call's own capture covers it and shows what really left.
+        source = practice.state_dir(self.project) / "target-profile.yaml"
+        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+        document["name"] = "proxy-gate-direct-no-media"
+        document["media"] = {"addresses": [], "port_range": {"start": 20000, "end": 20019}}
+        document["limits"]["max_calls"] = GATE_CALL_BUDGET
+        practice.write_private(self.host_path("direct-no-media.yaml"),
+                               yaml.safe_dump(document, sort_keys=False))
+        status, value = self.guided(
+            self.work_path("direct-no-media.yaml"), "scope-direct",
+            "--dial", "echo", "--duration", CALL_SECONDS,
+            "--username", "practice", "--secret-file", "work/practice/account.password",
+        )
+        self.record_stop(
+            "signaling address not listed for media (direct): media-outside-scope, and the call's capture, "
+            f"which covers that address, holds at most {SCOPE_STOP_MAX_PACKETS} RTP or RTCP packets to it",
+            status, value, captured=True,
+        )
+
+    def record_stop(self, name: str, status: int, value: dict[str, Any], *, captured: bool = False) -> None:
+        """One media-scope stop: verdict, the guard's own record, and the capture."""
         sent = self.tshark_count(
             self.call_capture(value),
             f"ip.src == {practice.CALLER_ADDRESS} && ip.dst == {self.address} "
-            "&& udp.dstport >= 20000 && udp.dstport <= 20019",
+            "&& udp.dstport >= 20000 && udp.dstport <= 20020",
+        )
+        covered = self.tshark_count(
+            self.call_capture(value), f"ip.dst == {self.address} && udp.dstport == 5060",
         )
         peer = str((value.get("softphone") or {}).get("media_peer") or "")
+        guard = value.get("mediaGuard") or {}
+        blocked = guard.get("blocked") or {}
         self.record(
-            "only the proxy approved: media-outside-scope stops the call "
-            f"(at most {SCOPE_STOP_MAX_PACKETS} RTP packets to the unapproved media address)",
+            name,
             status == 1 and value.get("verdict") == "media-outside-scope"
-            and peer.startswith(self.address + ":") and sent <= SCOPE_STOP_MAX_PACKETS,
+            and peer.startswith(self.address + ":") and sent <= SCOPE_STOP_MAX_PACKETS
+            and guard.get("active") is True and guard.get("listTruncated") is False
+            # The stop was exercised: PJSUA did address media there, RTCP included.
+            and int(blocked.get("rtcp") or 0) >= 2
+            and int(blocked.get("rtp") or 0) + int(blocked.get("rtcp") or 0) <= 10
+            and (covered > 0 if captured else True),
             {"exit": status, "verdict": value.get("verdict"), "media_peer": peer,
-             "rtp_sent_to_media": sent},
+             "media_packets_to_peer_in_capture": sent, "capture_covers_peer": covered > 0,
+             "guard": guard},
         )
 
     def campaign(self, manifest: str, label: str) -> tuple[int, dict[str, Any], list[dict[str, Any]], Path | None]:

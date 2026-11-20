@@ -247,7 +247,7 @@ from the recorded artifacts, and lists any exception at the top:
 |---|---|
 | `target-not-approved` | A run, step, or preflight target is not in any approved address, port, and transport set (an owner-approved media network never counts here: it admits media only) |
 | `target-not-literal` | A recorded target is not a literal address |
-| `media-peer-not-approved` | A call's negotiated media peer is neither an approved address nor inside an approved media network (scope `media.networks`, profile `media.networks`); each call's `details.media.peerApprovedBy` says which rule approved it (`approved-address` or `media-network`) and `peerRecordedRule` what the run itself recorded |
+| `media-peer-not-approved` | A call's negotiated media peer is neither an approved address nor inside an approved media network (scope `media.networks`, profile `media.networks`); each call's `details.media.peerApprovedBy` says which rule approved it (`approved-address` or `media-network`) and `peerRecordedRule` what the run itself recorded. For a call the media-scope stop hung up, the detail states what the softphone's media guard dropped ("the media guard dropped the 1 RTP and 4 RTCP packets addressed to it before they left, so no media was sent to it"; `details.media.guardDropped`, and `toPeerPackets` no longer counts them); a run from before the guard keeps "after N RTP packets were sent to it" |
 | `outside-approval-window` | A run's start or end lies outside every window that covers its target |
 | `approval-not-active` | The covering record is not in `approved` status |
 | `ceiling-exceeded` | Recorded packets, bytes, calls, or call time exceed the frozen ceiling |

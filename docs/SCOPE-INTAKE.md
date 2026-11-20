@@ -574,9 +574,13 @@ media-server pool(s), each of at most 1024 addresses, or the literal media
 addresses.
 
 Leave the media address out and the guided call ends `media-outside-scope` as
-soon as the peer is known, a safety stop that the cockpit marks `[stop]` and
-the owner report discloses as an integrity exception with the RTP packets sent
-before the hangup. `./bin/sippycup practice-target rehearsal --proxy`
+soon as the peer is known, a safety stop that the cockpit marks `[stop]`. No
+RTP or RTCP packet is sent to the unlisted address: the softphone's media
+guard drops what PJSUA addresses there before it leaves (see "Scope stops" in
+`GUIDED-CALL.md`), which is what question 12 promises the owner ("We send
+media only to these addresses and ranges ... A call stops by itself if your
+side offers media anywhere else"). The owner report still lists the stop as
+an integrity exception and states the RTP and RTCP packets the guard dropped. `./bin/sippycup practice-target rehearsal --proxy`
 rehearses exactly this shape and that stop, and `rehearsal --media-cidr` the
 same with media answered as a range (see `PRACTICE-TARGET.md`).
 

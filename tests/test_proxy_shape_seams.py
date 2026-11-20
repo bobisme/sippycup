@@ -178,6 +178,19 @@ class CockpitSafetyStopTests(unittest.TestCase):
         self.assertEqual("Safety stop", summary["facts"][0][0])
         self.assertIn("[stop]", run_line(1, summary))
 
+    def test_a_guarded_stop_says_the_packets_were_dropped_not_sent(self) -> None:
+        # bn-3l8o: PJSUA counts a packet the media guard dropped as sent.
+        document = {
+            "verdict": "media-outside-scope", "state": "failed", "notes": ["x"],
+            "softphone": {"media_peer": "127.0.0.2:20004", "rtp_tx_packets": 1, "error": "media_peer_outside_scope"},
+            "mediaGuard": {"active": True, "blocked": {"rtp": 1, "rtcp": 4, "other": 0}},
+        }
+        summary: dict = {"relative": "calls/R", "kind": "call", "readable": True, "time": "t"}
+        _call_summary(document, summary)
+        self.assertIn("the media guard dropped the 1 RTP and 4 RTCP packets addressed there; none were sent",
+                      summary["reason"])
+        self.assertNotIn("after 1 RTP packet", summary["reason"])
+
     def test_an_ordinary_failure_keeps_its_marker(self) -> None:
         summary: dict = {"relative": "calls/R", "kind": "call", "readable": True, "time": "t"}
         _call_summary({"verdict": "no-answer", "notes": ["nobody answered"]}, summary)

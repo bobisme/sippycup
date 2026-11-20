@@ -257,6 +257,10 @@ class SoftphoneResult:
     # (signaling) or that the far end's SDP named (media), from the message
     # log watched during the call; ``None`` when there was none.
     scope_violation: dict[str, Any] | None = None
+    # bn-3l8o: the media guard preloaded into PJSUA (see media_guard_rules):
+    # whether it was active and how many RTP, RTCP and other media datagrams
+    # it dropped before they left; ``None`` when the call had no media scope.
+    media_guard: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -851,6 +855,88 @@ class _ScopeWatch:
         return None
 
 
+# -- bn-3l8o: the media guard ---------------------------------------------------
+#
+# PJSUA creates and starts its media stream while it processes the far end's
+# SDP answer: two RTCP packets leave before the ACK, the first RTP packet
+# 2-3 ms later, and the hang-up itself sends two more RTCP packets (the RTCP
+# BYE). The watch above sees the SDP only afterwards, so by itself it stops
+# the call but not those packets. ``media_guard.c`` is therefore preloaded
+# into PJSUA (LD_PRELOAD) with the call's media rules and drops, inside
+# sendto()/send(), every RTP/RTCP datagram to a destination the rules do not
+# admit. The driver proves the guard is loaded before it dials, counts what
+# the guard dropped from PJSUA's console, and still hangs the call up.
+
+MEDIA_GUARD_LIBRARY_ENV = "SIPPYCUP_MEDIA_GUARD_LIBRARY"
+MEDIA_GUARD_RULES_ENV = "SIPPYCUP_MEDIA_GUARD_RULES"
+# Where the toolbox image installs the library (Containerfile). Used when the
+# variable is not in the environment (a runner started with a reduced one), so
+# inside the image a call with a media scope never runs without the guard.
+MEDIA_GUARD_INSTALLED = Path("/usr/local/lib/sippycup-media-guard.so")
+MEDIA_GUARD_MAX_RULES = 256
+_GUARD_ACTIVE = re.compile(r"^sippycup-media-guard: active v1 prog=(\S+) (addr=\S+ ports=\S+)\s*$")
+_GUARD_BLOCKED = re.compile(r"^sippycup-media-guard: blocked (RTP|RTCP|OTHER) to (\S+) port (\d+)\s*$")
+_GUARD_MORE = "sippycup-media-guard: more datagrams are being blocked"
+
+
+def has_media_scope(call: SoftphoneCall) -> bool:
+    """Whether the call carries any media rule (address, network or port)."""
+    return (
+        call.allowed_media_addresses is not None
+        or call.allowed_media_networks is not None
+        or call.allowed_media_ports is not None
+    )
+
+
+def media_guard_rules(call: SoftphoneCall) -> str | None:
+    """The call's media rules in the guard's format, or ``None`` without a scope.
+
+    ``v1;addr=LIST;ports=RANGE``: LIST is ``*`` (no address rule), ``-`` (no
+    address is admitted) or the approved addresses and media networks as
+    CIDR; RANGE is ``*`` or ``START-END``. The same rules as
+    :func:`media_destination_refusal`: an address must be inside LIST, and an
+    RTP (not RTCP) port inside RANGE.
+    """
+    if not has_media_scope(call):
+        return None
+    if call.allowed_media_addresses is None and call.allowed_media_networks is None:
+        addresses = "*"
+    else:
+        items: list[str] = []
+        for address in call.allowed_media_addresses or ():
+            parsed = ipaddress.ip_address(_literal_address(address))
+            items.append(f"{parsed}/{parsed.max_prefixlen}")
+        for network in call.allowed_media_networks or ():
+            items.append(str(ipaddress.ip_network(network)))
+        items = list(dict.fromkeys(items))
+        if len(items) > MEDIA_GUARD_MAX_RULES:
+            raise SoftphoneError(
+                f"the media scope has {len(items)} address rules; the media guard takes at most "
+                f"{MEDIA_GUARD_MAX_RULES}"
+            )
+        addresses = ",".join(items) if items else "-"
+    ports = "*" if call.allowed_media_ports is None else "{}-{}".format(*call.allowed_media_ports)
+    return f"v1;addr={addresses};ports={ports}"
+
+
+def media_guard_library() -> str | None:
+    """The guard library this process must preload into PJSUA, or ``None``.
+
+    ``SIPPYCUP_MEDIA_GUARD_LIBRARY`` when set (the image sets it; a missing
+    file then refuses the call), else the image's install path when that
+    file exists. ``None`` only outside the image (host unit tests with a
+    fake PJSUA), where the call's result records the guard as not active.
+    """
+    configured = os.environ.get(MEDIA_GUARD_LIBRARY_ENV)
+    if configured:
+        return configured
+    return str(MEDIA_GUARD_INSTALLED) if MEDIA_GUARD_INSTALLED.is_file() else None
+
+
+def _guard_destination(address: str, port: str) -> str:
+    return f"[{address}]:{port}" if ":" in address else f"{address}:{port}"
+
+
 def _kill_now(process: subprocess.Popen[bytes]) -> None:
     """SIGKILL PJSUA's process group: a graceful quit would hang up (BYE) along the bad route."""
     try:
@@ -1320,6 +1406,7 @@ def place_call(
     session, so a supervisor's process-group kill would not reach it.
     """
     uri = _validate(call, password)
+    guard_rules = media_guard_rules(call)
     result = SoftphoneResult(destination_uri=uri)
     if call.transport == "tls":
         result.tls_verified = False
@@ -1338,7 +1425,36 @@ def place_call(
     def mark(state: str) -> None:
         result.timeline.append({"state": state, "at": round(clock() - started, 3)})
 
+    # bn-3l8o: the media guard. Where the library is configured (the toolbox
+    # image sets SIPPYCUP_MEDIA_GUARD_LIBRARY) a call with a media scope does
+    # not start without it and is not dialed until PJSUA's console shows the
+    # guard active with exactly these rules.
+    guard_library = media_guard_library() if guard_rules is not None else None
+    guard_echo = None if guard_rules is None else guard_rules[len("v1;"):].replace(";", " ")
+    guard_program = Path(pjsua).name
+    guard_active = False
+    guard_blocked = {"rtp": 0, "rtcp": 0, "other": 0}
+    guard_destinations: list[str] = []
+    guard_truncated = False
+    if guard_rules is not None:
+        result.media_guard = {
+            "active": False,
+            "library": guard_library,
+            "rules": guard_echo,
+            "blocked": dict(guard_blocked),
+            "destinations": [],
+            "listTruncated": False,
+        }
+
     try:
+        if guard_library is not None and not Path(guard_library).is_file():
+            # Nothing was started and nothing was sent.
+            result.error = "media_guard_unavailable"
+            return result
+        if guard_library is not None:
+            base = os.environ if environment is None else environment
+            preload = " ".join(item for item in (guard_library, base.get("LD_PRELOAD")) if item)
+            environment = {**base, "LD_PRELOAD": preload, MEDIA_GUARD_RULES_ENV: guard_rules or ""}
         argv = [pjsua, "--config-file", str(config_path)]
         if call.tls_server_name is not None:
             # Pin the reviewed name to the literal before PJSUA exists; refuse
@@ -1422,8 +1538,29 @@ def place_call(
 
         def consume() -> None:
             nonlocal read_index, ready, confirmed_at, disconnected, hangup_by
+            nonlocal guard_active, guard_truncated
             for line in console.lines_from(read_index):
                 read_index += 1
+                marker = line.find("sippycup-media-guard: ")
+                if marker >= 0:
+                    # The guard writes whole lines to the same terminal as
+                    # PJSUA, so one can follow PJSUA's prompt (">>> ") on a
+                    # line; what precedes it is still PJSUA's.
+                    guard_line, line = line[marker:], line[:marker]
+                    if (match := _GUARD_ACTIVE.match(guard_line)) is not None:
+                        if match.group(1) == guard_program and match.group(2) == guard_echo:
+                            guard_active = True
+                    elif (match := _GUARD_BLOCKED.match(guard_line)) is not None:
+                        guard_blocked[match.group(1).lower()] += 1
+                        destination = _guard_destination(match.group(2), match.group(3))
+                        if destination not in guard_destinations and len(guard_destinations) < 8:
+                            guard_destinations.append(destination)
+                    elif guard_line.startswith(_GUARD_MORE):
+                        guard_truncated = True
+                    else:
+                        # An unreadable guard line (or its error line): the
+                        # counts can no longer be trusted to be complete.
+                        guard_truncated = True
                 if _READY.search(line):
                     ready = True
                 if (match := _STATE.search(line)) is not None:
@@ -1494,8 +1631,23 @@ def place_call(
                 result.error = "media_peer_outside_scope"
                 hang_up("scope")
                 continue
+            if not stopping and any(guard_blocked.values()):
+                # The guard dropped media PJSUA addressed outside the scope
+                # (for example after PJSUA moved to the address RTP arrived
+                # from) before the SDP watch saw a reason: stop all the same.
+                stopping = True
+                result.error = "media_peer_outside_scope"
+                hang_up("scope")
+                continue
             if phase == "starting":
-                if ready:
+                if ready and guard_library is not None and not guard_active:
+                    # Never dial without the guard. PJSUA may already have
+                    # sent its REGISTER to the approved target; no INVITE
+                    # was sent and no media can have started.
+                    result.error = "media_guard_not_active"
+                    stopping = True
+                    quit_now()
+                elif ready:
                     # PJSUA has parsed its configuration; remove the secret now.
                     config_path.unlink(missing_ok=True)
                     if call.account is not None and call.account.registrar is not None:
@@ -1656,6 +1808,18 @@ def place_call(
         if result.error is None and _media_outside_scope(call, result.media_peer):
             result.error = "media_peer_outside_scope"
         result.media_scope = media_scope_decision(call, result.media_peer)
+        if result.media_guard is not None:
+            result.media_guard.update(
+                active=guard_active,
+                blocked=dict(guard_blocked),
+                destinations=list(guard_destinations),
+                listTruncated=guard_truncated,
+            )
+            if any(guard_blocked.values()):
+                if result.error is None:
+                    result.error = "media_peer_outside_scope"
+                if result.media_scope is not None:
+                    result.media_scope["inScope"] = False
         if result.scope_violation is not None and result.scope_violation["kind"] == "media" and result.media_scope:
             # The far end's SDP, not the received-RTP peer, decided this.
             result.media_scope["inScope"] = False
