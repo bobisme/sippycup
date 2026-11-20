@@ -434,7 +434,10 @@ class ReportTests(unittest.TestCase):
     def setUp(self):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
-        self.root = Path(self._temporary.name) / "engagement"
+        # The fixture records the practice bench, made before the call
+        # ledger: its calls ran under the bench budget, so it lives where the
+        # bench lives (an engagement elsewhere counts its calls, bn-y3er).
+        self.root = Path(self._temporary.name) / "work" / "practice"
         shutil.copytree(self.FIXTURE, self.root)
         self.result_path = self.root / "calls" / self.PASS_CALL / "result.json"
 

@@ -23,6 +23,7 @@ which has no route off the host. No external host was contacted.
 | 4 | Low | `approved_addresses` accepted a YAML integer (`2130706433` is 127.0.0.1), non-canonical spellings, and unspecified, multicast or broadcast addresses. | Fixed |
 | 5 | High | `campaign run` has no approval window and no approval status. A frozen plan runs after `valid_until`, after revocation, and a long campaign can cross the window's end. | Fixed (bn-3vxl) |
 | 6 | Medium | Ceilings are per process and per invocation. Two commands at once (two terminals, or the cockpit and a shell) each get the full ceiling, and `max_calls` is not a budget across repeated `call` runs. | Fixed for the call limit (bn-2sfn); other ceilings stay per run |
+| R2-4 | Low | Rehearsal 2: a copied profile with its compile header removed, or a profile edited together with its recorded hash, is sent from; the first starts a new count in a subdirectory. Both are deliberate rewrites of the engagement's own files. | Documented: the checks stop honest mistakes, not deliberate rewrites |
 | 7 | Medium | Some senders are not bound to a profile at all: `preflight HOST`, `media send`, `shell` and `--`. `media send` took its destination from the session's remote SDP and would send its canary to any literal unicast address (bn-328). | Fixed for `media send`; `preflight` can be bound and says when it is not; `shell` and `--` say UNBOUND (bn-328, bn-3df) |
 | 8 | Medium | No kernel egress filter. Findings 1 and 2 are now caught within one poll interval, but a few packets still leave before the stop, and a host name in a far-end URI or SDP causes a DNS lookup first. | Reported (design) |
 | 9 | Low | Campaign run artifacts (including `capture.pcap`) are written mode 0644 in a 0755 `runs/` directory; call and checks runs are 0600/0700. | Fixed (bn-3vxl) |
@@ -187,27 +188,86 @@ engagement directory that holds the profile or manifest:
   commands started at once cannot both pass.
 - A command whose calls would bring the total under that approval id above
   the limit is refused with exit 2 and sends nothing. The message says how
-  many calls were placed, how many remain, and that only the owner can raise
+  many calls are counted, how many remain, and that only the owner can raise
   `limits.calls` in `ENG/scope.yaml` (then `scope compile`). `call --dry-run`,
-  `matrix plan` and `checks plan` show the same refusal.
-- An attempted call counts, whatever happened to it. A reserved call that
-  sent nothing (refused at the gate, capture failed, no step started) is
-  released again. A checks run that sent any request keeps its whole
-  reservation.
-- Fail closed: an unreadable, malformed or truncated ledger refuses, and so
-  does a missing ledger while `ENG/calls`, `matrix`, `runs` or `checks` hold
-  runs under the same approval id. The message gives the recovery: restore the
-  ledger from the backup of the engagement directory, or ask the owner for a
-  new approval id. Do not create an empty ledger. Each run records the
-  reservation that counted it (`callLedger` in `result.json`), so a run placed
-  here with `--run-root` from another engagement, whose ledger holds that
-  reservation, is not taken for an uncounted one.
-- `summary` counts the calls of every owner run per approval id, in start
-  order, and raises `call-limit-exceeded` for a run that took the total above
-  the limit (the smaller of the ceiling recorded with the run and
-  `limits.calls` of a scope file with the same approval id). This includes
-  overruns from before this fix. The executive summary then does not say that
-  every run fell inside the approval.
+  `matrix plan`, `checks plan`, `campaign plan` and `rehearse` show the same
+  refusal. An unreadable, malformed or truncated ledger line refuses too.
+- What consumes a call is one rule for `call`, `matrix run`, `campaign run`
+  and `checks run` (bn-y3er): the owner's limit is on calls, so a reserved
+  call that no INVITE can have left for is released again, with the reason in
+  the ledger (`release` entry). That covers a command stopped before its first
+  packet, a preflight that got no answer, a registration that failed (the
+  softphone never dialed), a campaign step that never started, and a security
+  check that sent no request at all. From the first INVITE on, the call
+  counts, whatever happened to it. Where a command cannot tell, it counts: a
+  campaign step run by SIPp once it started, a security check that sent any
+  request (its request log does not name every INVITE: on TCP and TLS the
+  first request of a connection is logged as the connection), and a call
+  whose softphone stopped with an internal error. A refusal says "already
+  counted" (placed, plus reserved by a command that may still be running),
+  never "placed" for calls that were only reserved.
+- The cross-check (bn-y3er): on every reservation, and on every read-only
+  count, the ledger must account for every run directory of the engagement
+  that placed or may have placed calls under the approval, whether or not the
+  ledger file exists. It reads the run directories directly under
+  `ENG/calls`, `matrix`, `runs` and `checks` (at most 5000). A run is under
+  the approval when its `profile.json`, `plan.json` or `result.json` says so,
+  and also when they cannot be read; a campaign whose readable plan names no
+  approval is unbound and not counted (see below). A run may have placed calls
+  unless its own record shows it could not: a campaign plan that budgets no
+  call, a checks plan with no INVITE attempt, or a checks run that sent no
+  request. Each run names the reservation that counted it, in
+  `call-ledger.json` as soon as the run directory exists and in `result.json`
+  (`callLedger`). A run is accounted for when
+  1. it names a reservation of this approval that is in this ledger (one
+     matrix or campaign reservation covers every run that names it);
+  2. it names a reservation in another engagement's ledger that exists and
+     holds it (a run placed here with `--run-root` from that engagement); or
+  3. on the practice bench only, it started before the latest
+     `new-approval-window` (earlier windows, and runs from before the ledger).
+
+  Any other run is unaccounted for, and the command refuses with exit 2,
+  sends nothing, and names the runs and why each is not accounted for. So an
+  emptied, shortened, replaced or deleted ledger cannot start a new count
+  while the run directories show calls. A run from before the ledger existed
+  names no reservation, so outside the practice bench it is unaccounted for
+  too. The recovery, in the message: restore `ENG/call-ledger.jsonl` from the
+  backup of the engagement directory, or ask the owner for a new approval id.
+  The message says what happens otherwise: an empty, shortened or new ledger
+  is refused the same way. Runs placed with `--run-root` outside those four
+  directories are not read: the ledger counted them when they were placed,
+  and the cross-check only catches a ledger that holds fewer calls than the
+  disk shows.
+- `Calls: N of M used, K left` (bn-y3er), computed read-only by the same
+  count, cross-check included, is printed by `rehearse` (which is `Ready: no`
+  with the refusal when none are left), `ready` (`Calls left` line, NO-GO
+  when none are left or the ledger cannot be trusted, and which of the two),
+  the cockpit's LIVE confirmation panel, `call --dry-run`, `matrix plan`,
+  `checks plan` and `campaign plan`. The plans add how many calls the command
+  would place. `campaign plan` writes no plan that the remaining calls cannot
+  cover (exit 2), like `matrix plan` and `checks plan`, which are BLOCKED: a
+  frozen plan that can never run is a trap for the operator, and raising the
+  limit needs a new `scope compile`, which makes the old plan stale anyway.
+- `summary` counts the calls of every run per approval id, in start order,
+  and raises `call-limit-exceeded` for a run that took the total above the
+  limit (the smaller of the ceiling recorded with the run and `limits.calls`
+  of a scope file with the same approval id). Only runs of the practice bench
+  are left out: a run whose profile is an archived practice approval, whose
+  reservation is in `work/practice/call-ledger.jsonl`, or that lies beneath
+  `work/practice`. An engagement directory that rehearses under the practice
+  approval id `LOCAL-PRACTICE-ONLY` is an engagement, and its runs count
+  (before bn-y3er the approval id alone excluded them, so a rehearsal never
+  showed this exception). The report also reads the engagement's ledger: it
+  states, per approval, the approved call limit, the calls counted in the
+  ledger, and the calls left, raises `call-limit-exceeded` when the ledger
+  counts more than the limit, and `call-ledger-unaccounted` when the
+  cross-check fails. When the limit was exceeded, the executive summary says
+  so in a sentence of its own and never says that every run fell inside the
+  approval. It also gives the calls the runs in the report placed: with this
+  rule the two agree; the ledger is higher for runs outside the report's run
+  roots or filters, for a command still running, and for attempts that the
+  earlier rule counted (an OPTIONS preflight or a REGISTER was sent, no
+  INVITE; in rehearsal 2 that was 22 placed against 24 counted).
 - The practice bench (`work/practice`, approval `LOCAL-PRACTICE-ONLY`) gets a
   new approval window on every `practice-target up`, with a budget of 200
   calls for all practice commands together. Only `up` may write that record,
@@ -215,11 +275,34 @@ engagement directory that holds the profile or manifest:
 
 What it does not do: the ledger counts per engagement directory. A copied
 engagement directory, a profile copied to another directory, or a second
-checkout keeps its own count. Anyone who can write the engagement directory
-can edit the ledger. It counts calls only: packet, request-rate and duration
-ceilings are still per run, and two commands at once each get their own rate.
-A campaign plan with no approval (`campaign selftest`, hand-written manifests
-without `authorization.approval`) is not counted.
+checkout keeps its own count. It counts calls only: packet, request-rate and
+duration ceilings are still per run, and two commands at once each get their
+own rate. A campaign plan with no approval (`campaign selftest`, hand-written
+manifests without `authorization.approval`) is not counted.
+
+### 4 (rehearsal 2): the integrity checks stop honest mistakes, not deliberate rewrites
+
+The compiled-profile integrity check (`scope-derivatives.json`, below), the
+call ledger and its cross-check, and `summary` catch an operator who edits a
+file by mistake, copies a profile by mistake, loses the ledger, or restores an
+old one. They do not stop an operator who deliberately rewrites the files:
+everything they compare lives in the engagement directory, which that
+operator can write. Rehearsal 2 showed both shapes:
+
+- (a) Copy `target-profile.yaml` to `ENG/sub/`, add a destination and raise
+  `max_calls`: refused, because the copy carries the compile header but has
+  no record beside it. Delete the three header comment lines as well: the copy
+  is now a hand-written profile, `rehearse` says `Ready: yes`, the call is
+  sent, a new ledger in `ENG/sub/` starts at 0, and `summary ENG` does not see
+  the run (it is not in ENG's run roots).
+- (b) Edit the profile in place and write its new SHA-256 into
+  `scope-derivatives.json`: the call is sent. `summary` caught it afterwards,
+  because the run's recorded scope did not authorize what was sent.
+
+Neither is a gap in the checks; both are an operator defeating them on
+purpose. The protection against that is procedural: one engagement directory
+per approval, owned and backed up by the operator, never edited by hand, and
+the owner report read against the owner's own written approval.
 
 ### Wave 8: senders refuse edited derivatives; summary judges by the approval in force (bn-zqe8, bn-2rgk)
 
@@ -303,6 +386,9 @@ address is yours and pass `--allow-network ADDRESS/32`.
    checkout; do not copy it or its profiles elsewhere and send from the copy;
    keep the ledger in the engagement backup. Packet, rate and duration
    ceilings are still per run: run one sender at a time, from one terminal.
+   The ledger, its cross-check and the profile integrity check stop honest
+   mistakes, not an operator who deliberately rewrites the engagement's
+   files (rehearsal 2 finding 4, above).
 3. **Unbound senders (finding 7).** `shell` and `-- COMMAND` send wherever they
    are told, and so does `preflight HOST` without `--profile`. Each prints a
    `Scope: UNBOUND` line. Use `preflight --profile PROFILE` and

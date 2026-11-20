@@ -79,6 +79,9 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
         target = value.get("facts", {}).get("target")
         if target:
             print(f"Target: {target['host']}:{target['port']} ({target['transport']})")
+        calls = value.get("facts", {}).get("calls")
+        if isinstance(calls, dict) and calls.get("line"):
+            print(calls["line"])
         facts = value.get("facts", {})
         if "approved_destinations" in facts:
             approved_dial = facts["approved_destinations"]
@@ -182,11 +185,21 @@ def rehearse_file(profile_path: str | Path) -> Any:
     """
     from .profile import Rehearsal
 
-    rehearsal = rehearse(load_profile(profile_path))
+    document = load_profile(profile_path)
+    rehearsal = rehearse(document)
     refusal = integrity_error(profile_path)
     if refusal:
         rehearsal = Rehearsal(False, (refusal, *rehearsal.errors), rehearsal.warnings, rehearsal.facts)
-    return rehearsal
+    # The owner's call limit (bn-y3er): the same read-only count, and the same
+    # refusal, that a call makes before it reserves. A profile with no call
+    # left, or whose ledger cannot be trusted, is not ready.
+    from .call import calls_status, ledger_blocking
+
+    status = calls_status(profile_path, document)
+    facts = {**rehearsal.facts, "calls": {**status.as_dict(), "line": status.line()}}
+    blocked = tuple(item for item in ledger_blocking(profile_path, document, 1, "call")
+                    if item not in rehearsal.errors)
+    return Rehearsal(rehearsal.ready and not blocked, (*rehearsal.errors, *blocked), rehearsal.warnings, facts)
 
 
 def _one_call_plan(profile_path: str) -> dict[str, Any]:

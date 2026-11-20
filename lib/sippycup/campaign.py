@@ -1907,6 +1907,27 @@ def main(argv: list[str] | None = None) -> int:
     if refused is not None:
         _emit_error(args, approval_rules.LAPSED, f"refusing to plan: {refused}")
         return 2
+    # The owner's call limit (bn-y3er): the same read-only count `campaign run`
+    # makes before it reserves. A plan the remaining calls cannot cover could
+    # never run, so it is not written (as matrix plan and checks plan say BLOCKED).
+    from sippycup import call_ledger
+    from sippycup.integration import _planned_calls, campaign_calls_status
+
+    calls = campaign_calls_status(plan, args.manifest)
+    if calls is not None:
+        planned = _planned_calls(plan)
+        if not calls.trusted or planned > (calls.left or 0):
+            reason = calls.error or call_ledger.refusal_text(
+                args.manifest.parent, calls.approval_id, calls.limit or 0, calls.used or 0,
+                planned, "campaign run",
+            )
+            _emit_error(
+                args, "call_limit",
+                f"refusing to plan: {reason}. No plan was written.",
+            )
+            return 2
+        if getattr(args, "error_format", "human") != "json":
+            print(calls.line(planned, "campaign"), file=sys.stderr)
     for code, message in warnings:
         _warn(args, code, message)
     if args.output is not None:

@@ -43,7 +43,12 @@ HOSTILE = '<script>alert("x")</script> \' " | *bold* _u_ [l](javascript:x) `tick
 
 
 def engagement(directory: Path) -> Path:
-    target = directory / "engagement"
+    # The fixture is a recording of the practice bench (work/practice), made
+    # before the call ledger: its four calls ran under the bench's budget, not
+    # under the profile's max_calls of 1, so it lives where the bench lives.
+    # An engagement directory elsewhere that uses the practice approval id is
+    # an engagement, and its calls count (bn-y3er).
+    target = directory / "work" / "practice"
     shutil.copytree(PRACTICE, target)
     return target
 

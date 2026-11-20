@@ -273,22 +273,43 @@ def build_plan(
             "srtp_approved": (document.get("features") or {}).get("srtp") is True,
         }
     shared = _shared_ceilings(transports, by_transport, per_profile, shown)
+    from sippycup import call_ledger
+
+    calls_status: list[dict[str, Any]] = []
+    left_by_approval: dict[str, int] = {}
     for group in _ledger_groups(transports, by_transport, per_profile, shown):
         for message in guided.ledger_blocking_in(
             group["directory"], group["approval"], group["ceiling"], group["calls"], "matrix run"
         ):
             if message not in blocking:
                 blocking.append(message)
+        # The same read-only count the reservation makes (bn-y3er).
+        found = call_ledger.status(group["directory"], group["approval"], group["ceiling"])
+        calls_status.append({**found.as_dict(), "placing": group["calls"],
+                             "line": found.line(group["calls"], "matrix")})
+        if found.left is not None:
+            left_by_approval[group["approval"]] = min(
+                found.left, left_by_approval.get(group["approval"], found.left)
+            )
     for item in shared:
         if item["calls"] > item["max_calls"]:
             counted = ", ".join(f"{calls} through {path}" for path, calls in item["profiles"].items())
+            # Narrow to what is left of the owner's limit, not to the limit.
+            room = min(item["max_calls"], left_by_approval.get(item["approval_id"], item["max_calls"]))
+            narrow = (
+                f"narrow --transports, --codecs, or --srtp to {room} call(s) or fewer in total "
+                f"({item['max_calls'] - room} of the {item['max_calls']} already counted), or ask "
+                if room < item["max_calls"] and room > 0
+                else f"narrow --transports, --codecs, or --srtp to {room} call(s) or fewer in total, or ask "
+                if room > 0
+                else "no call is left under this approval, so ask "
+            )
             blocking.append(
                 f"the matrix places {item['calls']} calls under approval {item['approval_id']}, "
                 f"more than its limits.max_calls {item['max_calls']} ({counted}); the profiles of one "
                 "approval (one scope) share one call ceiling, it is not a ceiling per profile; "
-                f"narrow --transports, --codecs, or --srtp to {item['max_calls']} calls or fewer in "
-                "total, or ask the owner to approve more calls (limits.calls in scope.yaml) and run "
-                "scope compile"
+                + narrow
+                + "the owner to approve more calls (limits.calls in scope.yaml) and run scope compile"
             )
     value: dict[str, Any] = {
         "apiVersion": MATRIX_VERSION,
@@ -310,6 +331,8 @@ def build_plan(
     }
     if shared:
         value["sharedCeilings"] = shared
+    if calls_status:
+        value["callsLeft"] = calls_status
     return value
 
 
@@ -577,7 +600,11 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
                     deps.progress(f"Matrix: {label}: refused: {error}")
                 continue
             cell.update(_cell_result(value, code))
-            sent[cell["index"]] = bool(
+            # The same rule as a single call (bn-y3er): a cell counts from its
+            # first INVITE on; a result without that record counts once its
+            # preflight was sent (fail closed).
+            counted = value.get("callCounted")
+            sent[cell["index"]] = counted if isinstance(counted, bool) else bool(
                 (value.get("timestamps") or {}).get("preflight_sent")
                 or value.get("verdict") == "internal-error"
             )
@@ -592,13 +619,14 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
-        # Cells that sent nothing (not run, refused, blocked) do not count.
+        # Cells that sent no INVITE (not run, refused, blocked, preflight or
+        # registration failed) do not count.
         for key, reservation in reservations.items():
             unsent = sum(
                 1 for cell in plan["cells"]
                 if group_of[cell["transport"]] == key and not sent.get(cell["index"], False)
             )
-            reservation.release(unsent, "matrix cells that sent nothing")
+            reservation.release(unsent, "matrix cells that sent no INVITE")
     run_cells = [cell for cell in plan["cells"] if cell["status"] == "run"]
     if cancelled:
         code = 130 if cancelled[0] in (signal.SIGINT, 130) else 143
@@ -714,6 +742,9 @@ def render_human(value: dict[str, Any]) -> str:
             f"  Shared ceiling: approval {item['approval_id']} allows {item['max_calls']} call(s) in "
             f"total across {', '.join(item['profiles'])}; this grid places {item['calls']}."
         )
+    if not executed:
+        for item in value.get("callsLeft") or ():
+            lines.append(f"  {item['line']}")
     lines.append(
         f"  Each cell is one guided call ({value['callSeconds']}s, offering only its codec), "
         f"strictly in order, at least {value['spacingSeconds']:.1f}s apart."

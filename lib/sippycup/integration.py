@@ -784,9 +784,11 @@ def execute_campaign(
         os.umask(old_umask)
         reservation = ledger.get("reservation")
         if reservation is not None:
-            # Calls of steps that never started were not attempted.
+            # The rule of every command (bn-y3er): calls of steps that never
+            # started, and of softphone steps that never dialed, sent no INVITE.
             reservation.release(
-                _unstarted_calls(plan, ledger.get("run_dir")), "campaign steps that never started"
+                _unsent_calls(plan, ledger.get("run_dir")),
+                "campaign steps that sent no INVITE (never started, or the softphone never dialed)",
             )
 
 
@@ -821,6 +823,63 @@ def _unstarted_calls(plan: Mapping[str, Any], run_dir: Path | None) -> int:
         for step in plan["steps"]
         if step["index"] not in started
     )
+
+
+def campaign_call_ceiling(plan: Mapping[str, Any], directory: Path) -> int:
+    """The call ceiling a campaign reserves against: the plan's hard maximum, or
+    ``limits.calls`` of the scope file beside the manifest when that is lower."""
+    ceiling = int(plan["authorization"]["hardMaxima"]["calls"])
+    scope_limit = _scope_call_limit(directory)
+    return ceiling if scope_limit is None else min(ceiling, scope_limit)
+
+
+def campaign_calls_status(plan: Mapping[str, Any], manifest_path: Path) -> Any:
+    """``Calls: N of M used, K left`` for a plan's engagement, read-only, or None
+    for a plan the ledger does not count (no approval, or no call)."""
+    from sippycup import call_ledger
+
+    # The approval id the run reserves under (its window gate's).
+    approval = approval_rules.plan_window(plan).approval_id
+    if not approval or not _planned_calls(plan):
+        return None
+    directory = Path(manifest_path).parent
+    return call_ledger.status(directory, approval, campaign_call_ceiling(plan, directory))
+
+
+def _unsent_calls(plan: Mapping[str, Any], run_dir: Path | None) -> int:
+    """Calls of steps that sent no INVITE: never started, or a started softphone
+    step whose own softphone.json shows it never dialed (registration failed).
+
+    A step run by SIPp, or a softphone step without a readable record, counts
+    once it started (fail closed).
+    """
+    unsent = _unstarted_calls(plan, run_dir)
+    if run_dir is None or not (Path(run_dir) / "events.jsonl").exists():
+        return unsent
+    started: set[int] = set()
+    try:
+        for line in (Path(run_dir) / "events.jsonl").read_text(encoding="utf-8").splitlines():
+            entry = json.loads(line)
+            if entry.get("event") == "step.started":
+                started.add(int(entry["step"]))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return unsent
+    for step in plan["steps"]:
+        calls = int((step.get("budget") or {}).get("calls") or 0)
+        if not calls or step["index"] not in started:
+            continue
+        try:
+            record = json.loads(
+                (_step_artifact_directory(Path(run_dir), step) / "softphone.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        except (OSError, ValueError):
+            continue
+        softphone = record.get("softphone") if isinstance(record, dict) else None
+        if isinstance(softphone, dict) and softphone.get("dialed") is False:
+            unsent += calls
+    return unsent
 
 
 def _scope_call_limit(directory: Path) -> int | None:
@@ -909,10 +968,7 @@ def _execute_campaign(
         from sippycup import call_ledger
 
         directory = Path(manifest_path).parent
-        ceiling = int(plan["authorization"]["hardMaxima"]["calls"])
-        scope_limit = _scope_call_limit(directory)
-        if scope_limit is not None:
-            ceiling = min(ceiling, scope_limit)
+        ceiling = campaign_call_ceiling(plan, directory)
         try:
             ledger["reservation"] = call_ledger.reserve(
                 directory, approval_id=gate.window.approval_id, ceiling=ceiling, calls=calls,
@@ -922,6 +978,10 @@ def _execute_campaign(
             raise AuthorizationLapsed(str(error)) from error
     run_dir = create_run_directory(run_root, name)
     ledger["run_dir"] = run_dir
+    from sippycup.call_ledger import write_run_record
+
+    # The reservation that counts this run, before anything else is written.
+    write_run_record(ledger.get("reservation"), run_dir)
     started = _utc()
     local_addresses = local_source_addresses(plan)
     manifest_copy = run_dir / "reviewed-manifest.yaml"

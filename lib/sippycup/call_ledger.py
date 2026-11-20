@@ -3,11 +3,18 @@
 Every command that places calls under an approval (``call``, ``matrix run``,
 ``checks run`` for its INVITE attempts, ``campaign run`` and the MCP live
 one-call tool) reserves its calls here *before its first packet*, under an
-exclusive lock, and refuses when the calls already placed under that approval
+exclusive lock, and refuses when the calls already counted under that approval
 id in this engagement directory plus the calls it is about to place would
-exceed the approved ceiling. Calls that were reserved but never attempted (the
-command stopped before sending anything) are released again; a call that was
-attempted counts, whatever happened to it.
+exceed the approved ceiling.
+
+What consumes a call (one rule for every command): the owner's limit is on
+calls, so a reserved call is released again, with the reason in the ledger,
+when no INVITE for it can have left the tool: the command stopped before its
+first packet, the OPTIONS preflight failed, registration failed, a campaign
+step never started, or a security check sent no request at all. From the first
+INVITE on, the call counts, whatever happened to it. Where a command cannot
+tell (a campaign step run by SIPp, a security check that sent some requests,
+an internal error), the call counts.
 
 The ledger is ``call-ledger.jsonl`` in the engagement directory (the directory
 that holds the target profile or the campaign manifest), one JSON object per
@@ -20,14 +27,46 @@ line, append only, mode 0600:
   ``work/practice`` for the practice approval, which issues a new approval
   window (and a bench budget of ``calls``) on every start.
 
-Fail closed: an unreadable or malformed ledger refuses, and so does a missing
-ledger while run directories of the engagement show calls under the same
-approval id. Nothing here sends anything.
+Each run directory records the reservation that counted it, as soon as the
+directory exists (``call-ledger.json``) and again in ``result.json``
+(``callLedger``): the ledger path relative to the run and the reservation id.
 
-Limits that remain (see docs/SAFETY-AUDIT.md, finding 6): the ledger counts per
-engagement directory, so a copied engagement directory, a profile copied into
-another directory, or another checkout keeps its own count; and it is an aid
-against honest mistakes, not a seal against someone who edits it.
+The cross-check (every reservation and every read-only count, whether or not
+the ledger file exists): the ledger must account for every run directory of
+the engagement that placed, or may have placed, calls under the approval. The
+runs read are the direct children of ``ENG/calls``, ``matrix``, ``runs`` and
+``checks`` (at most 5000). A run is under the approval when its profile.json,
+plan.json or result.json names it, and also when none of them can be read
+(fail closed); a campaign whose readable plan names no approval is unbound and
+not counted here. A run may have placed calls unless its own record shows it
+could not: a campaign plan that budgets no call, a checks plan with no INVITE
+attempt, or a checks run that sent no request. A run is accounted for when
+
+1. it names a reservation of this approval that is in this ledger (a matrix or
+   campaign reservation covers every run that names it), or
+2. it names a reservation in another engagement's ledger that exists and holds
+   it (a run placed with ``--run-root`` here from another engagement), or
+3. on the practice bench only, it started before the latest
+   ``new-approval-window`` (the bench's runs from earlier windows, including
+   runs from before the ledger existed).
+
+Any other run is unaccounted for and the command refuses, naming the runs:
+an empty, truncated, replaced or missing ledger cannot start a new count while
+the run directories show calls. A run from before the ledger existed names no
+reservation, so outside the practice bench it is unaccounted for too; the
+recovery is the same (restore the ledger, or a new approval id from the owner).
+Runs placed with ``--run-root`` outside these four directories are not read:
+the ledger counted them when they were placed, and the cross-check only
+catches a ledger that holds fewer calls than the disk shows.
+
+Fail closed: an unreadable or malformed ledger refuses too. Nothing here sends
+anything.
+
+Limits that remain (see docs/SAFETY-AUDIT.md, findings 4 and 6): the ledger
+counts per engagement directory, so a copied engagement directory, a profile
+copied into another directory, or another checkout keeps its own count; and it
+stops honest mistakes, not an operator who deliberately rewrites the ledger,
+the run directories, or the profiles.
 """
 
 from __future__ import annotations
@@ -46,9 +85,14 @@ LOCK_FILE = ".call-ledger.lock"
 VERSION = "sippycup.dev/call-ledger/v1"
 MAX_LEDGER_BYTES = 16 * 1024 * 1024
 PRACTICE_APPROVAL_ID = "LOCAL-PRACTICE-ONLY"
-# Run roots the cross-check reads when the ledger is missing.
+# Run roots the cross-check reads (every reservation and every count).
 RUN_ROOTS = ("calls", "matrix", "runs", "checks")
 MAX_RUNS_SCANNED = 5000
+# Written into each run directory as soon as it exists: the reservation that
+# counted the run, so a run that never finished is still accounted for.
+RUN_RECORD_FILE = "call-ledger.json"
+# How many unaccounted runs a refusal names.
+SHOWN_RUNS = 5
 
 
 class LedgerError(ValueError):
@@ -76,8 +120,13 @@ def _now() -> str:
 
 
 def _is_practice_bench(directory: Path) -> bool:
-    resolved = directory.resolve()
+    resolved = Path(directory).resolve()
     return resolved.name == "practice" and resolved.parent.name == "work"
+
+
+def is_practice_bench(directory: str | Path) -> bool:
+    """True for ``work/practice``, the practice bench (not an engagement)."""
+    return _is_practice_bench(Path(directory))
 
 
 @dataclass
@@ -88,6 +137,10 @@ class Usage:
     # A budget stated by the issuer of the approval window (the practice
     # bench only); None means the profile's or manifest's own ceiling holds.
     budget: int | None = None
+    # Every reservation id of this approval in the ledger (all windows).
+    reservations: frozenset[str] = frozenset()
+    # When the latest new approval window started (practice bench only).
+    window_at: str | None = None
 
 
 def _check_ledger_file(path: Path) -> None:
@@ -129,8 +182,10 @@ def usage(entries: Iterable[dict[str, Any]], approval_id: str, directory: Path) 
     """Calls placed or reserved under ``approval_id``, checked entry by entry."""
     path = operator_path(Path(directory) / LEDGER_FILE)
     reserved: dict[str, int] = {}
+    every: set[str] = set()
     used = 0
     budget: int | None = None
+    window_at: str | None = None
     for entry in entries:
         if entry.get("approval") != approval_id:
             continue
@@ -140,9 +195,10 @@ def usage(entries: Iterable[dict[str, Any]], approval_id: str, directory: Path) 
             raise LedgerError(f"{path} line {entry['_line']} has no valid call count")
         if event == "reserve":
             identifier = entry.get("id")
-            if not isinstance(identifier, str) or identifier in reserved:
+            if not isinstance(identifier, str) or identifier in every:
                 raise LedgerError(f"{path} line {entry['_line']} has a missing or repeated reservation id")
             reserved[identifier] = calls
+            every.add(identifier)
             used += calls
         elif event == "release":
             identifier = entry.get("id")
@@ -163,25 +219,59 @@ def usage(entries: Iterable[dict[str, Any]], approval_id: str, directory: Path) 
             reserved.clear()
             used = 0
             budget = calls
+            window_at = entry.get("at") if isinstance(entry.get("at"), str) else None
         else:
             raise LedgerError(f"{path} line {entry['_line']} has an unknown event {event!r}")
-    return Usage(used, budget)
+    return Usage(used, budget, frozenset(every), window_at)
+
+
+_UNBOUND = None  # a readable record that names no approval (an unbound campaign)
+
+
+def _load(run: Path, name: str) -> Any:
+    """A run file's JSON; None when absent; ``_UNREADABLE`` when it cannot be read."""
+    path = run / name
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _UNREADABLE
+
+
+class _Unreadable:
+    pass
+
+
+_UNREADABLE = _Unreadable()
 
 
 def _run_approval(run: Path) -> str | None:
-    """The approval id a run directory recorded, or "" when it cannot be read."""
+    """The approval id a run directory recorded.
+
+    "" when it cannot be read (fail closed: it may be under any approval);
+    None when a readable campaign plan names no approval (an unbound plan,
+    which the ledger never counts).
+    """
     for name, keys in (
         ("profile.json", ("authorization", "approval_id")),
         ("plan.json", ("authorization", "approval", "id")),
         ("result.json", ("approvalWindow", "approvalId")),
     ):
-        path = run / name
-        if path.is_symlink() or not path.is_file():
+        value: Any = _load(run, name)
+        if value is None:
             continue
-        try:
-            value: Any = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        if value is _UNREADABLE:
             return ""
+        if (
+            name == "plan.json"
+            and not (run / "profile.json").exists()
+            and isinstance(value, dict)
+            and isinstance(value.get("authorization"), dict)
+            and value["authorization"].get("approval") is None
+            and isinstance(value.get("steps"), list)
+        ):
+            return _UNBOUND
         for key in keys:
             value = value.get(key) if isinstance(value, dict) else None
         if isinstance(value, str):
@@ -203,29 +293,58 @@ def run_record(reservation: "Reservation | None", run_dir: str | Path) -> dict[s
     }
 
 
+def write_run_record(reservation: "Reservation | None", run_dir: str | Path) -> None:
+    """Record the reservation in a run directory as soon as it exists (``call-ledger.json``).
+
+    A run that is killed before it writes ``result.json`` is then still
+    accounted for by the cross-check. Nothing is written without a reservation.
+    """
+    record = run_record(reservation, run_dir)
+    if record is None:
+        return
+    path = Path(run_dir) / RUN_RECORD_FILE
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump({"v": VERSION, **record}, output, sort_keys=True)
+        output.write("\n")
+
+
+def _run_reference(run: Path) -> dict[str, Any] | None:
+    """The reservation a run names (``call-ledger.json``, else ``result.json``), or None."""
+    early = _load(run, RUN_RECORD_FILE)
+    if isinstance(early, dict) and isinstance(early.get("ledger"), str):
+        return early
+    result = _load(run, "result.json")
+    record = result.get("callLedger") if isinstance(result, dict) else None
+    if isinstance(record, dict) and isinstance(record.get("ledger"), str):
+        return record
+    return None
+
+
 def _placed_no_calls(run: Path) -> bool:
     """True only when the run's own record shows it could not have placed a call:
-    a campaign whose plan budgets no call, or a checks run whose request log
-    has no INVITE. Anything unreadable may have placed calls (False)."""
-    def load(name: str) -> Any:
-        path = run / name
-        if path.is_symlink() or not path.is_file():
-            return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
+    a campaign whose plan budgets no call, a checks run whose plan has no INVITE
+    attempt, or a checks run that sent no request at all. Anything unreadable
+    may have placed calls (False).
 
+    A checks run's request log does not show every INVITE by name (on TCP and
+    TLS the first request of a connection is logged as the connection), so a
+    log without "INVITE" in it is not proof of no call.
+    """
     if (run / "profile.json").exists():
-        result = load("result.json")
-        log = result.get("requestLog") if isinstance(result, dict) else None
-        if not isinstance(log, list) or (result or {}).get("verdict") is not None:
-            return False  # a guided call, or a checks run without a readable log
-        return not any(
-            isinstance(entry, dict) and str(entry.get("request", "")).upper().startswith("INVITE")
-            for entry in log
-        )
-    plan = load("plan.json")
+        plan = _load(run, "plan.json")
+        if isinstance(plan, dict) and "inviteAttempts" in plan:
+            attempts = plan.get("inviteAttempts")
+            if type(attempts) is int and attempts == 0:
+                return True
+        result = _load(run, "result.json")
+        if not isinstance(result, dict) or result.get("verdict") is not None:
+            return False  # a guided call, or a checks run without a readable result
+        log = result.get("requestLog")
+        return isinstance(log, list) and not log and result.get("requestsSent") == 0
+    plan = _load(run, "plan.json")
     steps = plan.get("steps") if isinstance(plan, dict) else None
     if not isinstance(steps, list) or not steps:
         return False
@@ -235,20 +354,22 @@ def _placed_no_calls(run: Path) -> bool:
         return False
 
 
-def _counted_elsewhere(run: Path, directory: Path) -> bool:
-    """True when the run's result names a reservation in another engagement's ledger
-    that exists and holds it (a run placed with ``--run-root`` in this directory)."""
-    path = run / "result.json"
-    if path.is_symlink() or not path.is_file():
-        return False
+def _reference_ledger(run: Path, record: dict[str, Any]) -> Path | None:
     try:
-        record = json.loads(path.read_text(encoding="utf-8")).get("callLedger")
-    except (OSError, ValueError, AttributeError):
+        ledger = (run / record["ledger"]).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return ledger if ledger.name == LEDGER_FILE else None
+
+
+def _counted_elsewhere(run: Path, directory: Path) -> bool:
+    """True when the run names a reservation in another engagement's ledger
+    that exists and holds it (a run placed with ``--run-root`` in this directory)."""
+    record = _run_reference(run)
+    if record is None:
         return False
-    if not isinstance(record, dict) or not isinstance(record.get("ledger"), str):
-        return False
-    ledger = (run / record["ledger"]).resolve()
-    if ledger.name != LEDGER_FILE or ledger.parent == Path(directory).resolve():
+    ledger = _reference_ledger(run, record)
+    if ledger is None or ledger.parent == Path(directory).resolve():
         return False
     try:
         entries = read_entries(ledger.parent)
@@ -260,16 +381,34 @@ def _counted_elsewhere(run: Path, directory: Path) -> bool:
     )
 
 
-def earlier_runs(directory: str | Path, approval_id: str) -> list[str]:
-    """Run directories in the engagement's default run roots recorded under ``approval_id``.
+def _run_started(name: str) -> datetime | None:
+    """The start time in a run directory's name (``YYYYmmddTHHMMSS[.ffffff]Z-...``)."""
+    stamp = name.split("-", 1)[0]
+    for pattern in ("%Y%m%dT%H%M%S.%fZ", "%Y%m%dT%H%M%SZ"):
+        try:
+            return datetime.strptime(stamp, pattern).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
 
-    A run whose approval cannot be read counts (fail closed). A run that
-    another engagement's existing ledger counted (``--run-root`` here) does not.
-    """
-    found: list[str] = []
+
+def _parse_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else None
+
+
+def _candidate_runs(directory: Path, approval_id: str) -> list[tuple[str, Path]]:
+    """Run directories in the default run roots that placed, or may have placed,
+    calls under ``approval_id`` (see the module docstring)."""
+    found: list[tuple[str, Path]] = []
     seen = 0
     for name in RUN_ROOTS:
-        root = Path(directory) / name
+        root = directory / name
         if root.is_symlink() or not root.is_dir():
             continue
         try:
@@ -283,13 +422,61 @@ def earlier_runs(directory: str | Path, approval_id: str) -> list[str]:
             if child.is_symlink() or not child.is_dir():
                 continue
             recorded = _run_approval(child)
-            if _counted_elsewhere(child, Path(directory)) or _placed_no_calls(child):
+            if recorded is _UNBOUND or recorded not in ("", approval_id):
                 continue
-            if recorded in ("", approval_id) and (
-                recorded == approval_id or any((child / item).exists() for item in ("result.json", "capture.pcap"))
+            if recorded == "" and not any(
+                (child / item).exists() for item in ("result.json", "capture.pcap", RUN_RECORD_FILE)
             ):
-                found.append(f"{name}/{child.name}")
+                continue
+            if _placed_no_calls(child):
+                continue
+            found.append((f"{name}/{child.name}", child))
     return found
+
+
+@dataclass
+class Unaccounted:
+    """A run the ledger does not account for, and why."""
+
+    run: str
+    why: str
+
+
+def unaccounted_runs(directory: str | Path, approval_id: str, found: Usage) -> list[Unaccounted]:
+    """The runs on disk that the ledger's reservations do not account for."""
+    directory = Path(directory)
+    here = (directory / LEDGER_FILE).resolve()
+    bench = approval_id == PRACTICE_APPROVAL_ID and _is_practice_bench(directory)
+    window = _parse_at(found.window_at) if bench else None
+    missing: list[Unaccounted] = []
+    for label, run in _candidate_runs(directory, approval_id):
+        record = _run_reference(run)
+        if record is not None:
+            ledger = _reference_ledger(run, record)
+            if ledger == here:
+                if record.get("reservation") in found.reservations:
+                    continue
+                if window is not None and (_run_started(run.name) or window) < window:
+                    continue
+                missing.append(Unaccounted(label, "its reservation is not in the ledger"))
+                continue
+            if _counted_elsewhere(run, directory):
+                continue
+        if window is not None:
+            started = _run_started(run.name)
+            if started is not None and started < window:
+                continue
+        missing.append(Unaccounted(
+            label,
+            "it names no reservation in this ledger" if record is None
+            else "it names a reservation in a ledger that does not hold it",
+        ))
+    return missing
+
+
+def earlier_runs(directory: str | Path, approval_id: str) -> list[str]:
+    """Run directories that a missing ledger would leave uncounted (kept for callers)."""
+    return [item.run for item in unaccounted_runs(directory, approval_id, Usage(0))]
 
 
 @dataclass
@@ -353,8 +540,9 @@ def _recover_text(directory: Path, approval_id: str) -> str:
     text = (
         f"restore {engagement}/{LEDGER_FILE} from your backup of the engagement directory, or ask "
         f"the owner for a new written approval with a new approval id, record it in "
-        f"{engagement}/scope.yaml, and run ./bin/sippycup scope compile {engagement}. Do not "
-        "create an empty ledger: the owner's limit counts every call already placed"
+        f"{engagement}/scope.yaml, and run ./bin/sippycup scope compile {engagement}. An empty, "
+        "shortened or new ledger is refused the same way: every command reads these run "
+        "directories again before it sends anything"
     )
     if approval_id == PRACTICE_APPROVAL_ID and _is_practice_bench(directory):
         text += (
@@ -364,22 +552,42 @@ def _recover_text(directory: Path, approval_id: str) -> str:
     return text
 
 
+def _runs_text(missing: list[Unaccounted]) -> str:
+    shown = ", ".join(f"{item.run} ({item.why})" for item in missing[:SHOWN_RUNS])
+    more = len(missing) - SHOWN_RUNS
+    return shown + (f", and {more} more" if more > 0 else "")
+
+
 def check(directory: str | Path, approval_id: str) -> Usage:
-    """Read-only: the usage under ``approval_id``, or LedgerError (for plans and dry runs)."""
+    """Read-only: the usage under ``approval_id``, or LedgerError.
+
+    The same count every reservation makes (it calls this under the lock), so
+    plans, dry runs, ``rehearse``, ``ready`` and the cockpit show the number
+    the refusal uses. The run-directory cross-check runs whether or not the
+    ledger file exists.
+    """
     directory = Path(directory)
     entries = read_entries(directory)
+    found = Usage(0) if entries is None else usage(entries, approval_id, directory)
+    missing = unaccounted_runs(directory, approval_id, found)
+    if not missing:
+        return found
+    ledger = operator_path(directory / LEDGER_FILE)
     if entries is None:
-        runs = earlier_runs(directory, approval_id)
-        if runs:
-            raise LedgerError(
-                f"the call ledger {operator_path(directory / LEDGER_FILE)} is missing, but "
-                f"{len(runs)} earlier run(s) under approval {approval_id} are in "
-                f"{operator_path(directory)} (for example {runs[0]}), so the calls already "
-                f"placed cannot be counted; nothing was sent. To recover, "
-                + _recover_text(directory, approval_id)
-            )
-        return Usage(0)
-    return usage(entries, approval_id, directory)
+        opening = f"the call ledger {ledger} is missing, so it does not account for"
+        cause = "The ledger was deleted or moved"
+    else:
+        opening = (
+            f"the call ledger {ledger} counts {found.used} call(s) under approval {approval_id}, "
+            "but it does not account for"
+        )
+        cause = "The ledger was emptied, shortened or replaced since those runs"
+    raise LedgerError(
+        f"{opening} {len(missing)} run(s) in {operator_path(directory)} that placed or may have "
+        f"placed calls under approval {approval_id}: {_runs_text(missing)}. {cause}, so the calls "
+        f"already placed cannot be counted; nothing was sent. To recover, "
+        + _recover_text(directory, approval_id)
+    )
 
 
 def effective_ceiling(found: Usage, ceiling: int) -> int:
@@ -391,13 +599,74 @@ def refusal_text(
 ) -> str:
     engagement = operator_path(directory)
     remaining = max(0, ceiling - used)
+    narrow = (
+        f" Narrow it to {remaining} call(s) or fewer, or ask the owner for more."
+        if calls > 1 and remaining > 0
+        else ""
+    )
     return (
         f"call limit: approval {approval_id} allows {ceiling} call(s) in this engagement "
-        f"(limits.calls in {engagement}/scope.yaml); {used} already placed (recorded in "
-        f"{engagement}/{LEDGER_FILE}), {remaining} remain, and this {command} would place "
-        f"{calls}; nothing was sent. Only the owner can raise the limit: ask them, record the new "
-        f"limits.calls in {engagement}/scope.yaml, and run ./bin/sippycup scope compile {engagement}"
+        f"(limits.calls in {engagement}/scope.yaml); {used} already counted in "
+        f"{engagement}/{LEDGER_FILE} (calls placed, and calls reserved by a command that may still "
+        f"be running), {remaining} remain, and this {command} would place {calls}; nothing was "
+        f"sent.{narrow} Only the owner can raise the limit: ask them, record the new limits.calls "
+        f"in {engagement}/scope.yaml, and run ./bin/sippycup scope compile {engagement}"
     )
+
+
+@dataclass
+class CallsStatus:
+    """The ``Calls: N of M used, K left`` line, read-only, from :func:`check`."""
+
+    approval_id: str
+    ledger: str
+    limit: int | None = None
+    used: int | None = None
+    error: str | None = None
+
+    @property
+    def left(self) -> int | None:
+        if self.limit is None or self.used is None:
+            return None
+        return max(0, self.limit - self.used)
+
+    @property
+    def trusted(self) -> bool:
+        return self.error is None and self.left is not None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"approvalId": self.approval_id, "ledger": self.ledger, "limit": self.limit,
+                "used": self.used, "left": self.left, "error": self.error}
+
+    def line(self, placing: int | None = None, command: str = "command") -> str:
+        """One line for the operator; ``placing`` adds what a command would place."""
+        if self.error is not None:
+            return (f"Calls: cannot be counted, so no call can be placed under approval "
+                    f"{self.approval_id}: {self.error}")
+        if self.left is None:
+            return f"Calls: no call limit is recorded for approval {self.approval_id}"
+        text = (f"Calls: {self.used} of {self.limit} used, {self.left} left "
+                f"(approval {self.approval_id}, counted in {self.ledger})")
+        if placing is not None:
+            text += f"; this {command} would place {placing}"
+            if placing > self.left:
+                text += (f", more than the {self.left} left, so it would be refused"
+                         if self.left else ", but none are left, so it would be refused")
+        return text
+
+
+def status(directory: str | Path, approval_id: str, ceiling: int | None) -> CallsStatus:
+    """Calls used and left under ``approval_id`` in ``directory``; never raises, sends nothing."""
+    directory = Path(directory)
+    shown = operator_path(directory / LEDGER_FILE)
+    try:
+        found = check(directory, approval_id)
+    except LedgerError as error:
+        return CallsStatus(approval_id, shown, error=str(error))
+    except OSError as error:
+        return CallsStatus(approval_id, shown, error=f"cannot read {shown}: {error.strerror or error}")
+    limit = found.budget if found.budget is not None else ceiling
+    return CallsStatus(approval_id, shown, limit=limit if isinstance(limit, int) else None, used=found.used)
 
 
 def reserve(

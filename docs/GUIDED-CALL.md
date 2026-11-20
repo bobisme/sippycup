@@ -243,12 +243,29 @@ an approved destination that the platform does not know.
 engagement, not for one `call`. Each `call` reserves one call in
 `ENG/call-ledger.jsonl`, beside the profile, before its first packet, and is
 refused (`Guided call: BLOCKED`, exit 2, nothing sent) when the calls already
-placed under the approval id by `call`, `matrix run`, `checks run` and
-`campaign run` leave none. The `BLOCK:` line gives the calls used and
-remaining. A call that stopped before its preflight was sent gives its
-reservation back; a call that sent anything counts. `--dry-run` shows the
-same refusal. A missing or damaged ledger refuses too; see SAFETY-AUDIT.md,
-finding 6, for the recovery and the limits of the ledger.
+counted under the approval id by `call`, `matrix run`, `checks run` and
+`campaign run` leave none. The `BLOCK:` line gives the calls counted and
+remaining. `rehearse`, `ready`, `--dry-run`, `matrix plan`, `checks plan`,
+`campaign plan` and the cockpit's LIVE panel print the same count before you
+send anything:
+
+```text
+Calls: 3 of 6 used, 3 left (approval QUAD-APPROVAL-7Q2X, counted in work/acme/call-ledger.jsonl)
+```
+
+What counts as a call is the same for every command: a call counts from the
+moment its INVITE may have left the tool, whatever happened next (busy, no
+answer, rejected, cut short). An attempt in which no INVITE left is given
+back, with the reason in the ledger: the preflight got no answer, the
+registration failed, the window lapsed before the call, or the command
+stopped before its first packet. Where a command cannot tell, the call counts
+(a campaign step run by SIPp, a security check that sent any request).
+
+The ledger must account for every run directory in `ENG/calls`, `matrix`,
+`runs` and `checks`. A missing, emptied or shortened ledger refuses, names
+the runs it does not account for, and says how to recover; an empty or new
+ledger is refused the same way. See SAFETY-AUDIT.md, finding 6, for the exact
+rule and the limits of the ledger.
 
 A compiled profile must also be exactly what `scope compile` wrote from the
 current `scope.yaml`. An edited, stale or copied profile is refused before

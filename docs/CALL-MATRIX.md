@@ -69,11 +69,13 @@ Calls start at least 1 s apart, and further apart when a profile's
 
 The scope's `limits.calls` is the owner's total for the engagement, and
 `scope compile` copies it into every target profile as `limits.max_calls`.
-Calls already placed under the same approval by `call`, earlier matrices,
+Calls already counted under the same approval by `call`, earlier matrices,
 `checks run` or `campaign run` count against it too: `matrix run` reserves
 the whole grid in `ENG/call-ledger.jsonl` before the first cell and gives back
-the cells that sent nothing, and `matrix plan` is BLOCKED when the grid would
-exceed what remains (see SAFETY-AUDIT.md, finding 6). It is not a ceiling per
+the cells that sent no INVITE (not run, refused, preflight unanswered,
+registration failed), and `matrix plan` is BLOCKED when the grid would exceed
+what remains. The plan prints `Calls: N of M used, K left` and how many calls
+the grid would place (see SAFETY-AUDIT.md, finding 6). It is not a ceiling per
 profile: a grid over the UDP and TLS profiles of a scope with `calls: 6` may
 place 6 calls in total, not 6 through each. The plan prints a
 `Shared ceiling:` line for such profiles, and a larger grid is refused, for
@@ -81,10 +83,11 @@ example with `limits.calls: 3`:
 
 ```text
 Call matrix plan: BLOCKED - 4 call(s) to echo (--max-calls 6)
-BLOCK: the matrix places 4 calls under approval QUAD-APPROVAL-7Q2X, more than its limits.max_calls 3 (2 through work/eng/target-profile.yaml, 2 through work/eng/target-profile-edge-tls.yaml); the profiles of one approval (one scope) share one call ceiling, it is not a ceiling per profile; narrow --transports, --codecs, or --srtp to 3 calls or fewer in total, or ask the owner to approve more calls (limits.calls in scope.yaml) and run scope compile
+BLOCK: the matrix places 4 calls under approval QUAD-APPROVAL-7Q2X, more than its limits.max_calls 3 (2 through work/eng/target-profile.yaml, 2 through work/eng/target-profile-edge-tls.yaml); the profiles of one approval (one scope) share one call ceiling, it is not a ceiling per profile; narrow --transports, --codecs, or --srtp to 3 call(s) or fewer in total, or ask the owner to approve more calls (limits.calls in scope.yaml) and run scope compile
   udp: work/eng/target-profile.yaml (2 call(s); limits.max_calls 3, approved codecs PCMU, PCMA, SRTP not approved)
   tls: work/eng/target-profile-edge-tls.yaml (2 call(s); limits.max_calls 3, approved codecs PCMU, PCMA, SRTP not approved)
   Shared ceiling: approval QUAD-APPROVAL-7Q2X allows 3 call(s) in total across work/eng/target-profile.yaml, work/eng/target-profile-edge-tls.yaml; this grid places 4.
+  Calls: 0 of 3 used, 3 left (approval QUAD-APPROVAL-7Q2X, counted in work/eng/call-ledger.jsonl); this matrix would place 4, more than the 3 left, so it would be refused
   ...
 This command sent no packets.
 Network activity: none
