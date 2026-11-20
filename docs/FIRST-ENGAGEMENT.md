@@ -83,10 +83,10 @@ After `scope compile`, `rehearse` prints `Signaling and media: 127.0.0.3 ...`
 and `Media only: 127.0.0.2/31 (2 addresses) (owner-approved media networks;
 never a signaling target)`. The call prints `Media scope: peer 127.0.0.2:20014
 admitted by the approved media network 127.0.0.2/31 (media only)`. (The port
-differs from call to call.) If you leave the media answer out, or give the
-signaling address as the only media address, the call stops
-`MEDIA-OUTSIDE-SCOPE`; that is the stop to rehearse, not a fault of the
-proxy. Question numbers follow `scope questions`; `scope answer` prints the
+differs from call to call.) If the media answer is only the signaling address
+(`127.0.0.3`; run this way), the call stops `Guided call: MEDIA-OUTSIDE-SCOPE`
+with `Media scope: peer 127.0.0.2:20012 NOT approved`: the scope is missing the
+media servers, which is not a fault of the proxy. Question numbers follow `scope questions`; `scope answer` prints the
 one it is asking.
 
 It ends with `Scope: COMPLETE and CONSISTENT` and
