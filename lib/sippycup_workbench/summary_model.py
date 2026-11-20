@@ -1562,7 +1562,9 @@ def _check_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, 
     model["sent"] = {
         "optionsRequests": None,
         "registerAttempts": None,
-        "calls": None,
+        # The calls this run counted against the owner's limit (srtp-policy
+        # and the INVITE checks place calls): in the run's row and the totals.
+        "calls": _check_run_calls(run.path) or None,
         "rtpPacketsSent": None,
         "capturePackets": None,
         "captureBytes": None,
@@ -1661,13 +1663,44 @@ def _run_call_terms(raw: RawRun, model: dict[str, Any]) -> tuple[str, int | None
             attempted = bool(_dict(result.get("timestamps")).get("preflight_sent")) or bool(_int(sent.get("calls")))
             calls = 1 if attempted else 0
     else:
-        result = _recorded(raw.path / "result.json")
-        calls = sum(
-            1 for entry in _list(result.get("requestLog"))
-            if isinstance(entry, dict) and str(entry.get("request", "")).upper().startswith("INVITE")
-            and entry.get("paced") is not False
-        )
+        calls = _check_run_calls(raw.path)
     return (approval if isinstance(approval, str) else ""), ceiling, calls
+
+
+def _check_run_calls(path: Path) -> int:
+    """The calls a security-check run counted against the owner's call limit (wave 13, finding 1).
+
+    The ledger's own rule, not a reading of the request log: the run reserved
+    its declared INVITE attempts and gave back those of checks that sent no
+    request. The log does not name every call (``srtp-policy`` places softphone
+    calls; on TCP and TLS the first request of a connection is logged as the
+    connection), so counting its "INVITE" lines left calls out of the report.
+
+    In order: the count the run recorded (``callsCounted``), what the ledger
+    still holds for the run's reservation, and for a run with neither the
+    INVITE and softphone-call lines of its request log.
+    """
+    from sippycup import call_ledger
+
+    result = _recorded(path / "result.json")
+    counted = result.get("callsCounted")
+    if type(counted) is int and counted >= 0:
+        return counted
+    ledger, identifier = call_ledger.run_reservation(path)
+    if ledger is not None and identifier:
+        held = call_ledger.reservation_counts(ledger.parent).get(identifier)
+        if held is not None:
+            return held["calls"]
+    calls = 0
+    for entry in _list(result.get("requestLog")):
+        if not isinstance(entry, dict):
+            continue
+        request = str(entry.get("request", ""))
+        if request.upper().startswith("INVITE") and entry.get("paced") is not False:
+            calls += 1
+        elif request.startswith("softphone call") and "reserved" in entry and "settled" not in entry:
+            calls += 1
+    return calls
 
 
 def _limit_in_force(scope: "_Scope | None") -> tuple[bool, int | None]:
@@ -1766,6 +1799,7 @@ def _bench_run(raw: RawRun, run: dict[str, Any]) -> bool:
 
 def _call_limits(
     root: Path, sources: list[Source], facts: dict[str, dict[str, Any]], reviewed: set[str],
+    run_dirs: "list[Path] | None" = None, narrowed: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Per approval id: the approved call limit, the calls counted, and the calls left (bn-y3er).
 
@@ -1781,6 +1815,14 @@ def _call_limits(
     or filters, a command still running, attempts an older rule counted); it
     holds fewer only when it was emptied or shortened, which its cross-check
     reports.
+
+    Every counted call is attributed or raised (wave 13, finding 1): with
+    ``run_dirs`` (the run directories of the report), a reservation in the
+    ledger that still counts calls and that no run of the report names is
+    ``unattributedCalls`` and a ``call-ledger-unattributed`` exception (a
+    limitation only when the report was ``narrowed`` with --runs or --since).
+    ``countedBeyondRuns`` is what the ledger holds for the report's runs above
+    the calls those runs recorded.
 
     ``exceeded`` is true when a run exceeded the limit in force when it ran,
     or when the ledger counts more than the current limit and the runs in the
@@ -1821,6 +1863,17 @@ def _call_limits(
     }
     rows: list[dict[str, Any]] = []
     exceptions: list[dict[str, Any]] = []
+    held = call_ledger.reservation_counts(root) if run_dirs is not None and ledger_present else {}
+    named: set[str] = set()
+    if held:
+        try:
+            here = (root / call_ledger.LEDGER_FILE).resolve()
+        except (OSError, RuntimeError):
+            here = None
+        for run_dir in run_dirs or ():
+            ledger, identifier = call_ledger.run_reservation(run_dir)
+            if identifier and ledger is not None and ledger == here:
+                named.add(identifier)
     for approval in sorted(current | earlier):
         fact = facts.get(approval) or {"placed": 0, "limits": [], "over": []}
         is_current = approval in current
@@ -1865,6 +1918,28 @@ def _call_limits(
         )
         row["exceeded"] = bool(fact["over"]) or (over_current and not explained)
         row["aboveLoweredLimit"] = explained
+        loose = [
+            item for identifier, item in held.items()
+            if item["approval"] == approval and item["calls"] > 0 and identifier not in named
+        ] if status.error is None and isinstance(status.used, int) else []
+        if run_dirs is not None and ledger_present and status.error is None and isinstance(status.used, int):
+            unattributed = sum(item["calls"] for item in loose)
+            row["unattributedCalls"] = unattributed
+            row["unattributedReservations"] = [
+                {"command": item["command"] if re.fullmatch(r"[a-z][a-z -]{0,30}", item["command"] or "") else None,
+                 "at": iso(parse_time(item["at"])) if item["at"] else None, "calls": item["calls"]}
+                for item in loose[:5]
+            ]
+            row["countedBeyondRuns"] = max(0, status.used - unattributed - fact["placed"])
+            row["reportNarrowed"] = bool(narrowed)
+            if unattributed and not narrowed:
+                exceptions.append(_exception(
+                    "call-ledger-unattributed", None,
+                    f"the call ledger {status.ledger} counts {unattributed} call(s) under {approval} that no run in "
+                    f"this report accounts for ({_reservations_text(row['unattributedReservations'], len(loose))}). "
+                    "Their run directory is outside the run roots this report read, was removed, or the command "
+                    "is still running; read it too with --run-root DIR, or account for these calls to the owner",
+                ))
         rows.append(row)
         if status.error is not None:
             exceptions.append(_exception(
@@ -1883,6 +1958,17 @@ def _call_limits(
                    and max(in_force) > effective else ""),
             ))
     return rows, exceptions, totals
+
+
+def _reservations_text(items: list[dict[str, Any]], total: int) -> str:
+    """Ledger reservations in words: which command reserved how many calls, and when."""
+    parts = [
+        f"{item['calls']} reserved by {item['command'] or 'a command'}"
+        + (f" at {item['at']}" if item.get("at") else "")
+        for item in items
+    ]
+    more = total - len(items)
+    return ", ".join(parts) + (f", and {more} more reservation(s)" if more > 0 else "")
 
 
 def _mark_overlaps(
@@ -2810,7 +2896,12 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     by_name = {raw.name: raw for raw in filtered}
     call_exceptions, call_facts = _engagement_call_check(runs, by_name, sources, run_scopes, reviewed_ids)
     exceptions.extend(call_exceptions)
-    call_limits, limit_exceptions, call_limit_totals = _call_limits(root, sources, call_facts, reviewed_ids)
+    shown_runs = {run["id"] for run in runs}
+    call_limits, limit_exceptions, call_limit_totals = _call_limits(
+        root, sources, call_facts, reviewed_ids,
+        run_dirs=[raw.path for raw in filtered if raw.name in shown_runs],
+        narrowed=bool(options.run_globs) or options.since is not None,
+    )
     exceptions.extend(limit_exceptions)
     exceptions.extend(_mark_overlaps(runs, by_name, run_scopes, scope))
     for run in runs:
@@ -2932,17 +3023,38 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             root, row["approvalId"])
         if not beside:
             continue
-        named = "; ".join(
-            f"{_reviewed(item.directory)} counts {item.used} call(s)" if item.used is not None
-            else f"{_reviewed(item.directory)} has a call ledger that names it and cannot be read"
-            for item in beside[:_ledger.SHOWN_DIRECTORIES]
-        )
+        named = "; ".join(item.counts_text(_reviewed(item.directory)) for item in beside[:_ledger.SHOWN_DIRECTORIES])
+        more = len(beside) - _ledger.SHOWN_DIRECTORIES
+        named += f"; and {more} more director{'y' if more == 1 else 'ies'}" if more > 0 else ""
+        # The de-duplicated number the command line uses (ElsewhereCount.extra):
+        # a ledger copied with its directory repeats the same calls (wave 13, finding 2).
+        here = row.get("counted") if isinstance(row.get("counted"), int) else row.get("placedByRuns")
+        known = all(item.used is not None and item.extra is not None for item in beside)
+        others = sum(item.extra or 0 for item in beside)
+        if not known or not isinstance(here, int):
+            whole = ("The calls there cannot all be counted, so the count in this report may not be the whole "
+                     "count for the approval.")
+        elif others:
+            # Each other directory is compared with this one only: calls that
+            # two of the others both hold are counted for each, as the limit does.
+            most = "at most " if len(beside) > 1 else ""
+            whole = (f"The {most}{others} call(s) counted only there are not in this report or its totals. "
+                     f"Counted once, the approval has {most}{here + others} call(s) in these directories: the "
+                     f"{here} in this report and {most}{others} more. The count in this report is not the whole "
+                     "count for the approval.")
+        else:
+            whole = (f"No call is counted there that is not counted in this report. Counted once, the approval "
+                     f"has {here} call(s) in these directories, the {here} in this report.")
+        row["sameApprovalElsewhere"] = {
+            "directories": [_reviewed(item.directory) for item in beside[:_ledger.SHOWN_DIRECTORIES]],
+            "countedOnlyElsewhere": others if known else None,
+            "countedOnce": here + others if known and isinstance(here, int) else None,
+            "upperBound": bool(known and others and len(beside) > 1),
+        }
         limitations.insert(0, {
             "code": "same-approval-in-another-directory",
             "text": f"Approval {row['approvalId']} was also used from another directory on the assessor's machine: "
-                    f"{named}. Those calls are not in this report or its totals. The call limit of this approval "
-                    "is one limit for all of them together, so the count in this report is not the whole count "
-                    "for the approval.",
+                    f"{named}. {whole} The call limit of this approval is one limit for all of them together.",
         })
     stale_judged = [
         r for r in owner_runs if r["id"] in set(unrecorded_runs) and r["readable"] != "unreadable"

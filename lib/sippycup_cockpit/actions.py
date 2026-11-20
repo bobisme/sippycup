@@ -233,6 +233,12 @@ TABLE: tuple[ActionSpec, ...] = (
         preview=lambda m: _practice_call(m, dry_run=True, json_output=True), secret="practice", approval="practice",
     ),
     ActionSpec(
+        "window-renew", "scope", "Record the owner's renewed approval window",
+        "The approved window has ended; only a renewed written approval from the owner opens a new one.",
+        "none", lambda m: "it asks questions, so run it in a terminal" if m["scope"].get("windowExpired") else None,
+        instruction=lambda m: f"With the owner's renewed written approval, in a terminal: {window_renewal_steps(m)}",
+    ),
+    ActionSpec(
         "scope-edit", "scope", "Fill scope.yaml from the owner's written answers",
         "Only the owner's written reply may go into the scope file; then run scope check.",
         "none", lambda m: "it asks questions, so run it in a terminal, then scope check"
@@ -333,6 +339,13 @@ ADVISOR_COVERED = {
 
 def command_line(argv: list[str]) -> str:
     return shlex.join(argv)
+
+
+def window_renewal_steps(model: dict[str, Any]) -> str:
+    """The three steps for an ended approval window, as the shell commands print them."""
+    eng = _eng(model)
+    return (f"{LAUNCHER} scope answer {eng} authorization.window   (the renewed window), then "
+            f"{LAUNCHER} scope answer {eng} 2   (the approval again), then {LAUNCHER} scope compile {eng}")
 
 
 def _action_dict(
@@ -489,6 +502,9 @@ def build_actions(
         identifier = str(item.get("id"))
         if identifier in ADVISOR_COVERED:
             continue
+        if identifier == "scope-questions-open" and model["scope"].get("windowExpired") and all(
+                question.get("expired") for question in model["scope"].get("unanswered") or []):
+            continue  # nothing is unanswered: the window has ended (wave 13, finding 5)
         stage = advisor_stage.get(identifier) or (
             "evidence" if identifier.startswith(("manifest-", "privacy-", "calls-manifest-")) else
             "rehearse" if identifier.startswith("rehearse-target-profile-") else current)

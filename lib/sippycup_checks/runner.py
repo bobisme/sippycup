@@ -612,6 +612,9 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         "profile": document.get("name"),
         "approvalRecord": approval_in_force,
         "callLedger": call_ledger_record(reservation, run_dir),
+        # The calls this run counted against the owner's call limit: reserved
+        # minus given back (wave 13, finding 1; the owner report reads it).
+        "callsCounted": reservation.calls - reservation.released if reservation is not None else 0,
         "runDirectory": _display(run_dir, work_root),
         "requestsSent": total,
         "requestLog": budget.log,

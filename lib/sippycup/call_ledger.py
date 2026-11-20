@@ -94,6 +94,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -704,6 +705,49 @@ def reference_counts(directory: str | Path) -> list[ReferenceCount]:
     return list(found.values())
 
 
+def reservation_counts(directory: str | Path) -> dict[str, dict[str, Any]]:
+    """Every reservation in the ledger of ``directory``: id -> approval, command, time, and
+    the calls it still counts (reserved minus released).
+
+    Read-only and never raises: no ledger, or one that cannot be read, gives
+    ``{}``. For the owner report, which attributes every counted call to a run
+    through the reservation the run names (wave 13, finding 1).
+    """
+    try:
+        entries = read_entries(Path(directory))
+    except (LedgerError, OSError):
+        return {}
+    found: dict[str, dict[str, Any]] = {}
+    for entry in entries or ():
+        identifier, calls = entry.get("id"), entry.get("calls")
+        if not isinstance(identifier, str) or type(calls) is not int or calls < 0:
+            continue
+        if entry.get("event") == "reserve" and identifier not in found:
+            found[identifier] = {
+                "approval": entry.get("approval"), "calls": calls,
+                "command": entry.get("command") if isinstance(entry.get("command"), str) else None,
+                "at": entry.get("at") if isinstance(entry.get("at"), str) else None,
+            }
+        elif entry.get("event") == "release" and identifier in found:
+            found[identifier]["calls"] = max(0, found[identifier]["calls"] - calls)
+    return found
+
+
+def run_reservation(run_dir: str | Path) -> tuple[Path | None, str | None]:
+    """(the ledger file a run directory names, resolved; its reservation id), or (None, None).
+
+    Read-only and never raises.
+    """
+    try:
+        record = _run_reference(Path(run_dir))
+        if record is None:
+            return None, None
+        identifier = record.get("reservation")
+        return _reference_ledger(Path(run_dir), record), identifier if isinstance(identifier, str) else None
+    except (OSError, RuntimeError, ValueError):
+        return None, None
+
+
 @dataclass
 class ElsewhereCount:
     """A sibling directory whose ledger counts calls under the same approval reference."""
@@ -716,10 +760,39 @@ class ElsewhereCount:
     # The calls there that this directory's own ledger does not also hold (a
     # ledger copied with its directory repeats the same reservations).
     extra: int | None = None
+    # The ledger there exists, or may exist, and this user cannot open it
+    # (wave 13, finding 3): whether it counts calls under the reference cannot
+    # be shown, so it stops this directory like a damaged ledger that names it.
+    unreadable: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {"directory": self.directory, "used": self.used, "error": self.error,
                 "firstAt": self.first_at, "extra": self.extra}
+
+    @property
+    def same(self) -> int:
+        """The calls there that are the same calls as this directory counts (copied reservations)."""
+        if self.used is None or self.extra is None:
+            return 0
+        return max(0, self.used - self.extra)
+
+    def counts_text(self, name: str | None = None) -> str:
+        """``DIR counts N call(s)``, saying which of them this directory counts too
+        (wave 13, findings 2 and 16), so that nobody adds the same calls twice."""
+        name = name or self.directory
+        if self.unreadable:
+            return (f"{name} has a call ledger that this user cannot read, so whether it counts calls under "
+                    "the approval is not known")
+        if self.used is None:
+            return f"{name} has a call ledger that names it and cannot be read"
+        text = f"{name} counts {self.used} call(s)"
+        if not self.same:
+            return text
+        if self.same == self.used:
+            return (f"{text}, all of them the same calls as {self.same} counted here (its ledger repeats "
+                    "reservations of this one, as after a copy of the directory), counted once")
+        return (f"{text}, {self.same} of them the same calls as {self.same} counted here (its ledger repeats "
+                f"reservations of this one, as after a copy of the directory) and {self.extra} others")
 
 
 def _first_reserve(entries: Iterable[dict[str, Any]], approval_id: str) -> tuple[str | None, set[str]]:
@@ -752,8 +825,14 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
     spent twice. Read-only, never raises, merges nothing. The practice bench
     (``work/practice``) is neither asked about nor read: every practice
     profile is generated from it and shares its approval by design. A sibling
-    ledger that cannot be read counts as a hit only when its bytes name the
-    reference.
+    ledger that is damaged counts as a hit only when its bytes name the
+    reference. A sibling ledger that exists and that this user cannot open is
+    a hit with ``unreadable`` set (wave 13, finding 3): it used to be skipped
+    without a word, so the commands that run on the host showed GO in a
+    directory the sending commands refuse, and a ledger the container cannot
+    read either would have let the refused directory send. The same holds for
+    a sibling directory that cannot be searched for a ledger, and for a parent
+    directory that cannot be listed.
     """
     if not isinstance(approval_id, str) or not approval_id:
         return []
@@ -761,7 +840,12 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
         here = Path(directory).resolve()
         if _is_practice_bench(here):
             return []
-        children = sorted(here.parent.iterdir())[:MAX_SIBLINGS_SCANNED]
+        try:
+            children = sorted(here.parent.iterdir())[:MAX_SIBLINGS_SCANNED]
+        except PermissionError as error:
+            return [ElsewhereCount(
+                operator_path(here.parent), None,
+                f"cannot list {operator_path(here.parent)}: {error.strerror or error}", unreadable=True)]
     except (OSError, RuntimeError):
         return []
     found: list[ElsewhereCount] = []
@@ -771,11 +855,22 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
         try:
             if child.is_symlink() or not child.is_dir() or child == here or _is_practice_bench(child):
                 continue
-            if ledger.is_symlink() or not ledger.is_file():
-                continue
         except OSError:
             continue
         shown = operator_path(child)
+        try:
+            # lstat, not is_file(): is_file() answers False when the directory
+            # cannot be searched, which would hide a ledger that is there.
+            mode = os.lstat(ledger).st_mode
+        except PermissionError as error:
+            found.append(ElsewhereCount(
+                shown, None, f"cannot look for {operator_path(ledger)}: {error.strerror or error}",
+                unreadable=True))
+            continue
+        except OSError:
+            continue
+        if not stat.S_ISREG(mode):
+            continue
         try:
             entries = read_entries(child) or []
             used = usage(entries, approval_id, child).used
@@ -788,7 +883,10 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
             try:
                 named = approval_id.encode() in ledger.read_bytes()[:MAX_LEDGER_BYTES]
             except OSError:
-                named = False
+                # It exists and cannot be opened: it may count calls under the
+                # reference, and nothing here can show that it does not.
+                found.append(ElsewhereCount(shown, None, str(error), unreadable=True))
+                continue
             if named:
                 found.append(ElsewhereCount(shown, None, str(error)))
             continue
@@ -844,6 +942,22 @@ def elsewhere_rule(
     except (OSError, RuntimeError):
         engagement = operator_path(directory)
     unreadable = [item for item in others if item.used is None]
+    closed = [item for item in unreadable if item.unreadable]
+    if closed:
+        # Wave 13, finding 3: a ledger this user cannot open. The fix line
+        # names the file and both ways back.
+        names = ", ".join(item.directory for item in closed[:SHOWN_DIRECTORIES])
+        first = closed[0].directory
+        chmod = (f"chmod u+r {first}/{LEDGER_FILE}" if (closed[0].error or "").startswith("cannot read")
+                 else f"chmod u+rx {first}")
+        return ElsewhereRule(approval_id, engagement, None, True, 0, (
+            f"a call ledger beside {engagement} cannot be read by this user, in {names} "
+            f"({closed[0].error}). The owner's limit is one limit for the approval, whatever the directory, "
+            f"and it cannot be shown that no call is counted there under {approval_id}. Restore read "
+            f"permission ({chmod}), or restore that directory "
+            f"from your backup; a directory that is not an engagement does not belong beside {engagement}. "
+            f"Until then {engagement} sends nothing under {approval_id}"
+        ))
     if unreadable:
         names = ", ".join(item.directory for item in unreadable[:SHOWN_DIRECTORIES])
         return ElsewhereRule(approval_id, engagement, None, True, 0, (
@@ -877,14 +991,18 @@ def elsewhere_rule(
         why = "its ledger has the earlier first call, and its count adds the calls of the other directory"
     one = len(stopped) == 1
     stop_names = ", ".join(stopped[:SHOWN_DIRECTORIES]) + (" and others" if len(stopped) > SHOWN_DIRECTORIES else "")
-    first_stopped = stopped[0] if stopped else engagement
+    # The fix commands name the directory the operator is in when it is one
+    # of the stopped ones (wave 13, finding 4: in a third directory they named
+    # the second, and typed literally changed the wrong engagement's reference).
+    first_stopped = engagement if engagement in stopped or not stopped else stopped[0]
+    each = f" (for {first_stopped}; the same in each of the others)" if len(stopped) > 1 else ""
     listing = f"approval {approval_id} has calls counted in {listed}"
     advice = (
         f"The owner's limit is one limit for the approval, whatever the directory. Go on in {keeper} ({why}): "
         f"./bin/sippycup ready {keeper}. "
         f"{stop_names} send{'s' if one else ''} nothing more under {approval_id}: "
         f"use {'it' if one else 'them'} again only under a new written approval from the owner, "
-        f"recorded with ./bin/sippycup scope answer {first_stopped} authorization.approval_id and "
+        f"recorded{each} with ./bin/sippycup scope answer {first_stopped} authorization.approval_id and "
         f"./bin/sippycup scope compile {first_stopped}"
     )
     text = f"{listing}. {advice}"
@@ -948,7 +1066,7 @@ class CallsStatus:
             )
         if self.elsewhere:
             shown = ", ".join(
-                f"{item.directory} counts {item.used} call(s)" if item.used is not None
+                item.counts_text() if item.used is not None or item.unreadable
                 else f"{item.directory} has a ledger that names it and cannot be read"
                 for item in self.elsewhere[:SHOWN_DIRECTORIES]
             )

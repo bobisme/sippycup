@@ -159,9 +159,14 @@ resulting profile passed.
 | 8 to 10 | `yes`; `practice`, `sippycup-proxy` (the realm); `practice-password`, `other` |
 | 12 to 16 | `127.0.0.2/31` (the media servers' range, as an owner gives a pool; the literal `127.0.0.2` also works); then `20000`, `20019`; `rtp, sdes-srtp`; `PCMU, PCMA`, `rfc4733`; `yes` |
 
-After `scope compile`, `rehearse` prints `Signaling and media: 127.0.0.3 ...`
-and `Media only: 127.0.0.2/31 (2 addresses) (owner-approved media networks;
-never a signaling target)`. The call prints `Media scope: peer 127.0.0.2:20014
+After `scope compile`, `rehearse` prints `Signaling only: 127.0.0.3 (the
+target host; the owner did not list it for media, so a call stops if media is
+offered there)` and `Media only: 127.0.0.2/31 (2 addresses) (owner-approved
+media networks; never a signaling target)`. That is the proxy shape as it
+should read: SIP goes only to the proxy, audio only to the media range, and
+the sentence about a call stopping is the rule, not a fault. (`Signaling and
+media: 127.0.0.3 ...` is printed only when the media answer lists the proxy
+address itself, the wrong answer for this shape; see below.) The call prints `Media scope: peer 127.0.0.2:20014
 admitted by the approved media network 127.0.0.2/31 (media only)`. (The port
 differs from call to call.) If the media answer is only the signaling address
 (`127.0.0.3`; run this way), the call stops `Guided call: MEDIA-OUTSIDE-SCOPE`

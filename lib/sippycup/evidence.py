@@ -236,6 +236,29 @@ def _printable_context(data: bytes, start: int, end: int) -> bool:
     return text(start - 1) and text(end)
 
 
+# In a capture file an IPv6 literal counts as text only inside a run of at
+# least this many text bytes (a SIP or SDP line). The bytes of a capture are
+# mostly binary (RTP audio, TLS records, packet headers), where "::1" with a
+# printable byte on either side occurs by chance: a routed rehearsal failed
+# on `::1` in a TLS run whose packets were all IPv4. The packet addresses of
+# a capture come from its parsed headers, not from this scan.
+CAPTURE_TEXT_RUN = 16
+
+
+def _text_run(data: bytes, start: int, end: int, enough: int) -> int:
+    """Length of the run of text bytes around ``data[start:end]``, counted up to ``enough``."""
+    def text(index: int) -> bool:
+        return data[index] in b"\t\r\n" or 0x20 <= data[index] < 0x7F
+    length = end - start
+    index = start - 1
+    while length < enough and index >= 0 and text(index):
+        length, index = length + 1, index - 1
+    index = end
+    while length < enough and index < len(data) and text(index):
+        length, index = length + 1, index + 1
+    return length
+
+
 def _inside(address: str, networks: list[Any]) -> bool:
     parsed = ipaddress.ip_address(address)
     return any(parsed.version == network.version and parsed in network for network in networks)
@@ -373,6 +396,10 @@ def privacy_findings(
                 # (a SIP header, a log line). Two colons and a hex digit
                 # occur by chance in binary bytes (RTP audio, TLS records);
                 # a capture's packet addresses come from its headers below.
+                continue
+            if (b":" in match.group() and suffix in CAPTURE_SUFFIXES
+                    and _text_run(data, match.start(), match.end(), CAPTURE_TEXT_RUN) < CAPTURE_TEXT_RUN):
+                # In a capture, a text address is part of a line of text.
                 continue
             try:
                 addresses.add(str(ipaddress.ip_address(match.group().decode())))

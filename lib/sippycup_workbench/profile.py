@@ -467,7 +467,7 @@ def window_too_short_step(profile_path: str | Path | None, shorten: str | None =
     engagement = _engagement_beside(profile_path)
     record = (
         f"record it with ./bin/sippycup scope answer {engagement} authorization.window (it asks for the "
-        f"approval again), and run ./bin/sippycup scope compile {engagement}"
+        f"approval again, unless that is already open), and run ./bin/sippycup scope compile {engagement}"
         if engagement is not None
         else "record it and the approval in scope.yaml, and run scope compile"
     )

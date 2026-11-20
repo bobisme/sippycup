@@ -437,6 +437,11 @@ def gate(
     if destination is not None:
         refusal = destination_refusal(document, destination)
         if refusal:
+            if profile_path is not None:
+                # The launcher and the directory, not "DIR" (wave 13, papercut 8). Text only.
+                from .profile import with_real_commands
+
+                refusal = with_real_commands([refusal], profile_path)[0]
             errors.append(refusal)
     if not host_is_approved_literal(document):
         errors.append(

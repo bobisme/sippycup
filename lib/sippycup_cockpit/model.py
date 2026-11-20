@@ -161,7 +161,9 @@ def _profile_facts(path: Path, repo: Path, now: datetime) -> dict[str, Any]:
     approval = authorization.get("approval_id")
     facts.update(
         ready=rehearsal.ready and host_is_approved_literal(document),
-        errors=list(rehearsal.errors),
+        # The launcher and the directory instead of the DIR placeholder, as
+        # rehearse prints them (wave 13, papercut 8). Text only.
+        errors=_real_commands(list(rehearsal.errors), path),
         warnings=list(rehearsal.warnings),
         approvalId=approval if isinstance(approval, str) and approval else None,
         approvedBy=authorization.get("approved_by"),
@@ -235,6 +237,9 @@ def _scope_facts(root: Path, repo: Path, now: datetime) -> dict[str, Any]:
         return facts
     report = inspect(path, now=now)
     facts["errors"] = [f"{item.code} [{item.field or '-'}]" for item in report.errors][:40]
+    # The approved window is recorded and has ended (wave 13, finding 5): that
+    # is not an unanswered question, and its three steps are not the sheet.
+    facts["windowExpired"] = any(item.code == "scope.window_expired" for item in report.errors)
     if report.document is None:
         facts["state"] = "invalid"
         return facts
@@ -248,6 +253,8 @@ def _scope_facts(root: Path, repo: Path, now: datetime) -> dict[str, Any]:
         if question_state(report, question) == "unanswered":
             facts["unanswered"].append({"number": number, "id": question.identifier,
                                         "section": question.section, "text": question.text})
+            if facts["windowExpired"] and "authorization.valid_until" in question.fields:
+                facts["unanswered"][-1]["expired"] = True
     try:
         derivatives = derivative_state(root, path)
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -853,7 +860,23 @@ def build_model(
     model["complete"] = model["currentStage"] is None
     model["nextCommand"] = primary["command"] if primary else None
     model["nextActionId"] = primary["id"] if primary else None
+    if model["scope"].get("windowExpired") and not model["complete"]:
+        # The same three steps every shell command prints for an ended window
+        # (wave 13, finding 5), not the question sheet.
+        from .actions import window_renewal_steps
+
+        model["nextCommand"] = window_renewal_steps(model)
+        model["nextActionId"] = "window-renew"
     return model
+
+
+def _real_commands(errors: list[str], profile_path: Path) -> list[str]:
+    from sippycup_workbench.profile import with_real_commands
+
+    try:
+        return list(with_real_commands(errors, profile_path))
+    except Exception:  # noqa: BLE001 - the text is a convenience; the errors stay
+        return errors
 
 
 def to_json(model: dict[str, Any]) -> str:

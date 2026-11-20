@@ -257,8 +257,17 @@ engagement directory that holds the profile or manifest:
   a `checks run` that places a call refuse before anything is sent, all with
   the same sentences, which name that one directory from every side. A
   sibling ledger that names the reference and cannot be read stops every
-  directory beside it. The owner report names the other directory's count as
-  a limitation. Only directories under the same parent are seen.
+  directory beside it. So does a sibling ledger that exists and that the
+  user running the command cannot open (for example after `chmod 000`, or a
+  directory owned by another user), a sibling directory that cannot be
+  searched for a ledger, and a parent directory that cannot be listed: for
+  every reference except the benches' own, `ready` is `NO-GO`, `rehearse` is
+  `Ready: no`, and every command that reserves a call refuses, with the
+  `chmod` that restores read permission in the message (fifth rehearsal,
+  finding 3; such a ledger used to be skipped without a word). The owner
+  report names the other directory's count as a limitation, with the calls
+  that both ledgers hold (a copied directory) counted once.
+  Only directories under the same parent are seen.
   The message says what happens otherwise: an empty, shortened or new ledger
   is refused the same way. Runs placed with `--run-root` outside those four
   directories are not read: the ledger counted them when they were placed,
