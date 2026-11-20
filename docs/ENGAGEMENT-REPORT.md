@@ -125,9 +125,19 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
    found" table.
 3. **Authorization**: every reviewed record with approval identifier, who
    approved, status, validity window, approved addresses, ports, transports,
-   server names, and limits.
-4. **Activity ledger**: every run with lane label, start, end, kind, target,
-   what was sent, verdict, and reason; engagement totals; a static SVG
+   server names, and limits. A campaign file has no status of its own; its row
+   shows the approval id and window it was compiled with, marked as a copy of
+   the scope's approval. When the approval window was renewed, the section
+   (and the executive summary) lists each window that was in force and which
+   runs (R1-R12, R13) fell under it, so "every run fell inside the approved
+   window" can be read off the page. The approval records behind those
+   windows are named in the Integrity section.
+4. **Activity ledger**: every run with lane label, start, end, kind, target
+   (a campaign that used UDP and TLS names both), what was sent, verdict, and
+   reason; a run that never started (for example packet capture could not
+   start on the assessor's side) says so, names no target, and is not a
+   finding about the owner's system (it is listed under Limitations and in the
+   executive summary); engagement totals; a static SVG
    timeline of the runs across the approval window and a per-call media bar
    (RTP packets to and from the peer), each next to a text table with the
    same numbers.
@@ -180,9 +190,9 @@ Derived observations and their severity:
 | `preflight-server-error` | low | A preflight answered 5xx or 6xx |
 | `tls-not-verified` | low | A TLS run did not verify the server |
 | `media-outside-scope` | low | A call verdict is `media-outside-scope` |
-| `oracle-assertion-failed` | info | The oracle failed on an answered, non-TLS call |
+| `oracle-assertion-failed` | info | The automatic packet check (the offline oracle) failed on an answered, non-TLS call |
 | `campaign-window-ended` | info | A campaign ended `authorization_lapsed`: Sippycup stopped it before a step because the approval window ended, was too short for that step, or the approval was withdrawn (a safety stop, not a target failure) |
-| `campaign-stopped` | info | A campaign ended in any other state but `succeeded` |
+| `campaign-stopped` | info | A campaign ended in any other state but `succeeded`, after at least one step or preflight started. A campaign that never started (no event stream, no preflight, no step) is not an observation: it is the assessor's failure and nothing was sent |
 | `capture-incomplete` | low | Capture failed or died during a run |
 
 ## Independent re-check
@@ -205,7 +215,8 @@ from the recorded artifacts, and lists any exception at the top:
 
 Windows come from the scope file and target profiles. A campaign manifest's
 `authorization.approval` window is what `campaign run` enforced, but it has no
-status, so the report does not use it as a window record; a campaign is checked against the windows of the records that approve
+status, so the report shows it (the id and window the file holds) and does not
+use it as a window record; a campaign is checked against the windows of the records that approve
 its addresses. A call or checks run whose recorded `profile.json` equals one
 of the practice approvals that `practice-target up` archived in
 `work/practice/approvals/` (loopback-only, `LOCAL-PRACTICE-ONLY`) is checked
@@ -221,11 +232,22 @@ SHA-256 of the scope file it was compiled from. They also keep a write-once
 copy of that scope file in `ENG/approved-scopes/scope-SHA256.yaml`. When the
 state is `compiled-current` and the copy still hashes to its name, the report
 checks the run's targets, window, status and destinations against that copy
-alone (the run's reasons say so), not against the current records. A run's own
-`profile.json` never authorizes anything. Runs without such a record (made
+alone (the run's reasons say so), not against the current records. Each run's window is the one in that copy,
+so after a renewal the older runs are checked against the older window. A run's
+own `profile.json` never authorizes anything. Runs without such a record (made
 before this change, or with a hand-written profile or manifest) are judged
 against the current records; when other runs do have a record, the report
 lists them under Limitations (`approval-in-force-unrecorded`).
+
+## Wording
+
+The report is for the system owner, who does not know the tool. Owner text uses
+plain words: "the automatic packet check" for the offline oracle, "the test
+softphone" for the softphone's own log and statistics, and no engagement-file
+names in a run's reasons. The precise names (the approval record file of each
+window, the evidence file names) stay in the Integrity and Evidence index
+sections. A loopback target is stated once, under Limitations (or, for practice
+runs, in the practice-runs item), not on every row.
 
 ## Privacy
 
