@@ -229,6 +229,45 @@ def _own_networks(root: Path) -> list[Any]:
     return networks
 
 
+def _printable_context(data: bytes, start: int, end: int) -> bool:
+    """True when the bytes just before and after a match are text (or the edges of the data)."""
+    def text(index: int) -> bool:
+        return index < 0 or index >= len(data) or data[index] in b"\t\r\n" or 0x20 <= data[index] < 0x7F
+    return text(start - 1) and text(end)
+
+
+def _inside(address: str, networks: list[Any]) -> bool:
+    parsed = ipaddress.ip_address(address)
+    return any(parsed.version == network.version and parsed in network for network in networks)
+
+
+def _nat_networks(root: Path) -> list[Any]:
+    """Where the target saw our source behind NAT (result ``natAddresses``).
+
+    The run records them from the softphone's log, which repeats the
+    ``received`` the registrar wrote in its Via, so the target chose them.
+    They are therefore expected only as text (a Via ``received=`` or a moved
+    Contact), never as the address of a captured packet: a target cannot
+    hide traffic to an unexpected party by naming it as our NAT address.
+    """
+    try:
+        result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(result, dict):
+        return []
+    values = result.get("natAddresses", [])
+    if not isinstance(values, list):
+        raise EvidenceError("result natAddresses must be a list")
+    networks = []
+    for value in values:
+        try:
+            networks.append(ipaddress.ip_network(ipaddress.ip_address(value)))
+        except (TypeError, ValueError) as error:
+            raise EvidenceError(f"invalid recorded NAT address {value!r}") from error
+    return networks
+
+
 def _classic_pcap_addresses(data: bytes) -> tuple[set[str], bool]:
     """Every IP address in a classic PCAP, for the link types tcpdump writes.
 
@@ -281,6 +320,7 @@ def privacy_findings(
         raise EvidenceError("max_capture_bytes must be a positive integer")
     plan = _read_plan(root)
     networks = _authorized_networks(plan, expected_networks) + _own_networks(root)
+    text_networks = networks + _nat_networks(root)
     findings: list[dict[str, str]] = []
     for artifact in artifacts:
         relative = artifact["path"]
@@ -328,10 +368,21 @@ def privacy_findings(
             )
         addresses: set[str] = set()
         for match in ASCII_ADDRESS.finditer(data):
+            if b":" in match.group() and not _printable_context(data, match.start(), match.end()):
+                # An IPv6 literal in text sits between printable characters
+                # (a SIP header, a log line). Two colons and a hex digit
+                # occur by chance in binary bytes (RTP audio, TLS records);
+                # a capture's packet addresses come from its headers below.
+                continue
             try:
                 addresses.add(str(ipaddress.ip_address(match.group().decode())))
             except ValueError:
                 pass
+        # Text may name our NAT address; a packet header may not (_nat_networks).
+        # "::" (and 0.0.0.0) as text names no party: two colons occur by chance
+        # in encrypted payload bytes (seen in a TLS call's capture).
+        addresses = {address for address in addresses
+                     if not _inside(address, text_networks) and not ipaddress.ip_address(address).is_unspecified}
         if suffix in CAPTURE_SUFFIXES:
             capture_addresses, parsed = _classic_pcap_addresses(data)
             addresses.update(capture_addresses)

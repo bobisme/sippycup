@@ -277,7 +277,10 @@ def run(ctx: Context) -> CheckResult:
                 console_file=directory / f"{probe['id']}-console.txt",
                 account=SoftphoneAccount(username=account, realm="*", registrar=None),
                 answer_timeout_seconds=ctx.answer_timeout,
-                allowed_media_addresses=tuple(ctx.approved_addresses) or (ctx.endpoint.address,),
+                allowed_media_addresses=(
+                    tuple(ctx.media_addresses) if ctx.media_addresses is not None
+                    else tuple(ctx.approved_addresses) or (ctx.endpoint.address,)
+                ),
                 allowed_media_networks=tuple(ctx.media_networks) or None,
                 allowed_media_ports=ctx.media_ports,
                 advertised_address=local,

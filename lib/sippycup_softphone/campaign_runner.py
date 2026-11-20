@@ -221,14 +221,50 @@ def parse_envelope(raw: bytes) -> tuple[dict[str, Any], str | None, dict[str, An
     return step, password, context
 
 
+def _media_allowed(context: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """The owner's media answer (``authorization.mediaAllowed``), or None without one."""
+    allowed = context["authorization"].get("mediaAllowed")
+    if allowed is None:
+        return None
+    if not isinstance(allowed, list) or not allowed or not all(isinstance(item, str) for item in allowed):
+        raise EnvelopeError("context authorization mediaAllowed is invalid")
+    try:
+        return tuple(str(ipaddress.ip_network(item)) for item in allowed)
+    except ValueError as error:
+        raise EnvelopeError("context authorization mediaAllowed is invalid") from error
+
+
+def media_step_addresses(destination: Mapping[str, Any], context: Mapping[str, Any]) -> tuple[str, ...]:
+    """The step's own destination addresses that may carry media.
+
+    All of them without a media answer; with one (``mediaAllowed``), only
+    those inside it, so the signaling address receives media only when the
+    owner listed it for media.
+    """
+    addresses = tuple(str(ipaddress.ip_address(item)) for item in destination["addresses"])
+    allowed = _media_allowed(context)
+    if allowed is None:
+        return addresses
+    networks = [ipaddress.ip_network(item) for item in allowed]
+    return tuple(
+        item for item in addresses
+        if any(ipaddress.ip_address(item).version == net.version and ipaddress.ip_address(item) in net
+               for net in networks)
+    )
+
+
 def media_networks(context: Mapping[str, Any]) -> tuple[str, ...] | None:
     """The frozen networks that bound the media peer.
 
     ``authorization.networks`` (which also admit signaling) and, when the plan
     has them, the media-only ``authorization.mediaNetworks``. The capture
     filter covers UDP in the media port range with every one of them, so all
-    admitted media is captured and counted by the watchdog.
+    admitted media is captured and counted by the watchdog. A plan with the
+    owner's media answer (``mediaAllowed``) admits media only inside it.
     """
+    allowed = _media_allowed(context)
+    if allowed is not None:
+        return allowed
     authorization = context["authorization"]
     combined: list[str] = []
     for key in ("networks", "mediaNetworks"):
@@ -269,8 +305,10 @@ def media_scope_record(
         source = "destination"
     elif rule == "media-network":
         authorization = context["authorization"]
-        source = "networks" if network in (authorization.get("networks") or []) else (
-            "mediaNetworks" if network in (authorization.get("mediaNetworks") or []) else None
+        source = "mediaNetworks" if network in (authorization.get("mediaNetworks") or []) else (
+            "networks" if network in (authorization.get("networks") or []) else (
+                "mediaAllowed" if network in (authorization.get("mediaAllowed") or []) else None
+            )
         )
     return {
         "peer": decision.get("peer"),
@@ -735,12 +773,11 @@ def run(
             registration_timeout_seconds=min(
                 MAX_REGISTRATION_TIMEOUT_SECONDS, max(1.0, budget / 3)
             ),
-            allowed_media_addresses=tuple(
-                str(ipaddress.ip_address(item)) for item in destination["addresses"]
-            ),
+            allowed_media_addresses=media_step_addresses(destination, context),
             # bn-2g0: the frozen authorization networks (and the media-only
             # mediaNetworks) also scope media, so a proxy's media servers on
             # another approved address are allowed; the capture covers them.
+            # With the owner's media answer (mediaAllowed) only that answer.
             allowed_media_networks=media_networks(context),
             allowed_media_ports=(media["start"], media["end"]),
             pin_signaling=True,

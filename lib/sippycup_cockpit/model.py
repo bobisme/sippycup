@@ -579,7 +579,11 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
             "state": state,
             "steps": steps[identifier],
         })
-    if not current_found:
+    # With every other stage done, a recommended practice stage becomes the
+    # current one again, unless the operator chose to skip it: then the
+    # engagement is complete (a real engagement has no practice call).
+    skipped = bool((model.get("preferences") or {}).get("skipPractice"))
+    if not current_found and not skipped:
         for stage in stages:
             if stage["state"] == "recommended":
                 stage["state"] = "current"

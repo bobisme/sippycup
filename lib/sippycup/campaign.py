@@ -408,6 +408,35 @@ def _media_networks(value: Any) -> list[str]:
     return [str(item) for item in parsed]
 
 
+def _media_allowed(value: Any, networks: list[Any], media_networks: list[str] | None) -> list[str]:
+    """Validate the optional ``authorization.mediaAllowed``: the owner's media answer.
+
+    When present, a call step admits media only inside these networks (not at
+    its own signaling address unless one of them holds it). It only narrows:
+    each must lie inside ``authorization.networks`` or ``mediaNetworks``.
+    Canonical, unique, sorted; it may hold single addresses (/32, /128).
+    """
+    items = _unique_list(value, "authorization.mediaAllowed")
+    if not items:
+        raise ManifestError("authorization.mediaAllowed must list at least one network")
+    allowed = [*networks, *(ipaddress.ip_network(item) for item in media_networks or [])]
+    parsed = []
+    for index, item in enumerate(items):
+        text = _string(item, f"authorization.mediaAllowed[{index}]")
+        try:
+            network = ipaddress.ip_network(text, strict=True)
+        except ValueError as error:
+            raise ManifestError(f"invalid media network {text!r}: {error}") from error
+        if not any(network.version == outer.version and network.subnet_of(outer) for outer in allowed):
+            raise ManifestError(
+                f"authorization.mediaAllowed {text} is outside authorization.networks and mediaNetworks; "
+                "it may only narrow where media goes"
+            )
+        parsed.append(network)
+    parsed.sort(key=lambda item: (item.version, int(item.network_address), item.prefixlen))
+    return [str(item) for item in parsed]
+
+
 def _validate_ceilings(value: Any) -> dict[str, int]:
     ceilings = _mapping(value, "authorization.ceilings")
     _keys(ceilings, "authorization.ceilings", set(CEILING_KEYS))
@@ -911,6 +940,7 @@ def compile_plan(
         {
             "networks",
             "mediaNetworks",
+            "mediaAllowed",
             "approval",
             "signalingPorts",
             "mediaPorts",
@@ -955,6 +985,17 @@ def compile_plan(
         if "mediaNetworks" in authorization
         else None
     )
+    media_allowed = (
+        _media_allowed(authorization["mediaAllowed"], networks, media_networks)
+        if "mediaAllowed" in authorization
+        else None
+    )
+    # A link-local network is only the routed practice target (sippycup.link_local).
+    from sippycup.link_local import problems as link_local_problems
+
+    link_local = link_local_problems([*map(str, networks), *(media_networks or [])])
+    if link_local:
+        raise ManifestError(link_local[0])
 
     signaling_ports = {
         _uint(value, f"authorization.signalingPorts[{index}]")
@@ -1360,6 +1401,7 @@ def compile_plan(
         "authorization": {
             "networks": [str(item) for item in networks],
             **({"mediaNetworks": media_networks} if media_networks is not None else {}),
+            **({"mediaAllowed": media_allowed} if media_allowed is not None else {}),
             **({"approval": approval} if approval is not None else {}),
             "signalingPorts": port_terms,
             "mediaPorts": {"start": media_start, "end": media_end},

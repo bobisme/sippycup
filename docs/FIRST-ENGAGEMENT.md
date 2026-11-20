@@ -13,8 +13,9 @@ target (`./bin/sippycup practice-target up`). Rehearse the sequence there
 first. `work/acme` is a placeholder for your engagement directory.
 
 The commands below show `--practice`. Against the owner's target, give the
-same command without `--practice`. That route was not run when this page was
-written (loopback only), so check its first output line carefully.
+same command without `--practice`. That route (the toolbox's own private
+network namespace, NAT, a real capture interface) is rehearsed on this host by
+`make routed-rehearsal`; run it once before the real target (section 0).
 
 ## 0. Before you start (offline)
 
@@ -38,6 +39,23 @@ The `umask` keeps the file private like the other engagement files (a plain
   and the media port range.
 - If `scope init` says `engagement directory does not exist`, run the
   `journal init ... --title "..." --owner "..."` command it prints first.
+
+### Before the real target: the routed rehearsal
+
+```sh
+make routed-rehearsal
+```
+
+It walks the whole chain (scope, compile, ready, preflight, calls, TLS+SRTP,
+DTMF, matrix, campaign, checks, evidence lint, owner report, an overlapping
+call, and `stop` during a call) with the commands exactly as this page gives
+them for a real target: no `--practice`. The target is the practice image on
+an internal network; your commands reach it from their private network
+namespace through a real NAT (the rootless port forwarder), so you see what
+the owner's network will show you. Nothing leaves this machine. It prints
+`Routed rehearsal: PASS in ... (14/14 stages)` at the end; see `PRACTICE-TARGET.md`, "Routed
+rehearsal". If it fails, fix that first: the same command will fail against
+the owner.
 
 ### Practice target: answer the questions as you will for the owner
 
@@ -387,7 +405,10 @@ When they are right, the output contains these lines:
   approval in `scope.yaml`, run `scope compile`, move `plan.json` aside, and
   plan again.
 - Use `--interface lo` only with `--practice`. Against the owner's target,
-  leave out `--interface` (the default is `any`).
+  leave out `--interface` (the default is `any`). `campaign run` always runs
+  in the image's private network namespace (like `call`), where packet
+  capture works without root; you need no `--isolated`. If capture cannot
+  start, it says so, nothing is sent, and no run directory is kept.
 
 ## 6. Security checks (LIVE, only if the owner approved them)
 
@@ -503,6 +524,42 @@ left after 30 s, then checks that nothing is still sending and prints
 --dry-run` lists what it would stop and signals nothing. Do not run `stop`
 while you want another run from this checkout to continue.
 
+## Testing from behind NAT
+
+On the engagement you are almost always behind NAT: your machine's private
+address is translated to a public address that the owner allowlists. The
+routed rehearsal shows the same effects on this host. What you will see:
+
+- The SDP and the first Via carry your private address (the container uses
+  your machine's own address). The target cannot reach that address; media
+  returns only because the target sends RTP back to where it came from
+  (symmetric RTP, `rtp_symmetric` / `comedia`). If the owner's side does not,
+  calls are answered with no audio from them: `diagnose` names this
+  `possible-nat-one-way-media`.
+- The softphone reads the `received`/`rport` the registrar writes in its Via
+  and moves its Contact there: `call` prints a `NAT:` note with the address
+  the target saw, and records it as `natAddresses` in `result.json`. That is
+  the address the owner must allowlist; if it is not the one you gave them,
+  stop and tell them.
+- `evidence lint` accepts that address where it appears as text (a Via
+  `received=`), never as a packet's address.
+- RTCP is sparse in the received direction; judge media by RTP.
+- A request from the target to you (a re-INVITE, an inbound call) reaches you
+  only while your NAT keeps the flow open; a long silence can close it.
+- `ready` shows the route your host takes to the target; the commands send
+  from their private namespace, whose source address is the same host
+  address.
+
+## Overlapping runs
+
+A sending command (`call`, `matrix run`, `checks run`, `campaign run`,
+`preflight`, `media send`) refuses to start while another sender of this
+checkout is active: two runs against one target spoil each other's verdicts.
+It names the other run and sends nothing. Wait for it, or end it with
+`./bin/sippycup stop`. To run beside it on purpose, set
+`SIPPYCUP_ALLOW_OVERLAP=<the name it printed>`; both are then reported as
+"another run was active; this verdict is unreliable".
+
 ## Troubleshooting
 
 Each row is an error or verdict seen in this walk-through:
@@ -516,6 +573,9 @@ Each row is an error or verdict seen in this walk-through:
 | `PREFLIGHT-FAILED` ... `unable to get local issuer certificate` | wrong or stale `tls_ca_file` | Get the owner's CA again. |
 | `PREFLIGHT-FAILED` `no_response: timeout`, target on 127.x | `--practice` is missing | Add `--practice` (the call prints this hint). The failed run stays in the report: record it as a mistake in the journal. |
 | `Guided call: MEDIA-OUTSIDE-SCOPE` (exit 1) | media address (or network) not in the scope | Stop. Ask the owner to approve the media address. |
+| `Guided call: MEDIA-OUTSIDE-SCOPE` (exit 1) with the peer at the signaling address | the owner's media answer (question 12) does not list the signaling address, so media is admitted only where the answer says | Stop. Ask the owner whether the signaling address also carries media; if yes, add it to `media.networks` and run `scope compile`. |
+| `call: another sending command of this checkout is active` (exit 2) | another call, matrix, campaign or checks run of this checkout is still running | Nothing was sent. Wait for it, or `./bin/sippycup stop`. |
+| `campaign: error: packet capture could not start (...)` | `campaign run` was started outside the launcher's container (for example `bin/campaign` on the host) | Nothing was sent and no run directory was kept. Use `./bin/sippycup campaign run ...`. |
 | `Guided call: BLOCKED` / `BLOCK: authorization has expired (valid_until ...)` | window ended | Ask the owner for a new written window, record it, and run `scope compile`. |
 | `campaign: error: refusing to plan: the approval window has ended` / `refusing to plan: the approval in the scope file beside the manifest ... differs` / `refusing to run: ...` (exit 2) | window ended, not open yet, too short for the first step, or the approval in `scope.yaml` was revoked or changed since `campaign.yaml` was written (`scope compile` leaves the old `campaign.yaml` when the scope has an error) | Nothing was sent. Ask the owner for a new written window, record it, run `scope compile`, then `campaign plan` again. |
 | `Campaign: AUTHORIZATION_LAPSED` (exit 1) and `Safety stop on our side` | the window ended (or the approval was revoked) between two steps | The completed steps are valid. Ask the owner for a new window before you send the rest. |

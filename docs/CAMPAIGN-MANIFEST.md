@@ -846,14 +846,16 @@ generic step runner.
 
 The lifecycle runs its own `tcpdump`, so it needs `NET_RAW`. A rootless
 container on the host network does not have it, and neither does an
-unprivileged host shell; both stop with `capture process failed during
-startup` before any traffic. With rootless Podman, use `--isolated` as shown.
-The launcher then runs the packaged `campaign` in the container's private
+unprivileged host shell; both stop with `packet capture could not start`
+before any traffic, and keep no run directory. `./bin/sippycup campaign run`
+and `campaign execute` therefore always run in the image (with or without
+`--isolated`, as shown). The launcher runs the packaged `campaign` in the container's private
 network namespace and rewrites arguments that resolve beneath the host `work/`
 directory to `/work/...`, so the plan, manifest, and run root must live there.
 The other `campaign execute` examples in this document omit `--isolated` and
-`work/` for brevity. Without container options the command runs directly on
-the host and needs host SIPp, tcpdump, and capture privileges. OPTIONS
+`work/` for brevity. Only `bin/campaign` started directly (not through
+`./bin/sippycup`) runs on the host, and it needs host SIPp, tcpdump, and
+capture privileges. OPTIONS
 preflights and `options` steps use the in-tree Python client
 (`lib/sippycup/options.py`), so no separate OPTIONS tool is needed.
 

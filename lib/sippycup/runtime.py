@@ -822,6 +822,28 @@ def _validate_media_networks(value: Any) -> list[str]:
     return items
 
 
+def _validate_media_allowed(value: Any, networks: list[Any], media_networks: list[str] | None) -> list[str]:
+    """Independently check ``mediaAllowed``: canonical, sorted, inside the authorized networks."""
+    items = _unique_array(value, "authorization.mediaAllowed")
+    if not items or any(not isinstance(item, str) for item in items):
+        raise RuntimeError("authorization.mediaAllowed must be a non-empty list of strings")
+    outer = [*networks, *(ipaddress.ip_network(item) for item in media_networks or [])]
+    parsed = []
+    for item in items:
+        try:
+            network = ipaddress.ip_network(item, strict=True)
+        except ValueError as error:
+            raise RuntimeError(f"invalid media network {item!r}") from error
+        if str(network) != item or not any(
+            network.version == other.version and network.subnet_of(other) for other in outer
+        ):
+            raise RuntimeError("authorization.mediaAllowed is not canonical or not inside the authorized networks")
+        parsed.append(network)
+    if parsed != sorted(parsed, key=lambda item: (item.version, int(item.network_address), item.prefixlen)):
+        raise RuntimeError("authorization.mediaAllowed is not in frozen sorted order")
+    return items
+
+
 def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise RuntimeError("plan must be an object")
@@ -869,6 +891,8 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         # Optional, media only: present only when the manifest states it, so
         # plans frozen without it validate exactly as before.
         | ({"mediaNetworks"} if "mediaNetworks" in authorization else set())
+        # Optional owner's media answer (narrows media admission only).
+        | ({"mediaAllowed"} if "mediaAllowed" in authorization else set())
         # Optional approval window, frozen only when the manifest states it.
         | ({"approval"} if "approval" in authorization else set()),
     )
@@ -895,6 +919,13 @@ def _validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         if "mediaNetworks" in authorization
         else None
     )
+    if "mediaAllowed" in authorization:
+        _validate_media_allowed(authorization["mediaAllowed"], networks, media_networks)
+    from sippycup.link_local import problems as link_local_problems
+
+    link_local = link_local_problems([*map(str, networks), *(media_networks or [])])
+    if link_local:
+        raise RuntimeError(f"plan authorization is refused: {link_local[0]}")
     ports = _unique_array(
         authorization["signalingPorts"], "authorization.signalingPorts"
     )

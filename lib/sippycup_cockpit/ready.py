@@ -768,6 +768,9 @@ def check_network(host: Host, model: dict[str, Any], mode: str, probe: dict[str,
         lines.append(f"inside a {mode} container ({probe.get('network_mode')} network) the route works; "
                      f"source {inner}" + ("" if inner == source else f" (translated to {source} by the container "
                                                                        "runtime on the way out)"))
+    if os.environ.get("SIPPYCUP_ROUTED_ADDRESS") == address:
+        lines.append(f"routed rehearsal: the toolbox containers map {address} to host loopback, so the host "
+                     "route above is never used for it; nothing leaves this host")
     return Check("network", title, status, lines, fix), source
 
 
@@ -784,7 +787,9 @@ def authorizes(model: dict[str, Any], document: dict[str, Any] | None, zone: Any
         f"Target         {target.get('host')} port {target.get('port')}/{target.get('transport')}"
         + (f" (TLS name {target['tls_server_name']})" if target.get("tls_server_name") else ""),
         f"Approved addrs {', '.join(str(item) for item in target.get('approved_addresses') or []) or 'none'}"
-        " (signaling and media)",
+        + (" (signaling and media)" if not isinstance(media.get("addresses"), list) else
+           f" (media only at {', '.join(str(item) for item in media['addresses']) or 'none of them'}: "
+           "the owner's media answer)"),
     ]
     approved_dial = target.get("approved_destinations")
     lines.append("Destinations   " + (

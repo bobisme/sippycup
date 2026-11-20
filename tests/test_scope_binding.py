@@ -590,7 +590,7 @@ class LauncherScopeTests(unittest.TestCase):
     def launch(self, *argv: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as name:
             runtime = Path(name) / "runtime"
-            runtime.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+            runtime.write_text("#!/bin/sh\nif [ \"$1\" = ps ]; then echo '[]'; exit 0; fi\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
             runtime.chmod(runtime.stat().st_mode | stat.S_IXUSR)
             environment = {key: value for key, value in os.environ.items() if key != "SIPPYCUP_REQUIRE_PROFILE"}
             environment.update({"SIPPYCUP_RUNTIME": str(runtime), "SIPPYCUP_IMAGE": "example.invalid/sippycup:test"})

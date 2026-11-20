@@ -1059,6 +1059,36 @@ def parse_pjsua_log(text: str) -> dict[str, Any]:
     return facts
 
 
+_ADDRESS_CHANGE = re.compile(
+    r"IP address change detected for account \d+ \((\S+):(\d+) --> (\S+):(\d+)\)"
+)
+
+
+def nat_addresses(text: str) -> list[dict[str, Any]]:
+    """Where the far end saw this softphone, when that differs from its own address.
+
+    PJSUA compares its own address with the ``received``/``rport`` the
+    registrar puts in the Via of its response, and on a difference prints
+    ``IP address change detected for account N (A:p --> B:q)`` and moves its
+    Contact to B:q. B is the address the target saw: our own source after NAT
+    (on an engagement, usually the public address the owner allowlisted).
+    Only literal IP addresses are returned, each once.
+    """
+    found: list[dict[str, Any]] = []
+    for match in _ADDRESS_CHANGE.finditer(text):
+        local, translated = match.group(1).strip("[]"), match.group(3).strip("[]")
+        try:
+            local_text = str(ipaddress.ip_address(local))
+            translated_text = str(ipaddress.ip_address(translated))
+        except ValueError:
+            continue
+        if translated_text == local_text or any(item["address"] == translated_text for item in found):
+            continue
+        found.append({"address": translated_text, "port": int(match.group(4)),
+                      "local": local_text, "localPort": int(match.group(2))})
+    return found
+
+
 def _private_root(explicit: Path | None) -> Path | None:
     if explicit is not None:
         return explicit

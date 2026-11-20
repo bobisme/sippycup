@@ -285,6 +285,22 @@ def capture_filter(addresses: Sequence[str], media_networks: Sequence[str] = ())
     return scope
 
 
+def _answered_media(document: dict[str, Any]) -> tuple[str, ...] | None:
+    """The owner's literal media answer when the profile records one (media.addresses)."""
+    from sippycup_workbench.media_scope import media_addresses
+
+    media = document.get("media")
+    if not isinstance(media, dict) or "addresses" not in media:
+        return None
+    return media_addresses(document)
+
+
+def _overlap_field() -> dict[str, Any]:
+    from sippycup.overlap_record import field
+
+    return field()
+
+
 def _utc(instant: datetime) -> str:
     return instant.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
@@ -419,6 +435,7 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
                       now=deps.now, monotonic=deps.monotonic,
                       approved_addresses=tuple(approved_addresses), recheck=lapsed, cancel=cancel,
                       media_networks=tuple(media_networks), media_ports=media_ports,
+                      media_addresses=_answered_media(document),
                       place_call=deps.place_call,
                       call_environment=_sanitized_environment(
                           secrets_list, [options.secret_env] if options.secret_env else [],
@@ -576,6 +593,8 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
         "timestamps": timestamps,
         "networkMode": network_mode,
         "networkActivity": activity,
+        # Started beside another run of this checkout (finding 6).
+        **_overlap_field(),
     }
     value = _redact(value, secrets_list)
     _write_json(run_dir / "timestamps.json", timestamps)

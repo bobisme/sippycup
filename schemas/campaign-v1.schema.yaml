@@ -44,6 +44,17 @@ properties:
         maxItems: 16
         uniqueItems: true
         items: {type: string}
+      mediaAllowed:
+        description: >-
+          Optional: the owner's media answer (scope media.networks), written by
+          scope compile. When present, a call step admits media only inside
+          these networks (single addresses as /32 or /128), not at its own
+          signaling address unless one of them holds it. Each must lie inside
+          networks or mediaNetworks; it only narrows.
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {type: string}
       approval:
         description: >-
           Optional approval window of the owner's written authorization.

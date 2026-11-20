@@ -43,7 +43,8 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
     def make_runtime(self, root: Path) -> Path:
         runtime = root / "runtime"
         runtime.write_text(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+            # `ps` answers like an idle runtime: no other run of this checkout.
+            "#!/bin/sh\n" 'if [ "$1" = ps ]; then echo "[]"; exit 0; fi\n' "printf '%s\\n' \"$@\"\n",
             encoding="utf-8",
         )
         runtime.chmod(runtime.stat().st_mode | stat.S_IXUSR)
@@ -581,13 +582,17 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root_name:
             runtime = self.make_runtime(Path(root_name))
             env = {"SIPPYCUP_RUNTIME": str(runtime)}
-            host_network = run_cli("preflight", "192.0.2.1", env=env)
+            # Plain preflight sends from the private namespace (like call);
+            # only --admin keeps the host network.
+            host_network = run_cli("--admin", "preflight", "192.0.2.1", env=env)
             isolated = run_cli("--isolated", "preflight", "192.0.2.1", env=env)
+            plain = run_cli("preflight", "192.0.2.1", env=env)
             offline = run_cli("mcp", env=env)
+        self.assertNotIn("--network=host", plain.stdout.splitlines())
         host_arguments = host_network.stdout.splitlines()
         self.assertIn("--network=host", host_arguments)
         self.assertIn("--hostname=sippycup", host_arguments)
-        for result in (host_network, isolated, offline):
+        for result in (host_network, isolated, plain, offline):
             arguments = result.stdout.splitlines()
             self.assertFalse([item for item in arguments if item.startswith("--add-host")])
             self.assertFalse([item for item in arguments if item.endswith(":/etc/hosts:ro")])
@@ -603,6 +608,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             inspect_branch = f"printf '%s\\n' '{inspect.replace('HOSTS', str(hosts))}'"
         runtime.write_text(
             "#!/bin/sh\n"
+            'if [ "$1" = ps ]; then echo "[]"; exit 0; fi\n'
             'if [ "$1" = container ] && [ "$2" = inspect ]; then\n'
             f"    {inspect_branch}\n"
             "    exit 0\n"
@@ -826,6 +832,7 @@ class UnifiedEntrypointContractTests(unittest.TestCase):
             runtime = root / "runtime"
             runtime.write_text(
                 "#!/bin/sh\n"
+                'if [ "$1" = ps ]; then echo "[]"; exit 0; fi\n'
                 'if [ \"${SIPPYCUP_TEST_SIGNAL:-}\" = yes ]; then kill -TERM \"$$\"; fi\n'
                 'exit \"${SIPPYCUP_TEST_EXIT:-0}\"\n',
                 encoding="utf-8",

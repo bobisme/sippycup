@@ -56,11 +56,46 @@ fi
 if [[ ! "${account}" =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
     fail "invalid practice account name"
 fi
-# The container must have no interface other than loopback.
-for interface in /sys/class/net/*; do
-    [[ "$(basename -- "${interface}")" == lo ]] \
-        || fail "refusing to start with a non-loopback interface: ${interface##*/}"
-done
+# Routed rehearsal (tools/routed_rehearsal.py): the target sits on a private
+# rootless network with no route out (podman network create --internal), and
+# its ports are published on host loopback only. The toolbox reaches it at
+# the link-local address the routed rehearsal maps to host loopback, so
+# Asterisk advertises that address in Contact and SDP.
+readonly routed_address="${SIPPYCUP_PRACTICE_ROUTED_ADDRESS:-}"
+bind_address="${address}"
+media_address="${address}"
+bind_rtp=yes
+client_match=127.0.0.0/8
+transport_nat="; loopback-only namespace: no NAT settings"
+if [[ -n "${routed_address}" ]]; then
+    if [[ ! "${routed_address}" =~ ^169\.254\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+        fail "routed address must be a 169.254.0.0/16 literal: ${routed_address}"
+    fi
+    for octet in "${BASH_REMATCH[@]:1}"; do
+        (( octet <= 255 )) || fail "invalid routed address: ${routed_address}"
+    done
+    # No default route at all: the internal network cannot reach any host.
+    if awk 'NR > 1 && $2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route; then
+        fail "refusing to start routed with a default route (use an --internal network)"
+    fi
+    if [[ -r /proc/net/ipv6_route ]] \
+        && awk '$1 == "00000000000000000000000000000000" && $2 == "00" && $10 != "lo" { found = 1 } END { exit !found }' /proc/net/ipv6_route; then
+        fail "refusing to start routed with an IPv6 default route"
+    fi
+    bind_address=0.0.0.0
+    media_address="${routed_address}"
+    bind_rtp=no
+    # Every request reaches the routed target through host loopback and the
+    # runtime's port forwarder, which rewrites the source.
+    client_match=0.0.0.0/0
+    transport_nat="external_signaling_address = ${routed_address}"$'\n'"external_media_address = ${routed_address}"$'\n'"local_net = 127.0.0.0/8"
+else
+    # The container must have no interface other than loopback.
+    for interface in /sys/class/net/*; do
+        [[ "$(basename -- "${interface}")" == lo ]] \
+            || fail "refusing to start with a non-loopback interface: ${interface##*/}"
+    done
+fi
 
 [[ -f "${state}/account.password" && ! -L "${state}/account.password" ]] \
     || fail "missing ${state}/account.password"
@@ -90,11 +125,15 @@ openssl req -new -nodes -quiet \
     -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
     -keyout "${tls}/server.key" -out "${tls}/server.csr" \
     -subj "/O=Sippycup/CN=${dns_name}" 2>/dev/null
+# Routed, the certificate names only the routed address: the loopback
+# address is not reachable from the tool container there, and the evidence
+# lint would rightly flag it as an unexpected network.
+server_ip="${routed_address:-${address}}"
 printf '%s\n' \
     "basicConstraints=critical,CA:FALSE" \
     "keyUsage=critical,digitalSignature" \
     "extendedKeyUsage=serverAuth" \
-    "subjectAltName=DNS:${dns_name},IP:${address}" \
+    "subjectAltName=DNS:${dns_name},IP:${server_ip}" \
     >"${tls}/server.ext"
 openssl x509 -req -in "${tls}/server.csr" \
     -CA "${tls}/ca.crt" -CAkey "${tls}/ca.key" -CAcreateserial \
@@ -129,6 +168,11 @@ trunk_token="$(openssl rand -hex 24)"
 render() {
     local source="$1" destination="$2" text
     text="$(<"${source}")"
+    text="${text//@BIND_ADDRESS@/${bind_address}}"
+    text="${text//@MEDIA_ADDRESS@/${media_address}}"
+    text="${text//@BIND_RTP@/${bind_rtp}}"
+    text="${text//@CLIENT_MATCH@/${client_match}}"
+    text="${text//@TRANSPORT_NAT@/${transport_nat}}"
     text="${text//@ADDRESS@/${address}}"
     text="${text//@DNS_NAME@/${dns_name}}"
     text="${text//@ACCOUNT@/${account}}"
@@ -160,9 +204,12 @@ install -m 0644 -- "${tls}/proxy.crt" "${state}/proxy.crt.tmp"
 mv -f -- "${state}/proxy.crt.tmp" "${state}/proxy.crt"
 
 # The proxy runs beside Asterisk (bn-2g0): it forks its own workers, logs to
-# the container log, and uses small fixed memory pools.
-/usr/sbin/kamailio -f "${runtime_root}/etc/kamailio/kamailio.cfg" \
-    -Y "${runtime_root}/kamailio" -P "${runtime_root}/kamailio/kamailio.pid" \
-    -m 32 -M 4 -E -DD &
+# the container log, and uses small fixed memory pools. The routed rehearsal
+# publishes only Asterisk (one mapped address), so it starts no proxy.
+if [[ -z "${routed_address}" ]]; then
+    /usr/sbin/kamailio -f "${runtime_root}/etc/kamailio/kamailio.cfg" \
+        -Y "${runtime_root}/kamailio" -P "${runtime_root}/kamailio/kamailio.pid" \
+        -m 32 -M 4 -E -DD &
+fi
 
 exec /usr/sbin/asterisk -f -n -C "${runtime_root}/etc/asterisk.conf"

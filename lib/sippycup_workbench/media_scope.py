@@ -205,8 +205,22 @@ def profile_media(document: Any) -> tuple[tuple[str, ...], tuple[int, int] | Non
     return tuple(networks or ()), ports
 
 
-def profile_scope(document: Any) -> MediaScope:
-    """The media scope of a profile: its literal approved addresses plus its media rule."""
+ADDRESSES_FIELD = "media.addresses"
+
+
+def media_addresses(document: Any) -> tuple[str, ...]:
+    """The literal addresses media may use: the owner's media answer when the profile has one.
+
+    ``scope compile`` writes ``media.addresses``: the single addresses the
+    owner listed under the media question (question 12), which promises that
+    media goes only there. When it is present, media is admitted only at
+    those addresses (each must also be a literal approved address; nothing
+    outside ``target.approved_addresses`` is ever added) and in
+    ``media.networks``: the signaling address receives media only when the
+    owner listed it for media too. A profile without it (hand-written, or
+    compiled before this rule) admits media at every literal approved
+    address, as before.
+    """
     target = document.get("target") if isinstance(document, dict) else None
     approved = target.get("approved_addresses") if isinstance(target, dict) else None
     addresses: list[str] = []
@@ -215,8 +229,53 @@ def profile_scope(document: Any) -> MediaScope:
             addresses.append(str(ipaddress.ip_address(str(item))))
         except ValueError:
             continue
+    media = document.get("media") if isinstance(document, dict) else None
+    if not isinstance(media, dict) or "addresses" not in media:
+        return tuple(addresses)
+    listed = media.get("addresses")
+    answered: list[str] = []
+    for item in listed if isinstance(listed, list) else []:
+        try:
+            text = str(ipaddress.ip_address(str(item)))
+        except ValueError:
+            continue
+        if text in addresses and text not in answered:
+            answered.append(text)
+    return tuple(answered)
+
+
+def validate_addresses(value: Any, approved: Sequence[str], errors: list[str]) -> list[str] | None:
+    """``media.addresses``: canonical literal addresses, each a literal approved address."""
+    if not isinstance(value, list):
+        errors.append(f"{ADDRESSES_FIELD} must be a list of literal IP addresses (possibly empty)")
+        return None
+    result: list[str] = []
+    for index, item in enumerate(value):
+        try:
+            parsed = ipaddress.ip_address(str(item))
+        except ValueError:
+            errors.append(f"{ADDRESSES_FIELD}[{index}] {item!r} is not a literal IP address")
+            return None
+        if not isinstance(item, str) or str(parsed) != item:
+            errors.append(f"{ADDRESSES_FIELD}[{index}] must be written in canonical form ({parsed})")
+            return None
+        if item not in approved:
+            errors.append(
+                f"{ADDRESSES_FIELD}[{index}] {item} is not one of target.approved_addresses; "
+                "a media address must also be a literal approved address"
+            )
+            return None
+        if item in result:
+            errors.append(f"{ADDRESSES_FIELD}[{index}] {item} is listed twice")
+            return None
+        result.append(item)
+    return result
+
+
+def profile_scope(document: Any) -> MediaScope:
+    """The media scope of a profile: its literal media addresses plus its media rule."""
     networks, ports = profile_media(document)
-    return MediaScope(tuple(addresses), networks, ports)
+    return MediaScope(media_addresses(document), networks, ports)
 
 
 def capture_terms(networks: Iterable[str]) -> str:

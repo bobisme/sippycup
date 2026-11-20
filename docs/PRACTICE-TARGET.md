@@ -624,6 +624,51 @@ is checked exactly as before; a practice approval never covers a run that did
 not use it. Runs made before this archive existed have no record and are
 still reported.
 
+## Routed rehearsal
+
+```sh
+make routed-rehearsal        # or: python3 tools/routed_rehearsal.py [--list]
+```
+
+Every other rehearsal joins the target's namespace (`--practice`), so
+signaling, media and capture are loopback. On an engagement the toolbox sends
+from its own private (pasta) network namespace, captures on a real interface
+and reaches the target through NAT. The routed rehearsal walks the whole
+owner-facing chain on exactly that path, with every command as
+`FIRST-ENGAGEMENT.md` gives it for a real target (no `--practice`):
+
+| | |
+|---|---|
+| target | the practice image as `<SIPPYCUP_PRACTICE_CONTAINER>-routed` on a rootless `--internal` network (no route to any host; the entrypoint refuses to start with a default route). SIP 5060 udp/tcp, TLS 5061 and 5071, RTP 20000-20019 are published on `127.0.0.1` only. Asterisk binds 0.0.0.0 inside its own namespace, advertises `169.254.77.2` in Contact and SDP, sends symmetric RTP, and serves a certificate for `sippycup-practice` and `169.254.77.2` only. |
+| toolbox | `SIPPYCUP_ROUTED_PRACTICE=<that container>` makes the launcher check it (running, label `dev.sippycup.profile=routed-practice`, a `dev.sippycup.routed-address` in `169.254.0.0/16`, exactly one network and that one internal) and fail closed otherwise. Every networked container then gets the normal private network plus one pasta mapping: `169.254.77.2` to host loopback. Nothing runs on the host network, and host-side commands only read. |
+| scope | `169.254.77.2` is written into `scope.yaml` as an owner's address would be; the approval id is `ROUTED-REHEARSAL`, not a practice approval, so the owner report judges the runs like a real engagement's. |
+
+The stages: scope and compile, rehearse and `ready`, preflight (UDP and
+verified TLS), a guided call and a DTMF call, a TLS+SRTP call and a 2x2
+matrix, `campaign plan` and the documented `campaign run` (no `--isolated`),
+`checks run`, a wire check (every captured packet has `169.254.77.2` on one
+side; the address the target saw is recorded as `natAddresses`; `evidence
+lint` reports no unexpected network), a second call while one is connected
+(refused: another run is active), `stop` during that call (`Silence: PROVED`,
+the call `cancelled`), manifests and journal, the owner report (no loopback
+or practice wording), and a stop leg whose media answer is another address,
+so the call stops `media-outside-scope` at the signaling address.
+
+What it shows about NAT (see `FIRST-ENGAGEMENT.md`, "Testing from behind
+NAT"): the toolbox's SDP and Via carry the host's own address (pasta copies
+it); the target sees the rootless port forwarder's address and a new source
+port; PJSUA reads the registrar's `received`/`rport`, moves its Contact there
+and re-registers; media returns only because the target sends symmetric RTP.
+
+Safety: a link-local address is never forwarded beyond the local segment, but
+a send to one from the host network would still leave on the default route's
+interface. So no command accepts a target, approved address or media network
+in `169.254.0.0/16` (or `fe80::/10`) unless the launcher has joined the routed
+target and exported that exact address (`SIPPYCUP_ROUTED_ADDRESS`, cleared
+from the caller's environment on every start). The rehearsal removes the
+container, its network and the password it wrote; it refuses to start when
+the container already exists or a published port is taken.
+
 ## Regression gate
 
 ```sh
