@@ -30,11 +30,10 @@ PRACTICE_EXAMPLE = ROOT / "examples" / "scope" / "practice-scope.yaml"
 WINDOW = ("2026-11-20T11:00:00Z", "2026-11-20T15:00:00Z")  # contains NOW
 
 # Every answer for the practice target, in the order `scope answer` asks them
-# on a new file (the approval comes right after the window).
+# on a new file (the approval comes last, with the scope it approves on screen).
 PRACTICE_ANSWERS = [
     "LOCAL-PRACTICE-ONLY", "practice target (you)",          # 1
     "UTC", "2026-11-20 11:00", "+4h",                         # 3: zone, start, end
-    "approved",                                               # 2
     "127.0.0.2",                                              # 4
     "5060, 5061", "udp, tls",                                 # 5: ports, transports
     "practice", "127.0.0.2", "udp", "5060", "y",              # target 1, another
@@ -58,6 +57,7 @@ PRACTICE_ANSWERS = [
     "options, call", "none",                                  # 21
     "you", "this terminal", "yes",                            # 22
     "7", "private",                                           # 23 (24 is optional: not asked)
+    "approved",                                               # 2, last
 ]
 
 
@@ -280,11 +280,12 @@ class RejectionTests(AnswerTestCase):
         self.new_scope()
         self.answer(["10.20.30.0/24"], "4")
         self.answer(["5060", "udp"], "5")
-        _, out = self.answer(["", "", "edge", "10.99.0.1", "10.20.30.40", "udp", "5070", "5060", "n"], "5")
+        _, out = self.answer(["edge", "10.99.0.1", "10.20.30.40", "udp", "5070", "5060", "n"], "5")
         self.assertIn("target address is outside the approved signaling networks", out)
         self.assertIn("target port is not in the approved signaling ports", out)
         _, out = self.answer(["abc", "40", "50", "2"], "17")
-        self.assertIn("calls must be an integer from 1 to", out)
+        self.assertIn("calls must be a whole number, 1 or more", out)
+        self.assertNotIn("18446744073709551615", out)
         self.assertIn("concurrent calls cannot exceed total calls", out)
         self.assertEqual(self.document()["limits"]["concurrent_calls"], 2)
         _, out = self.answer(["192.0.2.7", "10.20.30.0/24"], "12")
@@ -324,10 +325,11 @@ class ApprovalTests(AnswerTestCase):
         _, out = self.answer(["approved"], "2")
         self.assertIn("record the reference of the written approval", out)
         self.assertEqual(self.document()["authorization"]["status"], "pending")
-        self.answer(["CHG-1", "Jane Doe"], "1")
-        self.answer(["UTC", "2026-11-20 11:00", "+4h"], "3")
+        document = complete_scope()
+        document["authorization"].update(status="pending", approval_id="CHG-1", approved_by="Jane Doe")
+        self.write_scope(document)
         _, out = self.answer(["yes", "approved"], "2")
-        self.assertIn("ASSERTS that the owner approved this", out)
+        self.assertIn("ASSERTS that the owner approved", out)
         self.assertIn("yes is not enough", out)
         self.assertIn("reference CHG-1, approved by Jane Doe", out)
         self.assertEqual(self.document()["authorization"]["status"], "approved")

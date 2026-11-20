@@ -114,9 +114,10 @@ possible and gives the same result: `scope check` and `scope compile` read the
 file the same way.
 
 ```sh
-./bin/sippycup scope answer work/acme              # every open question, in sheet order
+./bin/sippycup scope answer work/acme              # every open question, in sheet order, the approval last
 ./bin/sippycup scope answer work/acme 11           # one question (here: destinations), to add or change
-./bin/sippycup scope answer work/acme limits.calls # the question that asks this field
+./bin/sippycup scope answer work/acme limits.calls # only this field
+./bin/sippycup scope answer work/acme 'targets[1]' # only this target (0-based, as scope check names it)
 ./bin/sippycup scope answer work/acme --all        # every question, also the answered ones
 ./bin/sippycup scope answer work/acme --set limits.calls=40 --set media.codecs=PCMU,PCMA
 ```
@@ -128,9 +129,27 @@ are asked field by field: each target (name, literal address, transport,
 port, and for TLS the certificate name and the CA file), each destination
 (name, target, what to dial, what it should do), the window (the timezone the
 owner used, then the start and the end), the media port range, and every
-ceiling. QUESTION is the sheet number (1 to 24, P1 to P18, A1 to A6), the id
-(`destinations`, `authorization.window`), or a field (`limits.calls`,
-`targets`).
+ceiling.
+
+QUESTION names exactly what is asked, and nothing else is:
+
+| QUESTION | What is asked |
+|---|---|
+| a sheet number (`11`, `P6`, `A2`) or id (`destinations`, `authorization.window`) | that question; if part of it is recorded, only its open answers (name a field to change a recorded one) |
+| a field (`contact.channel`, `limits.calls`, `media.port_range.end`, `authorization.valid_until`, `platform.dialing.reach.echo`) | only that field |
+| a list (`targets`, `destinations`, `platform.addressing`, `application.surfaces`, `application.identities`) | the list menu below |
+| an entry (`targets[1]`, `targets.1`) or a field of one (`destinations[0].user`) | only that entry or field; entries count from 0, as in `scope check` findings |
+| a prefix (`contact`, `limits`) | the fields under it |
+
+A name that matches nothing is refused before anything is asked, with the
+fields that can be opened under its first part and the closest names
+(`Did you mean: contact.channel`). Nothing is written.
+
+A list that already has entries shows them numbered and a menu: Enter keeps
+it, `add` adds one, `edit N` changes entry N (Enter keeps each of its
+answers), `remove N` removes it, `redo` asks the whole list again, `clear`
+empties it. While adding, Enter at the first field of a new entry means "no
+more entries".
 
 At every prompt:
 
@@ -139,13 +158,44 @@ At every prompt:
 | the answer | it is checked; if it is accepted it is saved at once |
 | Enter | the owner has not answered yet: the question stays open (a recorded answer is kept). Nothing is invented. |
 | `pending`, `unknown` | for platform and application answers (part 2) only: the open answers of that format |
-| `?` | how to write a valid answer |
+| the owner's own words | mapped to the stored value and echoed: `yes` / `no` / `not sure` for a part of the platform become `in-scope` / `out-of-scope` / `unknown`; `nothing` for a list becomes `[none]`; `the live system` becomes `production`; `plain` becomes `[rtp]`; `options probe, call placement` becomes `[options, call]`. The prompt prints `("not sure": recorded as unknown, ...)` so you see what was stored. |
+| `?` or `help` | how to write a valid answer (never recorded as an answer) |
 | `clear` | removes a recorded answer; the question is open again |
-| `quit` | stops; every answer accepted so far is already saved |
+| `quit` (`q`, `exit`) | stops; every answer accepted so far is already saved |
+| `\help`, `\no` | a backslash records the word itself, for a real value that is one of these words |
+
+A few words are understood but refused because they are ambiguous, with what
+to type instead: `yes` or `no` for the cost of public-network calls (P13) or
+for a third party's permission, and a lone `y`, `yes`, `n` where a name or a
+list is asked. A rejection prints only the help of its own prompt: the advice
+about hostnames appears only at an address prompt, for something that looks
+like a host name. Answering `none` to P6 (data we must never touch) on a
+production system, or with real customers, explains that this says the
+system holds no real data and needs a `y` that the owner confirmed it in
+writing. A third-party provider answered `none` records its permission as
+`out-of-path` at once and skips the permission and reference prompts.
+
+Where an answer already follows from another one, the prompt offers it as
+the Enter default and says why: a target's address when question 4 names one
+address, the transport no target uses yet, and the usual port of a transport
+when question 5 approves it. A whole port range typed at the first port
+(`10000-20000`, `10000 to 20000`) records both ends. Nothing else has a
+default: Enter leaves an answer open.
 
 Ctrl-C and Ctrl-D (end of input) also stop. The file is then valid and has
 every answer accepted before; a target or destination that was half typed is
-not written.
+not written. A list that was being added to when the session stopped (for
+example at `Another target?`) is recorded in `.scope.yaml.unfinished.json`
+beside `scope.yaml` (mode 0600; it holds only the list name and where it
+stopped). Until that list is finished its question counts as open, the
+summary prints `Unfinished list: targets (question 5; ...)`, and the next
+`scope answer` opens that question inside the list, at the next entry. `scope
+check` does not read this marker; a scope whose recorded targets are complete
+checks clean.
+
+A question with nothing to ask now (question 6 when no recorded target uses
+TLS, P11 before any destination is recorded, A2 before any surface) prints no
+heading: it is listed at the end under `Not asked now` with the reason.
 
 **Checks.** Each answer is checked with the same code as `scope check`: the
 answer goes into a copy of the document and the copy is checked. An answer
@@ -170,11 +220,50 @@ shows each one in UTC. The end may also be relative to the start (`+8h`). For
 the practice target, `now` and `+4h` give a window that is open now.
 
 **The approval.** `authorization.status: approved` is recorded only when you
-type the word `approved` at the approval prompt (question 2, asked after the
-window). The prompt shows the reference, the approver, and the window, and
-says that typing it asserts that the owner approved this scope in writing. It
-is refused until the reference, the approver, and the window are recorded.
-`yes` is not accepted, `--set` never sets it, and nothing else sets it.
+type the word `approved` at the approval prompt. The walk asks it LAST, after
+every other open question (part 2 included), and the prompt shows a compact
+summary of what typing it asserts: the reference and approver, the window,
+the signaling networks, ports and transports, each target, each destination,
+the account, the media scope, the ceilings, the stop conditions, the test
+classes, the security checks, and the platform answers that hold calls or
+surfaces. `yes` is not accepted, `--set authorization.status=approved` is
+refused, and nothing else sets it. Through a pipe it works as at a terminal
+(`printf 'approved\n' | scope answer DIR 2`).
+
+While a part-1 question that the approval approves is still open, the
+approval is not recorded: the walk does not ask it (the end lists `2: The
+approval is asked once the answers it approves are recorded; still open:
+...`), and `scope answer DIR 2` refuses `approved` and names those questions.
+We chose to defer rather than record an approval of answers nobody has seen:
+the next of those answers would reset it anyway. Questions that grant nothing
+(contact, evidence) do not hold the approval; the prompt says they are still
+open. Open part-2 answers do not hold it either (an open platform answer
+never blocks the SIP part).
+
+**Any later change to what may be sent sets the approval back to `pending`**,
+with a message naming the changed answers (`limits.calls: 10 -> 40`) and the
+command that asks it again; a walk asks it again at its end. This applies to
+prompts and to `--set` alike. The answers that reset it are everything
+`scope compile` turns into a permission or a bound: the approval reference,
+approver and window; `signaling`, `targets`, `destinations`,
+`media.networks`, `media.port_range`, `media.protection`, `media.codecs`,
+`limits`, `stop_conditions`, `test_scope`, `account.required`,
+`account.username`, `account.realm`, `account.credential_ref`,
+`security_checks`; and in part 2 `platform.dialing`, `platform.third_parties`,
+`platform.environment`, `platform.operations`, and `application.surfaces`
+(they decide whether a call may leave the platform, the production
+concurrency limit, and whether `application-surfaces.yaml` records a surface
+as `approved`). Answers that grant nothing keep it: `name`, `contact`,
+`evidence`, `account.credential_delivery`, `client.source_addresses`,
+`media.dtmf`, `media.symmetric_rtp`, and the record-only part-2 answers
+(platform name, components, out of scope, addressing, test identities,
+stored file kinds, route inventory). Rewriting a value in the same meaning
+(the same instant in another offset) is not a change.
+
+**A hand edit of `scope.yaml` cannot be caught.** The reset is done by `scope
+answer` when it writes. If you edit the file by hand after the approval, the
+status stays `approved`: set it to `pending` yourself, and get the owner's
+approval of the edited scope before you type `approved` again.
 
 **Secrets.** The password is never asked for. The credential reference prompt
 explains the format (a name such as `acme-password`, lowercase letters, digits
@@ -196,9 +285,13 @@ keeps the previous file beside it as `scope.yaml.bak-STAMP` (mode 0600). If
 nothing more and stops.
 
 **Optional question 24.** The walk does not ask the security checks question;
-the summary prints the command that does (`scope answer DIR 24`). The approved
-ids and `max_requests` are checked together, and `security-checks` is added
-to `test_scope.allowed_classes` with them.
+the summary prints the command that does (`scope answer DIR 24`). The ids are
+checked as soon as they are typed (an unknown id is refused before the
+ceiling is asked). The prompt then states what the chosen checks may send in
+this scope, computed by the same code as `scope check` and the planner (for
+example `banner-disclosure 1, srtp-policy 12`), and asks `max_requests` with
+that total as the lowest valid answer. `security-checks` is added to
+`test_scope.allowed_classes` with them.
 
 **Without a terminal.** Answers can come on standard input, one per line;
 each answer is echoed after its prompt, so a log reads like a session.
@@ -211,8 +304,10 @@ together; if one is refused, nothing is written (exit 2).
 **The end.** It runs the same check as `scope check` and prints its findings
 (the `scope.missing` lines are counted, not listed), the questions that are
 still open by number, and the exact next command: `scope answer` again while
-questions are open, `scope check` when an answer must be corrected, or
-`scope compile` when the scope is complete and consistent. Exit 0 when the
+questions are open, or `scope compile` when the scope is complete and
+consistent. After a contradiction each error gets a `To fix CODE [field]:`
+line with the command that opens that field, and `Next:` names it when the
+question is open only because of that error. Exit 0 when the
 scope checks clean, 1 when findings remain, 2 for a refusal, 130 after Ctrl-C.
 `Network activity: none`.
 
@@ -247,6 +342,7 @@ artifacts it blocks.
 | `scope.destination_target_unknown` | A destination names an unknown target |
 | `scope.media_ports_invalid` | The media port range start is above its end |
 | `scope.class_excluded`, `scope.no_baseline_class` | Test classes contradict the exclusions or allow no baseline case |
+| `scope.unknown_class` | `test_scope.allowed_classes` names a class the tools do not know; the message lists the known ones (`options`, `call`, `security-checks`) |
 | `scope.contact_cannot_stop` | The live contact cannot stop the test |
 | `scope.ceiling_low_rate`, `scope.network_too_broad`, `scope.media_not_enumerable` | Warnings |
 | `scope.pstn_destination_unconfirmed`, `scope.carrier_answer_conflict`, `scope.destination_never_dial`, `scope.limit_exceeds_production` | Platform answers that hold the profile and the campaign (see "Platform and application answers") |

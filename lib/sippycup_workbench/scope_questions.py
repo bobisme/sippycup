@@ -20,13 +20,18 @@ class Question:
 
 
 def _uses_tls(document: dict[str, Any]) -> bool:
+    """Question 6 asks about the TLS targets; once targets are recorded, only they decide.
+
+    Before any target is recorded an approved tls transport means the question
+    is coming. After that, a target list without a tls target has nothing for
+    question 6 to ask (it would stay open forever with no prompt); a TLS target
+    still to be added belongs to question 5.
+    """
     transports = lookup(document, "signaling.transports")
     targets = document.get("targets")
-    if isinstance(transports, list) and "tls" in transports:
-        return True
-    if isinstance(targets, list):
+    if isinstance(targets, list) and any(isinstance(item, dict) for item in targets):
         return any(isinstance(item, dict) and item.get("transport") == "tls" for item in targets)
-    return False
+    return isinstance(transports, list) and "tls" in transports
 
 
 def _needs_account(document: dict[str, Any]) -> bool:

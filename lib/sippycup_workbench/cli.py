@@ -523,7 +523,8 @@ def build_parser() -> argparse.ArgumentParser:
     scope_answer.add_argument("engagement")
     scope_answer.add_argument(
         "question", nargs="?",
-        help="one question to answer or change: its number (1-24, P1-P18, A1-A6), id, or a field such as limits.calls",
+        help="exactly what to answer or change: a question number (1-24, P1-P18, A1-A6) or id, a field such as"
+             " contact.channel, a list (targets), or one entry or field of it (targets[1], destinations[0].user)",
     )
     scope_answer.add_argument("--scope", help="scope file (default ENGAGEMENT/scope.yaml)")
     scope_answer.add_argument(

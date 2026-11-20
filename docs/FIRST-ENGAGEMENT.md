@@ -56,15 +56,19 @@ Rehearse the real step: run `scope answer` and type the example's values
 |---|---|
 | 1 | `LOCAL-PRACTICE-ONLY`, `practice target (you)` |
 | 3 | `UTC`, `now`, `+4h` |
-| 2 | `approved` (on a real engagement: only with the owner's written approval) |
 | 4 | `127.0.0.2` |
-| 5 | `5060, 5061`, `udp, tls`; target `practice` `127.0.0.2` `udp` `5060`, `y`; target `tls` `127.0.0.2` `tls` `5061`, certificate name `sippycup-practice`, CA `work/practice/ca.crt`, `n` |
+| 5 | `5060, 5061`, `udp, tls`; target `practice`, Enter (address 127.0.0.2), `udp`, Enter (5060), `y`; target `tls`, Enter, Enter (tls), Enter (5061), certificate name `sippycup-practice`, CA `work/practice/ca.crt`, `n` |
 | 7 | `127.0.0.1` |
 | 8 to 10 | `yes`; `practice`, `sippycup-practice`; `practice-password`, `other` |
 | 11 | `echo` `practice` `echo` `echo`, `y`; `dtmf` `practice` `dtmf` `echo`, `y`; `echo-tls` `tls` `echo` `echo`, `n` |
 | 12 to 16 | `127.0.0.2`; `20000`, `20019`; `rtp, sdes-srtp`; `PCMU, PCMA`, `rfc4733`; `yes` |
 | 17 to 19 | `40`, `2`, `1`; `200`, `200000`, `50000000`; `60`, `3600` |
 | 20 to 23 | `3`, `yes`, `20`; `options, call`, `none`; `you`, `this terminal`, `yes`; `7`, `private` |
+| 2 (asked last) | `approved`, after reading the summary it shows (on a real engagement: only with the owner's written approval of exactly that summary) |
+
+Changing an answer that decides what may be sent (a target, a limit, the
+media ranges) sets the approval back to `pending`; `scope answer work/acme 2`
+asks it again.
 
 **Proxy shape (practice proxy at `127.0.0.3`).** Answer the same questions with
 these rows changed; every other row is as in the table above. This was run
