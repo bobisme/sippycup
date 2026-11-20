@@ -302,7 +302,12 @@ rules (a refused answer is explained and asked again), and saves it at once,
 atomically and mode 0600, keeping comments. Enter leaves a question open;
 `quit`, Ctrl-C, and end of input stop and keep what was saved. It never asks
 for a password and records `approved` only when that word is typed at the
-approval prompt. `--all` also walks answered questions, and
+approval prompt, which the walk asks last, with a summary of what is approved.
+Any later change to what may be sent (a target, a destination, a limit, the
+media ranges, `--set` included) sets the approval back to `pending` and says
+so. QUESTION opens exactly what it names (a question, a field such as
+`contact.channel`, a list, or one entry such as `targets[1]`) and refuses a
+name that matches nothing. `--all` also walks answered questions, and
 `--set FIELD=VALUE` (repeatable) records plain answers without prompts (never
 the approval). It ends with the check result, the open questions, and the next
 command. `scope check` ends with a `Next:` line, and `scope init` on a missing

@@ -58,6 +58,15 @@ USER_PATTERN = re.compile(r"^[A-Za-z0-9._+@-]{1,128}$")
 DEST_USER_PATTERN = re.compile(r"^[A-Za-z0-9._+*#-]{1,64}$")
 
 TRANSPORTS = ("udp", "tcp", "tls")
+# The test classes the tool knows: compile generates an OPTIONS probe and a
+# baseline call per target, and `checks` runs the owner-approved posture checks
+# (sippycup_checks.scope_support.CLASS_NAME). Any other word grants nothing and
+# is refused, so a class the owner did not mean is never silently ignored.
+TEST_CLASSES = {
+    "options": "an OPTIONS probe per target",
+    "call": "a baseline call per target",
+    "security-checks": "the posture checks approved in question 24",
+}
 PROTECTIONS = ("rtp", "sdes-srtp", "dtls-srtp")
 CODECS = ("PCMU", "PCMA", "G722", "OPUS")
 DTMF_METHODS = ("rfc4733", "sip-info", "inband", "none")
@@ -314,7 +323,7 @@ stop_conditions:
   unexpected_response: null
   packet_loss_percent: null
 test_scope:
-  allowed_classes: []   # e.g. options, call
+  allowed_classes: []   # options | call | security-checks (only with question 24)
   exclusions: []        # explicit exclusions; write [none] if there are none
 contact:
   name: null
@@ -689,11 +698,13 @@ class _Validator:
             self.missing(path, what, blocks)
             return None
         if type(value) is not int or not minimum <= value <= maximum:
+            # The 64-bit ceiling is a storage limit, not an answer anyone gives.
+            bounds = f"{minimum} or more" if maximum == U64_MAX else f"from {minimum} to {maximum}"
             self.add(
                 "scope.malformed",
                 "malformed",
                 path,
-                f"{what} must be an integer from {minimum} to {maximum}",
+                f"{what} must be a whole number, {bounds}",
                 blocks,
             )
             return None
@@ -805,6 +816,23 @@ class _Validator:
 
 
 def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[Finding]:
+    return _validate(document, now)[0]
+
+
+def security_check_requests(document: dict[str, Any], approved: list[str]) -> list[tuple[str, int, int]]:
+    """(check id, requests, INVITE attempts) each approved check may send in this scope.
+
+    The same numbers ``scope check`` compares with ``security_checks.max_requests``
+    (computed from the targets and destinations that validation accepted), so a
+    prompt that states them never disagrees with the check.
+    """
+    from sippycup_checks.scope_support import request_bounds
+
+    inputs = _validate(document, None)[1]
+    return request_bounds(document, approved, targets=inputs["targets"], destinations=inputs["destinations"])
+
+
+def _validate(document: dict[str, Any], now: datetime | None) -> tuple[list[Finding], dict[str, Any]]:
     v = _Validator(document, now)
     all_three = ARTIFACTS
 
@@ -1037,6 +1065,14 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
         v.add("scope.malformed", "malformed", "test_scope.allowed_classes",
               "test classes must be short lowercase names such as options or call", (CAMPAIGN,))
         classes = None
+    unknown_classes = [item for item in classes or [] if item not in TEST_CLASSES]
+    if unknown_classes:
+        v.add("scope.unknown_class", "malformed", "test_scope.allowed_classes",
+              f"test_scope.allowed_classes names {'a class' if len(unknown_classes) == 1 else 'classes'} this tool"
+              f" does not know: {', '.join(unknown_classes)}. Known classes: "
+              + "; ".join(f"{name} ({what})" for name, what in TEST_CLASSES.items())
+              + ". Ask the owner what was meant; a test that is not one of these is not run by this tool",
+              (CAMPAIGN,))
     exclusions = v.string_list(test_scope, "exclusions", "test_scope.exclusions", "explicit exclusions", ())
     if classes is not None and exclusions is not None:
         clash = sorted(set(classes) & {item.strip().lower() for item in exclusions})
@@ -1184,7 +1220,7 @@ def validate(document: dict[str, Any], *, now: datetime | None = None) -> list[F
         document, targets=targets, destinations=valid_dest, classes=classes, limits=limits
     ):
         v.add(code, kind, field_name, message, (PROFILE,), severity)
-    return v.findings
+    return v.findings, {"targets": targets, "destinations": valid_dest}
 
 
 def _is_ip(text: str) -> bool:

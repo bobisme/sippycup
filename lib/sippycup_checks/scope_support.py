@@ -74,14 +74,7 @@ def validate_scope(
         add("scope.security_checks_class", "inconsistent", "test_scope.allowed_classes",
             f"security checks are approved but test_scope.allowed_classes does not include {CLASS_NAME}")
     first = targets[0] if targets else None
-    account = document.get("account") or {}
-    section_like: dict[str, Any] = {
-        "account": account.get("username") if account.get("required") else None,
-        "destination": _destination(first, destinations),
-        "cleartext_endpoints": cleartext_endpoints(document, first),
-    }
-    total = 0
-    invites = 0
+    section_like = _section_like(document, targets, destinations)
     for check_id in approved:
         spec = catalog.get(check_id)
         if "tls" in spec.needs and (first is None or first.get("transport") != "tls"):
@@ -102,9 +95,9 @@ def validate_scope(
                 add("scope.security_check_inapplicable", "inconsistent", "security_checks.approved",
                     f"{check_id} would probe {count} cleartext endpoints; at most "
                     f"{catalog.MAX_CLEARTEXT_ENDPOINTS} are allowed")
-        first_transport = first.get("transport") if first else None
-        total += catalog.declared_bound(spec, section_like, first_transport)
-        invites += catalog.invites_declared(spec, section_like, first_transport)
+    bounds = request_bounds(document, approved, targets=targets, destinations=destinations)
+    total = sum(item[1] for item in bounds)
+    invites = sum(item[2] for item in bounds)
     maximum = section.get("max_requests")
     if type(maximum) is int and total > maximum:
         add("scope.security_checks_budget", "inconsistent", "security_checks.max_requests",
@@ -116,6 +109,43 @@ def validate_scope(
         add("scope.security_checks_budget", "inconsistent", "limits.calls",
             f"the approved checks place up to {invites} INVITE attempts, above limits.calls {limits['calls']}")
     return out
+
+
+def _section_like(document: dict[str, Any], targets: list[dict[str, Any]],
+                  destinations: list[dict[str, Any]]) -> dict[str, Any]:
+    first = targets[0] if targets else None
+    account = document.get("account") or {}
+    return {
+        "account": account.get("username") if account.get("required") else None,
+        "destination": _destination(first, destinations),
+        "cleartext_endpoints": cleartext_endpoints(document, first),
+    }
+
+
+def request_bounds(
+    document: dict[str, Any],
+    approved: list[str],
+    *,
+    targets: list[dict[str, Any]],
+    destinations: list[dict[str, Any]],
+) -> list[tuple[str, int, int]]:
+    """(id, requests, INVITE attempts) for each known approved check in this scope.
+
+    ``targets`` and ``destinations`` are the entries validation accepted. The
+    sum of the requests is what ``security_checks.max_requests`` must cover.
+    """
+    first = targets[0] if targets else None
+    first_transport = first.get("transport") if first else None
+    section_like = _section_like(document, targets, destinations)
+    result = []
+    for check_id in approved:
+        try:
+            spec = catalog.get(check_id)
+        except catalog.CatalogError:
+            continue
+        result.append((check_id, catalog.declared_bound(spec, section_like, first_transport),
+                       catalog.invites_declared(spec, section_like, first_transport)))
+    return result
 
 
 def _destination(first: dict[str, Any] | None, destinations: list[dict[str, Any]]) -> str | None:
@@ -170,7 +200,30 @@ def question_text() -> str:
     for spec in catalog.CHECKS:
         if spec.state != "runnable":
             continue
-        bound = (f"at most 1 request per approved cleartext port, {catalog.MAX_CLEARTEXT_ENDPOINTS} at most"
-                 if spec.per_endpoint else f"at most {spec.max_requests} request{'s' if spec.max_requests != 1 else ''}")
-        lines.append(f"   - {spec.id} ({spec.impact}, {bound}): {spec.owner_text}")
+        lines.append(f"   - {spec.id} ({spec.impact}, {bound_text(spec)}): {spec.owner_text}")
     return "\n".join(lines)
+
+
+def _requests(count: int) -> str:
+    return f"{count} request{'s' if count != 1 else ''}"
+
+
+def bound_text(spec: Any) -> str:
+    """The request bound of one check in the owner's words, with the numbers the planner uses.
+
+    Where the bound depends on the rest of the scope, both cases are given,
+    computed with ``catalog.declared_bound`` (the number ``scope check`` and
+    ``checks plan`` use), so the sheet cannot drift from them.
+    """
+    if spec.per_endpoint:
+        return f"at most 1 request per approved cleartext port, {catalog.MAX_CLEARTEXT_ENDPOINTS} at most"
+    if spec.id == "srtp-policy":
+        cleartext = {"cleartext_endpoints": [{"transport": "udp", "port": 5060}]}
+        two = catalog.declared_bound(spec, {}, "udp")
+        three = catalog.declared_bound(spec, cleartext, "tls")
+        return (f"at most {_requests(two)} for two calls; {three} for three calls when your edge uses TLS and "
+                "you also approve a UDP or TCP signaling port")
+    if spec.id == "user-enumeration":
+        without = catalog.declared_bound(spec, {}, None)
+        return f"at most {_requests(spec.max_requests)}; {without} when no destination is approved"
+    return f"at most {_requests(spec.max_requests)}"
