@@ -63,7 +63,7 @@ class LedgerUnitTests(unittest.TestCase):
         with self.assertRaises(call_ledger.CeilingRefused) as caught:
             self.reserve()
         message = str(caught.exception)
-        for text in ("approval CHG-9 allows 2 call(s) in this engagement", "2 already placed", "0 remain",
+        for text in ("approval CHG-9 allows 2 call(s) in this engagement", "2 already counted", "0 remain",
                      "would place 1", "nothing was sent", "Only the owner can raise the limit",
                      "limits.calls in work/acme/scope.yaml", "./bin/sippycup scope compile work/acme"):
             self.assertIn(text, message)
@@ -110,9 +110,14 @@ class LedgerUnitTests(unittest.TestCase):
             self.reserve()
         message = str(caught.exception)
         self.assertIn("call ledger work/acme/call-ledger.jsonl is missing", message)
-        self.assertIn("1 earlier run(s) under approval CHG-9", message)
+        self.assertIn("1 run(s) in work/acme that placed or may have placed calls under approval CHG-9", message)
+        self.assertIn("calls/20261119T000000Z-acme-1 (it names no reservation in this ledger)", message)
         self.assertIn("restore work/acme/call-ledger.jsonl from your backup", message)
         self.assertIn("new approval id", message)
+        # Finding 1 (bn-y3er): the refusal no longer names the bypass; it says
+        # what happens if the operator tries it.
+        self.assertNotIn("Do not create an empty ledger", message)
+        self.assertIn("An empty, shortened or new ledger is refused the same way", message)
         self.assertFalse((self.engagement / call_ledger.LEDGER_FILE).exists())
         # A run under another approval does not block a new approval id.
         self.reserve(approval="CHG-10")
@@ -127,10 +132,20 @@ class LedgerUnitTests(unittest.TestCase):
         no_invite = self.engagement / "checks" / "20261119T000000Z-checks-1"
         no_invite.mkdir(parents=True)
         (no_invite / "profile.json").write_text(json.dumps({"authorization": {"approval_id": "CHG-9"}}))
+        (no_invite / "plan.json").write_text(json.dumps({"inviteAttempts": 0}))
         (no_invite / "result.json").write_text(json.dumps({"requestLog": [{"request": "OPTIONS"}]}))
+        nothing_sent = self.engagement / "checks" / "20261119T000001Z-checks-2"
+        nothing_sent.mkdir(parents=True)
+        (nothing_sent / "profile.json").write_text(json.dumps({"authorization": {"approval_id": "CHG-9"}}))
+        (nothing_sent / "result.json").write_text(json.dumps({"requestLog": [], "requestsSent": 0}))
         self.assertEqual(call_ledger.earlier_runs(self.engagement, "CHG-9"), [])
-        # A checks run that sent an INVITE, or a campaign that budgets a call, counts.
-        (no_invite / "result.json").write_text(json.dumps({"requestLog": [{"request": "INVITE x"}]}))
+        # A checks run with INVITE attempts that sent requests counts, even when
+        # its log names no INVITE (on TCP the first request is logged as the
+        # connection); so does a campaign that budgets a call.
+        nothing_sent.rename(self.engagement / "elsewhere")
+        (no_invite / "plan.json").write_text(json.dumps({"inviteAttempts": 1}))
+        (no_invite / "result.json").write_text(json.dumps(
+            {"requestLog": [{"request": "TCP connection and its first request"}], "requestsSent": 1}))
         (options_only / "plan.json").write_text(json.dumps({
             "authorization": {"approval": {"id": "CHG-9"}}, "steps": [{"index": 1, "budget": {"calls": 1}}]}))
         self.assertEqual(len(call_ledger.earlier_runs(self.engagement, "CHG-9")), 2)
@@ -213,7 +228,8 @@ class EngagementCeilingTests(unittest.TestCase):
         self.assertEqual(value["state"], "blocked")
         self.assertEqual(fakes.events, [])
         self.assertEqual(value["networkActivity"], "none")
-        self.assertIn("2 already placed", value["blockingErrors"][0])
+        self.assertIn("2 already counted", value["blockingErrors"][0])
+        self.assertNotIn("already placed", value["blockingErrors"][0])
         self.assertIn("0 remain", value["blockingErrors"][0])
         self.assertEqual(len(list((self.root / "calls").iterdir())), 2)
         rendered = guided.render_human(value)
@@ -240,10 +256,15 @@ class EngagementCeilingTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertNotIn("preflight_sent", value["timestamps"])
         self.assertEqual(call_ledger.check(self.root, APPROVAL).used, 0)
-        # A call whose preflight was sent counts even though it failed.
-        _fakes, code, _value = self.call(Fakes(preflight=(False, "no_response: timeout")))
+        # Finding 8 (bn-y3er): a failed preflight sent no INVITE, so the call
+        # is released, with the reason in the ledger.
+        _fakes, code, value = self.call(Fakes(preflight=(False, "no_response: timeout")))
         self.assertNotEqual(code, 0)
-        self.assertEqual(call_ledger.check(self.root, APPROVAL).used, 1)
+        self.assertIs(value["callCounted"], False)
+        self.assertEqual(call_ledger.check(self.root, APPROVAL).used, 0)
+        last = json.loads((self.root / call_ledger.LEDGER_FILE).read_text().splitlines()[-1])
+        self.assertEqual(last["event"], "release")
+        self.assertIn("no INVITE was sent", last["reason"])
 
     def test_dry_run_is_not_ready_once_the_limit_is_used(self) -> None:
         for _ in range(2):

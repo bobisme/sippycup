@@ -1539,8 +1539,16 @@ def _run_call_terms(raw: RawRun, model: dict[str, Any]) -> tuple[str, int | None
     ceiling = _int(_dict(profile.get("limits")).get("max_calls"))
     if raw.kind == "call":
         result = _dict(raw.docs.get("result.json"))
-        attempted = bool(_dict(result.get("timestamps")).get("preflight_sent")) or bool(_int(sent.get("calls")))
-        calls = 1 if attempted else 0
+        counted = result.get("callCounted")
+        if isinstance(counted, bool):
+            # The run's own record of the ledger rule (bn-y3er): it counts
+            # from its first INVITE on, as the ledger counted it.
+            calls = 1 if counted else 0
+        else:
+            # A run from before that record: the ledger then counted every
+            # call whose preflight was sent.
+            attempted = bool(_dict(result.get("timestamps")).get("preflight_sent")) or bool(_int(sent.get("calls")))
+            calls = 1 if attempted else 0
     else:
         result = _recorded(raw.path / "result.json")
         calls = sum(
@@ -1572,11 +1580,13 @@ def _engagement_call_check(
     placed: dict[str, int] = {}
     for run in runs:
         raw = raws.get(run["id"])
-        if raw is None or run.get("practiceApproval") or run["readable"] == "unreadable":
+        if raw is None or run["readable"] == "unreadable" or _bench_run(raw, run):
+            # Practice-bench runs (work/practice) have their own budget per
+            # `practice-target up`. An engagement that rehearses under the
+            # practice approval id is an engagement: its runs count.
             continue
         approval, recorded, calls = _run_call_terms(raw, run)
-        if not calls or approval == "LOCAL-PRACTICE-ONLY":
-            # Practice-bench runs have their own budget per `practice-target up`.
+        if not calls:
             continue
         placed[approval] = placed.get(approval, 0) + calls
         limits = [value for value in (recorded, scope_limits.get(approval)) if isinstance(value, int)]
@@ -1593,6 +1603,109 @@ def _engagement_call_check(
                 f"{placed[approval]}, above the approved limit of {limit}",
             ))
     return exceptions
+
+
+def _bench_run(raw: RawRun, run: dict[str, Any]) -> bool:
+    """True for a run of the practice bench, which is not an engagement (bn-y3er).
+
+    That is a run whose recorded profile is an archived practice approval (it
+    was placed from ``work/practice``), a run whose ledger reservation is in
+    ``work/practice/call-ledger.jsonl``, or a run directory beneath
+    ``work/practice``. The approval id alone never makes a run a bench run.
+    """
+    from sippycup import call_ledger
+
+    if run.get("practiceApproval"):
+        return True
+    record = _dict(_recorded(raw.path / call_ledger.RUN_RECORD_FILE))
+    if not isinstance(record.get("ledger"), str):
+        result = raw.docs.get("result.json") if raw.kind != "check" else _recorded(raw.path / "result.json")
+        record = _dict(_dict(result).get("callLedger"))
+    if isinstance(record.get("ledger"), str):
+        try:
+            return call_ledger.is_practice_bench((raw.path / record["ledger"]).resolve().parent)
+        except (OSError, RuntimeError, ValueError):
+            return False
+    return any(call_ledger.is_practice_bench(parent) for parent in raw.path.parents)
+
+
+def _call_limits(
+    root: Path, runs: list[dict[str, Any]], raws: dict[str, RawRun], sources: list[Source]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Per approval id: the approved call limit, the calls counted, and the calls left (bn-y3er).
+
+    ``counted`` is the engagement's call ledger, read with the count every
+    sender makes before it reserves (the run-directory cross-check included);
+    ``placedByRuns`` is the calls the runs in this report recorded under the
+    same rule. The ledger may hold more (runs outside the report's run roots
+    or filters, a command still running, attempts an older rule counted); it
+    holds fewer only when it was emptied or shortened, which its cross-check
+    reports.
+    """
+    from sippycup import call_ledger
+
+    if call_ledger.is_practice_bench(root):
+        # The bench is not an engagement: its budget is per approval window.
+        return [], []
+    ledger_present = (root / call_ledger.LEDGER_FILE).exists() or (root / call_ledger.LEDGER_FILE).is_symlink()
+    scope_limits: dict[str, int] = {}
+    profile_limits: dict[str, int] = {}
+    for source in sources:
+        if not source.approval_id:
+            continue
+        if source.kind == "scope" and isinstance(source.limits.get("calls"), int):
+            scope_limits[source.approval_id] = min(source.limits["calls"], scope_limits.get(source.approval_id, source.limits["calls"]))
+        elif source.kind == "target-profile" and isinstance(source.limits.get("max_calls"), int):
+            profile_limits[source.approval_id] = min(source.limits["max_calls"], profile_limits.get(source.approval_id, source.limits["max_calls"]))
+    placed: dict[str, int] = {}
+    for run in runs:
+        raw = raws.get(run["id"])
+        if raw is None or run["readable"] == "unreadable" or _bench_run(raw, run):
+            continue
+        approval, _recorded_limit, calls = _run_call_terms(raw, run)
+        if approval:
+            placed[approval] = placed.get(approval, 0) + calls
+    rows: list[dict[str, Any]] = []
+    exceptions: list[dict[str, Any]] = []
+    for approval in sorted(set(scope_limits) | set(profile_limits)):
+        limit = scope_limits.get(approval, profile_limits.get(approval))
+        source = "limits.calls in scope.yaml" if approval in scope_limits else "limits.max_calls of the target profile"
+        status = call_ledger.status(root, approval, limit)
+        if not ledger_present:
+            # No ledger at all (runs from before it, or none placed yet): the
+            # runs' own records are the count; the per-run check above judges them.
+            status = call_ledger.CallsStatus(approval, status.ledger, limit=limit, used=None)
+        row = {
+            "approvalId": approval,
+            "limit": status.limit if status.limit is not None else limit,
+            "limitSource": "the practice bench budget of this approval window" if status.limit != limit and status.limit is not None else source,
+            "counted": status.used,
+            "left": status.left,
+            "placedByRuns": placed.get(approval, 0),
+            "ledger": status.ledger,
+            "ledgerTrusted": status.error is None,
+            "ledgerProblem": status.error,
+            "ledgerPresent": ledger_present,
+        }
+        if not ledger_present:
+            row["left"] = max(0, limit - row["placedByRuns"]) if isinstance(limit, int) else None
+        effective = row["limit"]
+        highest = max([value for value in (status.used, row["placedByRuns"]) if isinstance(value, int)] or [0])
+        row["exceeded"] = isinstance(effective, int) and highest > effective
+        rows.append(row)
+        if status.error is not None:
+            exceptions.append(_exception(
+                "call-ledger-unaccounted", None,
+                f"the call ledger for approval {approval} cannot be trusted, so the calls placed under it "
+                f"cannot be confirmed against the limit of {limit}: {status.error}",
+            ))
+        elif isinstance(effective, int) and isinstance(status.used, int) and status.used > effective:
+            exceptions.append(_exception(
+                "call-limit-exceeded", None,
+                f"the call ledger {status.ledger} counts {status.used} calls under {approval}, above the "
+                f"approved limit of {effective}",
+            ))
+    return rows, exceptions
 
 
 RECORDED_SCOPES = "approved-scopes"
@@ -2355,6 +2468,8 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     for index, run in enumerate(runs, 1):
         run["label"] = f"R{index}"
     exceptions.extend(_engagement_call_check(runs, {raw.name: raw for raw in filtered}, sources))
+    call_limits, limit_exceptions = _call_limits(root, runs, {raw.name: raw for raw in filtered}, sources)
+    exceptions.extend(limit_exceptions)
     for run in runs:
         exceptions.extend(run["integrity"])
         candidate_findings.extend(_observations(run) if run["readable"] != "unreadable" else [])
@@ -2505,6 +2620,8 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         "runCounts": kinds,
         "totals": totals,
         "ceilings": ceilings,
+        # The owner's call limit per approval: limit, counted, left (bn-y3er).
+        "callLimits": call_limits,
         "findings": findings,
         "findingCounts": {
             severity: sum(1 for f in findings if f["severity"] == severity) for severity in SEVERITIES
@@ -2734,6 +2851,18 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
             f"Sippycup could not begin {'them' if many else 'it'} on the assessor's side; nothing was sent to your "
             f"system for {'them' if many else 'it'}."
         )
+    for row in model.get("callLimits") or []:
+        if row.get("exceeded"):
+            counted = max(value for value in (row.get("counted"), row.get("placedByRuns")) if isinstance(value, int))
+            parts.append(
+                f"The owner's call limit was exceeded: {counted} calls were placed under approval "
+                f"{row['approvalId']}, above the approved limit of {row['limit']}."
+            )
+        elif not row.get("ledgerTrusted", True):
+            parts.append(
+                f"The calls placed under approval {row['approvalId']} cannot be confirmed against its "
+                f"limit of {row['limit']}: the call ledger does not account for every run."
+            )
     if exceptions:
         parts.append(f"{len(exceptions)} integrity exception{'s require' if len(exceptions) != 1 else ' requires'} review before this report is relied on.")
     else:

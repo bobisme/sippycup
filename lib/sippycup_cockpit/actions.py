@@ -612,6 +612,12 @@ def _bounded_lines(model: dict[str, Any], action: dict[str, Any], repo: Path, no
                 )
             lines.append(f"  Planned totals: {json.dumps(plan.get('plannedTotals'), sort_keys=True)}")
             lines.append(f"  Hard maxima: {json.dumps(plan.get('hardMaxima'), sort_keys=True)}")
+            planned = (plan.get("plannedTotals") or {}).get("calls")
+            ceilings = [value for value in ((plan.get("hardMaxima") or {}).get("calls"),
+                                            (model["profile"].get("limits") or {}).get("max_calls"))
+                        if type(value) is int]
+            if type(planned) is int and planned and ceilings:
+                lines.extend(_calls_lines(model, {"max_calls": min(ceilings)}, planned, "campaign"))
         return lines
     if action.get("approval") == "practice":
         practice = model["readiness"]["practice"]
@@ -622,9 +628,38 @@ def _bounded_lines(model: dict[str, Any], action: dict[str, Any], repo: Path, no
     if practice_route(model):
         lines.append("  Route: --practice (the target is the local practice address; loopback namespace only)")
     limits = (model["profile"].get("limits") or {})
-    if limits:
-        lines.append(f"  Profile limits: {json.dumps(limits, sort_keys=True)}")
+    lines.extend(_limit_lines(limits))
+    lines.extend(_calls_lines(model, limits))
     return lines
+
+
+_LIMIT_TEXT = (
+    ("max_duration_seconds", "Each call lasts at most {} s"),
+    ("max_concurrency", "At most {} call(s) at the same time"),
+    ("max_calls_per_second", "At most {} new call(s) per second"),
+)
+
+
+def _limit_lines(limits: dict[str, Any]) -> list[str]:
+    """The profile's limits in words, instead of its raw JSON (bn-y3er)."""
+    lines = [f"  {text.format(limits[key])}" for key, text in _LIMIT_TEXT if limits.get(key) is not None]
+    known = {key for key, _text in _LIMIT_TEXT} | {"max_calls"}
+    lines += [f"  Limit {key}: {value}" for key, value in sorted(limits.items()) if key not in known]
+    return lines
+
+
+def _calls_lines(model: dict[str, Any], limits: dict[str, Any], placing: int | None = None,
+                 command: str = "command") -> list[str]:
+    """``Calls: N of M used, K left``: the count the command makes before it reserves (bn-y3er)."""
+    approval = (model.get("authorization") or {}).get("approvalId")
+    path = (model.get("engagement") or {}).get("path")
+    if not approval or not path:
+        return []
+    from sippycup_workbench.call import calls_status
+
+    document = {"authorization": {"approval_id": approval}, "limits": {"max_calls": limits.get("max_calls")}}
+    status = calls_status(Path(path) / "target-profile.yaml", document)
+    return [f"  {status.line(placing, command)}"]
 
 
 GO_STALE_SECONDS = 12 * 3600

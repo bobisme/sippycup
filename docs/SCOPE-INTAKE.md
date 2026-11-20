@@ -647,7 +647,8 @@ records it and its hash still matches. A derivative that was edited by hand
 profile from `init` (`scope.derivative_unmanaged`), makes compile refuse and
 write nothing; `--force` overwrites it. The sidecar is an aid against honest
 mistakes, not a tamper-proof seal: anyone who can edit the derivatives can edit
-the sidecar.
+the sidecar, or strip the compile header from a copied profile. See
+SAFETY-AUDIT.md, rehearsal 2 finding 4, for the two cases it does not stop.
 
 ### Revoking or changing an approval
 

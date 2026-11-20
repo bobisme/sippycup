@@ -218,6 +218,31 @@ def check_profile(model: dict[str, Any]) -> Check:
     return Check("profile", "Profile passes rehearse", GO, lines)
 
 
+def check_calls(model: dict[str, Any], profile_path: Path, document: dict[str, Any] | None) -> Check | None:
+    """``Calls: N of M used, K left``, from the count every sender makes before it reserves (bn-y3er).
+
+    NO-GO when no call is left, or when the call ledger cannot be trusted.
+    """
+    if document is None:
+        return None
+    from sippycup_workbench.call import calls_status
+
+    eng = model["engagement"]["display"]
+    status = calls_status(profile_path, document)
+    title = "Calls left (owner's limit)"
+    if status.error is not None:
+        return Check("calls", title, NOGO,
+                     ["the call ledger cannot be trusted, so no call can be placed", status.line()],
+                     f"restore {eng}/call-ledger.jsonl from your backup of {eng}, or ask the owner for a new "
+                     f"approval id, record it in {eng}/scope.yaml, and run {LAUNCHER} scope compile {eng}")
+    if status.left == 0:
+        return Check("calls", title, NOGO, ["none left: every command that places a call will refuse",
+                                            status.line()],
+                     f"only the owner can approve more calls: record the new limits.calls in {eng}/scope.yaml, "
+                     f"then run {LAUNCHER} scope compile {eng}")
+    return Check("calls", title, GO, [status.line()])
+
+
 def other_profiles(model: dict[str, Any]) -> list[dict[str, Any]]:
     """The compiled profiles of every further target (scope compile writes one per target)."""
     return [item for item in model.get("profiles") or [] if not item.get("first")]
@@ -858,7 +883,9 @@ def assess(engagement: Path, *, host: Host, image: str, margin_minutes: int = DE
             document = None
     mode = route_mode(model)
     image_check = check_image(host, image)
+    calls = check_calls(model, profile_path, document)
     checks = [check_engagement(model), check_scope(model), check_profile(model),
+              *([calls] if calls is not None else []),
               *check_other_profiles(host, model, mode, now, zone),
               check_window(model, now, zone, margin_minutes), check_clock(host), image_check]
     probe, problem = (None, "skipped (--no-container)")

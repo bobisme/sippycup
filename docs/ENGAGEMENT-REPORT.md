@@ -132,6 +132,16 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
    runs (R1-R12, R13) fell under it, so "every run fell inside the approved
    window" can be read off the page. The approval records behind those
    windows are named in the Integrity section.
+   A **Call limit** block (`CALL LIMIT` in the text
+   report) gives, per approval id, `Calls: N of M used, K left`: the approved
+   call limit, the calls counted in `ENG/call-ledger.jsonl` (the count every
+   command checks before it sends), and the calls left; and the calls the
+   runs in the report placed. A call counts from its first INVITE on, as the
+   ledger counts it. The ledger can be higher (runs outside the report's run
+   roots or filters, a command still running, attempts an older rule counted:
+   a preflight or a REGISTER was sent, no INVITE); it is never lower unless it
+   was emptied or shortened, which raises `call-ledger-unaccounted`. When the
+   limit was exceeded, the executive summary says so in its own sentence.
 4. **Activity ledger**: every run with lane label, start, end, kind, target
    (a campaign that used UDP and TLS names both), what was sent, verdict, and
    reason; a run that never started (for example packet capture could not
@@ -210,7 +220,8 @@ from the recorded artifacts, and lists any exception at the top:
 | `ceiling-exceeded` | Recorded packets, bytes, calls, or call time exceed the frozen ceiling |
 | `unapproved-address-in-artifact` | A run artifact's text named an address outside the approved set |
 | `destination-not-approved` | A call dialed a destination that is not on the approved destination list |
-| `call-limit-exceeded` | The calls placed under one approval id in the engagement, counted in start order across all commands, went above its limit (`limits.calls`); practice runs are not counted |
+| `call-limit-exceeded` | The calls placed under one approval id in the engagement, counted in start order across all commands, went above its limit (`limits.calls`), or the engagement's call ledger counts more than the limit. Only runs of the practice bench (`work/practice`) are left out; an engagement that rehearses under the practice approval id is counted |
+| `call-ledger-unaccounted` | The engagement's call ledger does not account for every run directory that placed or may have placed calls under the approval (it was emptied, shortened or replaced), so the calls cannot be confirmed against the limit |
 | `approval-record-edited` | A compiled profile or manifest was edited after `scope compile`, or is not recorded by it; it is not used as an approval record |
 
 Windows come from the scope file and target profiles. A campaign manifest's

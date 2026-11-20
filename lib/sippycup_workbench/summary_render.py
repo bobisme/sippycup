@@ -283,6 +283,32 @@ def _parse(value: str | None) -> datetime | None:
 # Markdown
 
 
+def call_limit_lines(model: dict[str, Any]) -> list[str]:
+    """The owner's call limit per approval, in words: limit, counted, left (bn-y3er)."""
+    lines: list[str] = []
+    for row in model.get("callLimits") or []:
+        if row.get("ledgerPresent") is False:
+            text = (f"Approval {row['approvalId']}: Calls: {row['placedByRuns']} of {row['limit']} used, "
+                    f"{row['left']} left, counted from the runs in this report. Approved call limit: "
+                    f"{row['limit']} ({row['limitSource']}). There is no call ledger ({row['ledger']}): "
+                    "the runs predate it, or it was deleted.")
+        elif row.get("ledgerTrusted", True):
+            text = (f"Approval {row['approvalId']}: Calls: {row['counted']} of {row['limit']} used, "
+                    f"{row['left']} left. Approved call limit: {row['limit']} ({row['limitSource']}). "
+                    f"Calls counted: {row['counted']} (in {row['ledger']}, the count every command "
+                    "checks before it sends).")
+        else:
+            text = (f"Approval {row['approvalId']}: approved call limit {row['limit']} "
+                    f"({row['limitSource']}); calls counted and calls left cannot be confirmed, because "
+                    f"the call ledger does not account for every run: {row.get('ledgerProblem')}")
+        lines.append(text + (" LIMIT EXCEEDED." if row.get("exceeded") else ""))
+        lines.append(
+            f"  Calls placed by the runs in this report: {row['placedByRuns']} (a call counts from its "
+            "first INVITE on; runs from before that rule count from their preflight)"
+        )
+    return lines
+
+
 def md(value: Any) -> str:
     text = _value(value)
     return _MD_SPECIAL.sub(r"\\\1", text)
@@ -365,6 +391,8 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
             for s in auth["sources"]
         ),
     )
+    if model.get("callLimits"):
+        out += ["Call limit:", ""] + [f"- {md(line.strip())}" for line in call_limit_lines(model)] + [""]
     if model["ceilings"]:
         out += ["Approved limits recorded in those records:", ""]
         out += _md_table(
@@ -920,6 +948,8 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             ),
         )
     )
+    if model.get("callLimits"):
+        out.append("<p><strong>Call limit</strong></p><ul>" + "".join(f"<li>{h(line.strip())}</li>" for line in call_limit_lines(model)) + "</ul>")
     if model["ceilings"]:
         out.append(_html_table("Approved limits", ["Record", "Limit", "Value"], ([_c(c["source"]), h(c["limit"]), h(c["value"])] for c in model["ceilings"]), numeric=[2]))
     out.append("</section>")
@@ -1212,6 +1242,8 @@ def render_text(model: dict[str, Any], report_sha256: str) -> str:
     for s in model["authorization"]["sources"]:
         cells = _source_cells(s)
         out.append(f"  {s['ref']} [{_KIND_WORDS.get(s['kind'], s['kind'])}] approval {cells[0]}, {cells[2]} to {cells[3]}, addresses {', '.join(s['networks']) or '-'}")
+    if model.get("callLimits"):
+        out += ["", "CALL LIMIT", ""] + [f"  {line}" for line in call_limit_lines(model)]
     out += ["", "ACTIVITY", ""]
     for r in model["runs"]:
         out.append(f"  {r['id']}  {r['kind']:<8} {_value(r['started'])}  {_run_target(r)}  {r.get('verdict') or r['readable']}")

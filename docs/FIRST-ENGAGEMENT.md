@@ -553,8 +553,12 @@ Stop and send nothing more if one of these happens:
 - A `call limit:` refusal. The owner's `limits.calls` counts every call
   placed in the engagement, by `call`, `matrix run`, `checks run` and
   `campaign run` together (the count is in `work/acme/call-ledger.jsonl`).
-  Only the owner can raise it. Do not delete or edit the ledger, and do not
-  copy the engagement directory to send from the copy.
+  `rehearse`, `ready` and every plan print `Calls: N of M used, K left`; watch
+  it. A call counts once its INVITE may have left, whatever happened next; an
+  attempt that sent no INVITE (preflight unanswered, registration failed) is
+  given back. Only the owner can raise the limit. Do not delete or edit the
+  ledger (the next command refuses, because the run directories still show
+  the calls), and do not copy the engagement directory to send from the copy.
 - A refusal that says a profile or manifest was edited, is stale, or was not
   recorded by `scope compile`. Put the change in `work/acme/scope.yaml` and
   run `./bin/sippycup scope compile work/acme` again; never edit a compiled

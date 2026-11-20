@@ -448,6 +448,30 @@ def _ledger_record(reservation: Any, run_dir: Path) -> dict[str, str] | None:
     return call_ledger.run_record(reservation, run_dir)
 
 
+def call_counts(call_attempted: bool, softphone: dict[str, Any] | None) -> bool:
+    """Whether a guided call counts against the owner's call limit (bn-y3er).
+
+    It counts from the moment the softphone was started to place it, unless
+    the softphone's own result shows that it never dialed (registration
+    failed or timed out, the softphone did not start, or it was cancelled
+    first): no INVITE left the tool. A call that was never handed to the
+    softphone (stopped before the preflight, preflight failed, the window
+    lapsed) does not count. An internal error inside the softphone leaves no
+    result, so that call counts.
+    """
+    if not call_attempted:
+        return False
+    return not (isinstance(softphone, dict) and softphone.get("dialed") is False)
+
+
+def _release_reason(preflight_sent: bool, softphone: dict[str, Any] | None, verdict: str) -> str:
+    if not preflight_sent:
+        return f"nothing was sent ({verdict})"
+    if softphone is None:
+        return f"no INVITE was sent: the call was not started after the preflight ({verdict})"
+    return f"no INVITE was sent: the softphone never dialed ({verdict})"
+
+
 def ledger_terms(document: dict[str, Any]) -> tuple[str, int]:
     """The approval id and the call ceiling a profile counts its calls against."""
     authorization = document.get("authorization") if isinstance(document.get("authorization"), dict) else {}
@@ -462,6 +486,19 @@ def ledger_blocking(profile_path: str | Path, document: dict[str, Any], calls: i
     """
     approval, ceiling = ledger_terms(document)
     return ledger_blocking_in(Path(profile_path).parent, approval, ceiling, calls, command)
+
+
+def calls_status(profile_path: str | Path, document: dict[str, Any]) -> Any:
+    """``Calls: N of M used, K left`` for a profile's engagement, read-only (bn-y3er)."""
+    from sippycup import call_ledger
+
+    approval, ceiling = ledger_terms(document)
+    if not approval:
+        return call_ledger.CallsStatus(
+            "(none)", call_ledger.operator_path(Path(profile_path).parent / call_ledger.LEDGER_FILE),
+            error="the profile records no authorization.approval_id to count calls against",
+        )
+    return call_ledger.status(Path(profile_path).parent, approval, ceiling)
 
 
 def ledger_blocking_in(directory: Path, approval: str, ceiling: int, calls: int, command: str) -> list[str]:
@@ -798,6 +835,7 @@ def dry_run_plan(
         )
     except (CallError, ValueError, TypeError):
         scope = None
+    calls = calls_status(options.profile, document)
     return {
         "schema_version": "sippycup.dev/call-dry-run/v1",
         "ready": not blocking,
@@ -806,6 +844,9 @@ def dry_run_plan(
         "capture_filter": scope,
         "capture_interface": str(document.get("capture", {}).get("interface", "any")),
         "executor": "./bin/sippycup call runs these steps in one isolated container",
+        # The same read-only count the reservation makes (bn-y3er).
+        "calls": calls.as_dict(),
+        "calls_line": calls.line(1, "call"),
         "network_activity": False,
     }
 
@@ -2078,6 +2119,10 @@ def _execute(
     old_umask = os.umask(0o077)
     state["umask"] = old_umask
     run_dir = create_run_directory(run_root, _slug(profile_name))
+    from sippycup.call_ledger import write_run_record
+
+    # The reservation that counts this run, before anything else is written.
+    write_run_record(reservation or deps.ledger_reservation, run_dir)
     state.update(
         run_dir=run_dir, password=password, profile=profile_name, uri=uri, local=local,
         target={"host": host, "port": port, "transport": transport}, network_mode=network_mode,
@@ -2093,6 +2138,8 @@ def _execute(
     previous_handlers: dict[int, Any] = {}
     capture: Any = None
     preflight_sent = False
+    # True from the moment the softphone may send an INVITE (bn-y3er).
+    call_attempted = False
     preflight_ok: bool | None = None
     detail = ""
     stop_reason: str | None = None
@@ -2316,6 +2363,7 @@ def _execute(
 
         call_started = deps.now()
         timestamps["call_started"] = _utc(call_started)
+        call_attempted = True
         result = deps.place_call(
             softphone_call,
             password=password,
@@ -2474,9 +2522,11 @@ def _execute(
         media_networks=media_networks,
     )
     notes.insert(0, _network_note(network_mode, host))
-    if reservation is not None and not preflight_sent and stop_reason != "internal-error":
-        # Nothing reached the network: the reserved call does not count.
-        reservation.release(1, f"nothing was sent ({verdict})")
+    # One rule for every command (bn-y3er): a reserved call that no INVITE
+    # can have left for does not count; from the first INVITE on, it counts.
+    counted = call_counts(call_attempted, softphone_result)
+    if reservation is not None and not counted:
+        reservation.release(1, _release_reason(preflight_sent, softphone_result, verdict))
     if verdict == "preflight-failed" and _is_loopback(host) and not str(detail).startswith("tls_"):
         notes.append(_loopback_preflight_note(host))
     if internal_error is not None:
@@ -2514,6 +2564,8 @@ def _execute(
         "profile": profile_name,
         "approvalRecord": approval_in_force,
         "callLedger": _ledger_record(reservation or deps.ledger_reservation, run_dir),
+        # Whether this run's call counts against the owner's limit (bn-y3er).
+        "callCounted": counted,
         "target": {"host": host, "port": port, "transport": transport},
         "destinationUri": uri,
         **_destination_record(document, options.destination),
@@ -2635,6 +2687,8 @@ def render_human(value: dict[str, Any]) -> str:
         lines.append(f"Guided call plan: {'READY' if value['ready'] else 'BLOCKED'}")
         for error in plan["blocking_errors"]:
             lines.append(f"BLOCK: {error}")
+        if value.get("calls_line"):
+            lines.append(value["calls_line"])
         softphone = value["softphone"]
         host_port = softphone["destination_uri"].split("@", 1)[-1]
         lines.append("What call does by itself (type nothing else):")

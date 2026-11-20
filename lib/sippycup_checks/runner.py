@@ -170,10 +170,13 @@ def build_plan(
         blocking.append(
             f"the selected checks place up to {invites} INVITE attempts, above limits.max_calls {max_calls}"
         )
+    calls_line = None
     if invites and profile_path is not None:
-        from sippycup_workbench.call import ledger_blocking
+        from sippycup_workbench.call import calls_status, ledger_blocking
 
         blocking.extend(ledger_blocking(profile_path, document, invites, "checks run"))
+        # The same read-only count the reservation makes (bn-y3er).
+        calls_line = calls_status(profile_path, document).line(invites, "checks run")
     valid_until = (rehearsal.facts.get("authorization") or {}).get("valid_until") if rehearsal.facts else None
     if not blocking and valid_until and now + timedelta(seconds=seconds) >= datetime.fromisoformat(valid_until):
         blocking.append(f"authorization expires before the run's latest possible end ({int(seconds)}s from now)")
@@ -193,6 +196,7 @@ def build_plan(
         "totalMaxRequests": total,
         "maxRequests": maximum,
         "inviteAttempts": invites,
+        **({"callsLine": calls_line} if calls_line else {}),
         "pacingSeconds": interval,
         "plannedSeconds": int(seconds),
         "validUntil": valid_until,
@@ -221,6 +225,8 @@ def render_plan(plan: dict[str, Any]) -> str:
         f"{plan['maxRequests']}), {plan['inviteAttempts']} INVITE attempts, new requests paced "
         f">= {plan['pacingSeconds']:g}s apart, never retried."
     )
+    if plan.get("callsLine"):
+        lines.append(plan["callsLine"])
     lines.append("This command sent no packets.")
     lines.append("Network activity: none")
     return "\n".join(lines) + "\n"
@@ -389,6 +395,10 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
             }
     old_umask = os.umask(0o077)
     run_dir = create_run_directory(run_root, _slug(str(document.get("name", "profile"))))
+    from sippycup.call_ledger import write_run_record
+
+    # The reservation that counts this run, before anything else is written.
+    write_run_record(reservation, run_dir)
     timestamps: dict[str, str] = {"started": _utc(deps.now())}
     cancel = threading.Event()
     cancel_signal: list[int] = []
@@ -520,10 +530,21 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     findings = [item for result in results for item in result.findings]
     findings.sort(key=lambda item: (-catalog.SEVERITY_RANK[item["severity"]], item["id"]))
     total = sum(result.requests_sent for result in results)
-    if reservation is not None and not total and not budget.log:
-        # Nothing was sent: the reserved INVITE attempts do not count. Once
-        # any request left, every reserved attempt counts (fail closed).
-        reservation.release(reservation.calls, "nothing was sent")
+    if reservation is not None:
+        # The rule of every command (bn-y3er): calls for which no INVITE can
+        # have left do not count. A check that sent no request at all gives
+        # back its declared INVITE attempts; a check that sent any request
+        # keeps all of them, because its request log does not name every
+        # INVITE (on TCP and TLS the first request of a connection is logged
+        # as the connection).
+        unsent = sum(
+            catalog.invites_declared(catalog.get(entry["id"]), section, transport)
+            for entry, result in zip(plan["checks"], results)
+            if entry["status"] == "will-run" and not result.requests_sent
+        )
+        if not total and not budget.log:
+            unsent = reservation.calls
+        reservation.release(unsent, "security checks that sent no request")
     findings_document = {
         "apiVersion": FINDINGS_VERSION,
         "target": {"address": host, "port": port, "transport": transport, "serverName": server_name},
