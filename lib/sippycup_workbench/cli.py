@@ -82,6 +82,8 @@ def _emit(value: dict[str, Any], output_format: str) -> None:
         calls = value.get("facts", {}).get("calls")
         if isinstance(calls, dict) and calls.get("line"):
             print(calls["line"])
+            for note in calls.get("notes") or ():
+                print(f"Calls: {note}.")
         facts = value.get("facts", {})
         if "approved_destinations" in facts:
             approved_dial = facts["approved_destinations"]
@@ -210,7 +212,11 @@ def rehearse_file(profile_path: str | Path) -> Any:
     from .call import calls_status, ledger_blocking
 
     status = calls_status(profile_path, document)
-    facts = {**rehearsal.facts, "calls": {**status.as_dict(), "line": status.line()}}
+    # The count on one line; what must stand beside it (calls under another
+    # reference here, the same reference in a sibling directory) on lines of
+    # its own (wave 11, findings 2 and 4).
+    facts = {**rehearsal.facts, "calls": {**status.as_dict(), "line": status.line(notes=False),
+                                          "notes": status.notes()}}
     blocked = tuple(item for item in ledger_blocking(profile_path, document, 1, "call")
                     if item not in rehearsal.errors)
     return Rehearsal(rehearsal.ready and not blocked, (*rehearsal.errors, *blocked), rehearsal.warnings, facts)

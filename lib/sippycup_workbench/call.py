@@ -505,7 +505,9 @@ def calls_status(profile_path: str | Path, document: dict[str, Any]) -> Any:
             "(none)", call_ledger.operator_path(Path(profile_path).parent / call_ledger.LEDGER_FILE),
             error="the profile records no authorization.approval_id to count calls against",
         )
-    return call_ledger.status(Path(profile_path).parent, approval, ceiling)
+    # context: the other references counted here and the same reference in a
+    # sibling directory are said beside the count (wave 11, findings 2 and 4).
+    return call_ledger.status(Path(profile_path).parent, approval, ceiling, context=True)
 
 
 def ledger_blocking_in(directory: Path, approval: str, ceiling: int, calls: int, command: str) -> list[str]:

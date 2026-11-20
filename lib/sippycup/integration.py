@@ -877,7 +877,7 @@ def campaign_calls_status(plan: Mapping[str, Any], manifest_path: Path) -> Any:
     if not approval or not _planned_calls(plan):
         return None
     directory = Path(manifest_path).parent
-    return call_ledger.status(directory, approval, campaign_call_ceiling(plan, directory))
+    return call_ledger.status(directory, approval, campaign_call_ceiling(plan, directory), context=True)
 
 
 def _unsent_calls(plan: Mapping[str, Any], run_dir: Path | None) -> int:

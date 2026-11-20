@@ -439,6 +439,15 @@ def _step(label: str, done: bool | None) -> dict[str, Any]:
     return {"label": label, "done": done}
 
 
+def _plan_step(files: dict[str, Any]) -> dict[str, Any]:
+    """"frozen plan present", not done when the plan no longer matches campaign.yaml (wave 11, finding 9)."""
+    facts = files.get("planFacts") if isinstance(files.get("planFacts"), dict) else {}
+    if files.get("plan") and facts.get("manifestMatches") is False:
+        return _step("frozen plan matches campaign.yaml (it does NOT: the campaign file was written again after "
+                     "the plan was frozen, so campaign run will refuse it; freeze a new plan, see ready)", False)
+    return _step("frozen plan present (campaign plan)", files["plan"])
+
+
 def _go_label(facts: dict[str, Any]) -> str:
     if not facts.get("present"):
         return "go/no-go check says GO for this profile (ready)"
@@ -522,7 +531,7 @@ def derive_stages(model: dict[str, Any]) -> list[dict[str, Any]]:
         ],
         "campaign": [
             _step("campaign manifest present", files["campaign"]),
-            _step("frozen plan present (campaign plan)", files["plan"]),
+            _plan_step(files),
             _step("campaign run succeeded", campaign_pass),
         ],
         "checks": [
@@ -621,7 +630,7 @@ def _files(root: Path, repo: Path) -> dict[str, Any]:
         "expectations": exists("expectations.yaml"),
         "packs": has_packs,
         "internalReport": internal,
-        "planFacts": _plan_facts(root / "plan.json") if exists("plan.json") else None,
+        "planFacts": _plan_facts(root / "plan.json", root / "campaign.yaml") if exists("plan.json") else None,
     }
 
 
@@ -662,7 +671,27 @@ def _owner_report(root: Path) -> dict[str, Any] | None:
     return newest
 
 
-def _plan_facts(path: Path) -> dict[str, Any] | None:
+def _manifest_matches(plan: dict[str, Any], manifest: Path | None) -> bool | None:
+    """Whether the campaign file is still the one the plan was frozen from (wave 11, finding 9).
+
+    The same comparison ``campaign run`` makes first: the SHA-256 of the
+    campaign file's bytes against the plan's ``metadata.manifestSha256``.
+    None when there is no campaign file to compare or the plan records no
+    digest (``campaign run`` then says so itself).
+    """
+    metadata = plan.get("metadata") if isinstance(plan.get("metadata"), dict) else {}
+    recorded = metadata.get("manifestSha256")
+    if manifest is None or not isinstance(recorded, str) or manifest.is_symlink() or not manifest.is_file():
+        return None
+    import hashlib
+
+    try:
+        return hashlib.sha256(manifest.read_bytes()).hexdigest() == recorded
+    except OSError:
+        return None
+
+
+def _plan_facts(path: Path, manifest: Path | None = None) -> dict[str, Any] | None:
     try:
         plan = read_json(path)
     except Unreadable as exc:
@@ -672,6 +701,9 @@ def _plan_facts(path: Path) -> dict[str, Any] | None:
     authorization = plan.get("authorization") if isinstance(plan.get("authorization"), dict) else {}
     approval = authorization.get("approval")
     return {
+        # False: the campaign file was written again (or edited) after the
+        # plan was frozen, so campaign run will refuse the plan.
+        "manifestMatches": _manifest_matches(plan, manifest),
         "name": (plan.get("metadata") or {}).get("name") if isinstance(plan.get("metadata"), dict) else None,
         "steps": len(plan.get("steps") or []) if isinstance(plan.get("steps"), list) else None,
         "plannedTotals": plan.get("plannedTotals"),

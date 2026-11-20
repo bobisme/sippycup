@@ -305,6 +305,7 @@ EOF
         "${confinement[@]}" \
         --hostname=sippycup \
         "${stop_labels[@]}" \
+        "${claim_label[@]}" \
         --env=SIPPYCUP_NETWORK_MODE="${network_mode}" \
         "${routed_environment[@]}" \
         "${overlap_environment[@]}" \
@@ -393,10 +394,23 @@ join_practice_target() {
 # tools/routed_rehearsal.py starts. Fail closed unless it is running, carries
 # the routed-practice label and a link-local address label, and sits only on
 # an --internal network (no route to any real host).
+#
+# Wave 11, finding 5: the emergency stop and the host-side commands that only
+# read (routed_tolerant below) must not be refused because a variable was left
+# in the shell after the routed target went away. For those the join is
+# attempted the same way; when it fails they run as if the variable were not
+# set (no routed address is admitted) and say so. Every other command,
+# senders above all, fails closed exactly as before.
 routed_address=""
+routed_tolerant=0
 join_routed_practice() {
     local name="$1" runtime state running profile address networks network internal
     if [[ ! "${name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$ ]]; then
+        if (( routed_tolerant != 0 )); then
+            printf 'Note: SIPPYCUP_ROUTED_PRACTICE is set to an invalid name and is ignored: %s sends nothing to a target. Unset it before any sending command.\n' \
+                "${routed_command}" >&2
+            return 0
+        fi
         printf 'Invalid SIPPYCUP_ROUTED_PRACTICE: %s\n' "${name}" >&2
         exit 2
     fi
@@ -414,6 +428,11 @@ join_routed_practice() {
         || ! "${address}" =~ ^169\.254\.([0-9]{1,3})\.([0-9]{1,3})$ \
         || "${internal}" != true ]]
     then
+        if (( routed_tolerant != 0 )); then
+            printf 'Note: SIPPYCUP_ROUTED_PRACTICE is set, but the routed practice target %s is not up. It is ignored: %s sends nothing to a target. Unset it (or run make routed-rehearsal) before any sending command.\n' \
+                "${name}" "${routed_command}" >&2
+            return 0
+        fi
         printf 'The routed practice target %s is not up (SIPPYCUP_ROUTED_PRACTICE is set).\n' "${name}" >&2
         printf 'Run: make routed-rehearsal, or unset SIPPYCUP_ROUTED_PRACTICE.\n' >&2
         printf 'No container or network activity was started.\n' >&2
@@ -427,9 +446,17 @@ join_routed_practice() {
 # (lib/sippycup_cockpit/overlap.py). SIPPYCUP_ALLOW_OVERLAP=NAME[,NAME]
 # names the runs it may knowingly run beside; the run then records the
 # overlap (SIPPYCUP_OVERLAP) and its verdict is reported as unreliable.
+#
+# Wave 11, finding 1: starts closer together than a container start did not
+# see each other. The check now also claims the start for this launcher's
+# process ($$, which becomes the runtime's when it execs), under a file lock
+# that only the check holds; a later start sees the claim until that process
+# is gone. The claim id is put on the container as a label so the claim and
+# its running container count as one run. No claim back means no start.
 declare -a overlap_environment=()
+declare -a claim_label=()
 refuse_overlap() {
-    local record argument
+    local record argument output claim
     for argument in "$@"; do
         # A dry run sends nothing, so it never overlaps.
         [[ "${argument}" == --dry-run ]] && return 0
@@ -439,9 +466,20 @@ refuse_overlap() {
             "${command_name}" >&2
         exit 2
     fi
-    record="$(PYTHONPATH="${project_dir}/lib" PYTHONDONTWRITEBYTECODE=1 \
-        python3 -m sippycup_cockpit.overlap --repo "${project_dir}" \
+    output="$(PYTHONPATH="${project_dir}/lib" PYTHONDONTWRITEBYTECODE=1 \
+        python3 -m sippycup_cockpit.overlap --repo "${project_dir}" --claim-pid "$$" \
         --command "${command_name}${1:+ $1}")" || exit 2
+    claim="${output%%$'\n'*}"
+    if [[ ! "${claim}" =~ ^claim\ ([0-9a-f]{32})$ ]]; then
+        printf '%s: the check for another active run of this checkout did not claim this start. Nothing was sent.\n' \
+            "${command_name}" >&2
+        exit 2
+    fi
+    claim_label=("--label=dev.sippycup.claim=${BASH_REMATCH[1]}")
+    record=""
+    if [[ "${output}" == *$'\n'* ]]; then
+        record="${output#*$'\n'}"
+    fi
     if [[ -n "${record}" ]]; then
         export SIPPYCUP_OVERLAP="${record}"
         overlap_environment=(--env=SIPPYCUP_OVERLAP="${record}")
@@ -618,6 +656,15 @@ unset SIPPYCUP_ROUTED_ADDRESS
 # Only refuse_overlap may hand a run its overlap record.
 unset SIPPYCUP_OVERLAP
 if [[ -n "${SIPPYCUP_ROUTED_PRACTICE:-}" ]]; then
+    routed_command="${1:-}"
+    if (( advanced == 0 && isolated == 0 && admin == 0 && practice == 0 )); then
+        # `stop` (with any argument) and the host-side commands that only
+        # read. With a container option they are not host-side, so the
+        # strict path below applies.
+        case "${routed_command}" in
+            stop|summary|report|rehearse|ready|go|journal|diagnose|explain) routed_tolerant=1 ;;
+        esac
+    fi
     if (( practice != 0 || admin != 0 )); then
         printf 'SIPPYCUP_ROUTED_PRACTICE cannot be combined with --practice or --admin.\n' >&2
         exit 2

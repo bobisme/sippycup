@@ -284,7 +284,7 @@ def build_plan(
             if message not in blocking:
                 blocking.append(message)
         # The same read-only count the reservation makes (bn-y3er).
-        found = call_ledger.status(group["directory"], group["approval"], group["ceiling"])
+        found = call_ledger.status(group["directory"], group["approval"], group["ceiling"], context=True)
         calls_status.append({**found.as_dict(), "placing": group["calls"],
                              "line": found.line(group["calls"], "matrix")})
         if found.left is not None:
@@ -598,6 +598,18 @@ def run(options: MatrixOptions, deps: MatrixDependencies | None = None) -> tuple
                 stop = f"refused: {error}"
                 if deps.progress is not None:
                     deps.progress(f"Matrix: {label}: refused: {error}")
+                continue
+            if value.get("state") == "blocked" and not value.get("runDirectory"):
+                # Wave 11, finding 7: the call's own gate refused this cell
+                # before anything existed (for example the scope changed after
+                # the compile, mid-run). No run directory, no packet: the cell
+                # was not placed and the record must not say it was.
+                why = "; ".join(str(item) for item in value.get("blockingErrors") or ()) or "no reason was recorded"
+                reason = f"the profile gate refused it before anything was sent for it: {why}"
+                cell.update(status="refused", verdict="blocked", exitCode=code, reason=reason)
+                stop = f"blocked: cell {cell['index']} was not placed; {reason}"
+                if deps.progress is not None:
+                    deps.progress(f"Matrix: {label}: blocked, nothing was sent for this cell: {why}")
                 continue
             cell.update(_cell_result(value, code))
             # The same rule as a single call (bn-y3er): a cell counts from its

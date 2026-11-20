@@ -230,17 +230,33 @@ def check_calls(model: dict[str, Any], profile_path: Path, document: dict[str, A
     eng = model["engagement"]["display"]
     status = calls_status(profile_path, document)
     title = "Calls left (owner's limit)"
+    # Wave 11, findings 2 and 4: calls under another reference in this
+    # directory, and the same reference counted in a sibling directory, are
+    # said on lines of their own beside the count.
+    notes = [f"{note}." for note in status.notes()]
     if status.error is not None:
         return Check("calls", title, NOGO,
-                     ["the call ledger cannot be trusted, so no call can be placed", status.line()],
-                     f"restore {eng}/call-ledger.jsonl from your backup of {eng}, or ask the owner for a new "
-                     f"approval id, record it in {eng}/scope.yaml, and run {LAUNCHER} scope compile {eng}")
+                     ["the call ledger cannot be trusted, so no call can be placed", status.line(notes=False),
+                      *notes],
+                     f"restore {eng}/call-ledger.jsonl from your backup of {eng}. A new approval id is not a way "
+                     f"around this: only when the owner gives a new written approval (tell them how many calls the "
+                     f"run directories show) record its id with {LAUNCHER} scope answer {eng} "
+                     f"authorization.approval_id, then run {LAUNCHER} scope compile {eng}")
     if status.left == 0:
         return Check("calls", title, NOGO, ["none left: every command that places a call will refuse",
-                                            status.line()],
+                                            status.line(notes=False), *notes],
                      f"only the owner can approve more calls: record the new limits.calls in {eng}/scope.yaml, "
                      f"then run {LAUNCHER} scope compile {eng}")
-    return Check("calls", title, GO, [status.line()])
+    if status.elsewhere_blocks:
+        where = ", ".join(item.directory for item in status.elsewhere[:3])
+        return Check("calls", title, NOGO,
+                     [status.line(notes=False), *notes,
+                      "the count above starts again in this directory, so the owner's limit could be passed "
+                      "without any refusal"],
+                     f"go on in {where} (its ledger holds the count: {LAUNCHER} ready {status.elsewhere[0].directory}); "
+                     f"use {eng} only under a new written approval from the owner, recorded with {LAUNCHER} scope "
+                     f"answer {eng} authorization.approval_id and {LAUNCHER} scope compile {eng}")
+    return Check("calls", title, GO, [status.line(notes=False), *notes])
 
 
 def other_profiles(model: dict[str, Any]) -> list[dict[str, Any]]:
@@ -378,6 +394,25 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
                                   f"({approval.get('validUntil')}) than the profile"], replan)
         lines.append("the frozen campaign plan is bound to this window (checked before every step)")
     return Check("window", "Approval window", GO, lines + [f"at least {_duration(required)} left ({need})"])
+
+
+def check_plan(model: dict[str, Any]) -> Check | None:
+    """A frozen plan that no longer matches campaign.yaml (wave 11, finding 9); None when there is nothing to say.
+
+    ``campaign run`` compares the campaign file's SHA-256 with the one the
+    plan recorded and refuses on a difference, so this is said here first,
+    with the same recovery line that refusal prints.
+    """
+    plan = model["files"].get("planFacts") or {}
+    if plan.get("error") or plan.get("manifestMatches") is not False:
+        return None
+    eng = model["engagement"]["display"]
+    return Check("plan", "Frozen campaign plan", WARN,
+                 [f"{eng}/plan.json was frozen from an earlier {eng}/campaign.yaml: the campaign file's SHA-256 no "
+                  "longer matches the one the plan recorded (scope compile wrote the file again, or it was edited)",
+                  "campaign run will refuse this plan and send nothing; call, matrix and checks do not use it",
+                  "to freeze a new plan from the current file and keep the old one, run the fix line"],
+                 replan_command(f"{eng}/plan.json", f"{eng}/campaign.yaml"))
 
 
 def check_clock(host: Host) -> Check:
@@ -892,7 +927,9 @@ def assess(engagement: Path, *, host: Host, image: str, margin_minutes: int = DE
     checks = [check_engagement(model), check_scope(model), check_profile(model),
               *([calls] if calls is not None else []),
               *check_other_profiles(host, model, mode, now, zone),
-              check_window(model, now, zone, margin_minutes), check_clock(host), image_check]
+              check_window(model, now, zone, margin_minutes),
+              *([stale_plan] if (stale_plan := check_plan(model)) is not None else []),
+              check_clock(host), image_check]
     probe, problem = (None, "skipped (--no-container)")
     if container and image_check.status == NOGO and "built from" not in " ".join(image_check.lines):
         # Never start (or pull) an image that is not there; the image line says why.
