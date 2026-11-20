@@ -1,6 +1,6 @@
 # sippycup
 
-![Sippycup voice-network assessment toolbox](assets/sippycup-readme-hero.png)
+![Sippycup — Test calls for SIP and RTP. An ornate silver goblet rests on a worn oak table, with a SIP call ladder etched into its bowl.](assets/sippycup-cover.webp)
 
 A containerized toolbox for authorized, network-only assessment of SIP/RTP
 voice systems. It contains call generators, protocol viewers, packet capture
