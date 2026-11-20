@@ -70,14 +70,22 @@ whatever the scope names later. What is shown beside the count
 plans) is every other reference this directory's ledger holds calls under
 (:func:`reference_counts`), and every sibling directory beside this one whose
 ledger counts calls under the same reference (:func:`same_approval_elsewhere`).
-Ledgers are never merged, and neither note changes what a sender's reservation
-counts.
+Ledger files are never merged.
+
+One rule for an owner's reference that a sibling directory counts calls under
+too (wave 12, finding 1; :func:`elsewhere_rule`): the directory whose ledger
+has the earlier first call is where the work goes on, and its reservations
+add the calls of the others (those its own ledger does not also hold, so a
+ledger copied with its directory counts once); every other directory's
+reservation is refused before anything is sent. ``ready``, ``rehearse``, the
+dry runs and the plans read the same rule and print the same text. The
+benches' own references (:data:`BENCH_APPROVAL_IDS`) are exempt.
 
 Limits that remain (see docs/SAFETY-AUDIT.md, findings 4 and 6): the ledger
-counts per engagement directory, so a copied engagement directory, a profile
-copied into another directory, or another checkout keeps its own count (a
-sibling directory under the same parent is named, see above; another parent or
-checkout is not seen); and it stops honest mistakes, not an operator who
+counts per engagement directory, so an engagement directory or a profile
+copied under another parent, or another checkout, keeps its own count (a
+sibling directory under the same parent is seen and refused, see above;
+another parent or checkout is not seen); and it stops honest mistakes, not an operator who
 deliberately rewrites the ledger, the run directories, or the profiles.
 """
 
@@ -618,10 +626,15 @@ def effective_ceiling(found: Usage, ceiling: int) -> int:
 
 
 def refusal_text(
-    directory: Path, approval_id: str, ceiling: int, used: int, calls: int, command: str
+    directory: Path, approval_id: str, ceiling: int, used: int, calls: int, command: str,
+    elsewhere: int = 0,
 ) -> str:
     engagement = operator_path(directory)
-    remaining = max(0, ceiling - used)
+    remaining = max(0, ceiling - used - elsewhere)
+    beside = (
+        f", {elsewhere} more counted under the same approval in another directory beside it"
+        if elsewhere else ""
+    )
     narrow = (
         f" Narrow it to {remaining} call(s) or fewer, or ask the owner for more."
         if calls > 1 and remaining > 0
@@ -631,7 +644,7 @@ def refusal_text(
         f"call limit: approval {approval_id} allows {ceiling} call(s) in this engagement "
         f"(limits.calls in {engagement}/scope.yaml); {used} already counted in "
         f"{engagement}/{LEDGER_FILE} (calls placed, and calls reserved by a command that may still "
-        f"be running), {remaining} remain, and this {command} would place {calls}; nothing was "
+        f"be running){beside}, {remaining} remain, and this {command} would place {calls}; nothing was "
         f"sent.{narrow} Only the owner can raise the limit: ask them, record the new number with "
         f"./bin/sippycup scope answer {engagement} limits.calls (that sets the approval back to pending), "
         f"record the approval again with ./bin/sippycup scope answer {engagement} 2, and then run "
@@ -698,9 +711,37 @@ class ElsewhereCount:
     directory: str
     used: int | None
     error: str | None = None
+    # When that ledger's first reservation under the reference was made.
+    first_at: str | None = None
+    # The calls there that this directory's own ledger does not also hold (a
+    # ledger copied with its directory repeats the same reservations).
+    extra: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"directory": self.directory, "used": self.used, "error": self.error}
+        return {"directory": self.directory, "used": self.used, "error": self.error,
+                "firstAt": self.first_at, "extra": self.extra}
+
+
+def _first_reserve(entries: Iterable[dict[str, Any]], approval_id: str) -> tuple[str | None, set[str]]:
+    """When the first reservation under ``approval_id`` was made, and every reservation id."""
+    first: str | None = None
+    identifiers: set[str] = set()
+    for entry in entries:
+        if entry.get("approval") != approval_id or entry.get("event") != "reserve":
+            continue
+        if first is None and isinstance(entry.get("at"), str):
+            first = entry["at"]
+        if isinstance(entry.get("id"), str):
+            identifiers.add(entry["id"])
+    return first, identifiers
+
+
+def own_first_reserve(directory: str | Path, approval_id: str) -> tuple[str | None, set[str]]:
+    """:func:`_first_reserve` for this directory's ledger; never raises."""
+    try:
+        return _first_reserve(read_entries(Path(directory)) or (), approval_id)
+    except (LedgerError, OSError):
+        return None, set()
 
 
 def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[ElsewhereCount]:
@@ -724,6 +765,7 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
     except (OSError, RuntimeError):
         return []
     found: list[ElsewhereCount] = []
+    _own_first, own_ids = own_first_reserve(here, approval_id)
     for child in children:
         ledger = child / LEDGER_FILE
         try:
@@ -735,7 +777,13 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
             continue
         shown = operator_path(child)
         try:
-            used = usage(read_entries(child) or (), approval_id, child).used
+            entries = read_entries(child) or []
+            used = usage(entries, approval_id, child).used
+            first_at, _ids = _first_reserve(entries, approval_id)
+            # Reservations this directory's ledger also holds were copied
+            # with the directory: the same calls, counted once.
+            extra = usage([entry for entry in entries if entry.get("id") not in own_ids],
+                          approval_id, child).used if own_ids else used
         except (LedgerError, OSError) as error:
             try:
                 named = approval_id.encode() in ledger.read_bytes()[:MAX_LEDGER_BYTES]
@@ -745,8 +793,105 @@ def same_approval_elsewhere(directory: str | Path, approval_id: str) -> list[Els
                 found.append(ElsewhereCount(shown, None, str(error)))
             continue
         if used > 0:
-            found.append(ElsewhereCount(shown, used))
+            found.append(ElsewhereCount(shown, used, first_at=first_at, extra=max(0, min(extra, used))))
     return found
+
+
+@dataclass
+class ElsewhereRule:
+    """One owner's approval counted in more than one directory: the one rule (wave 12, finding 1).
+
+    The directory whose ledger has the earlier first call under the reference
+    (the first by name when the times are equal) is where the work goes on;
+    its count adds the calls of the others. Every other directory sends
+    nothing more under the reference. Each side computes the same ``keeper``
+    and prints the same :attr:`text`. A sibling ledger that names the
+    reference and cannot be read stops every directory that sees it.
+    """
+
+    approval_id: str
+    engagement: str
+    keeper: str | None
+    blocks: bool
+    # Calls counted in the other directories that this one adds (the keeper only).
+    extra: int
+    text: str
+    # The part of the text that is the same from every directory involved.
+    advice: str = ""
+
+    def refusal(self, command: str) -> str:
+        return (f"call limit: this {command} is refused in {self.engagement}. Nothing was sent. "
+                f"{self.text[0].upper()}{self.text[1:]}")
+
+
+def elsewhere_rule(
+    directory: str | Path, approval_id: str, used: int | None,
+    elsewhere: Iterable[ElsewhereCount] | None = None,
+) -> ElsewhereRule | None:
+    """The rule for ``directory``; None when no sibling directory counts calls
+    under ``approval_id``, or the reference is one of the tool's own benches
+    (exempt: every bench directory shares its reference by design).
+
+    Read-only; never raises.
+    """
+    if not isinstance(approval_id, str) or not approval_id or approval_id in BENCH_APPROVAL_IDS:
+        return None
+    others = list(same_approval_elsewhere(directory, approval_id) if elsewhere is None else elsewhere)
+    if not others:
+        return None
+    try:
+        engagement = operator_path(Path(directory).resolve())
+    except (OSError, RuntimeError):
+        engagement = operator_path(directory)
+    unreadable = [item for item in others if item.used is None]
+    if unreadable:
+        names = ", ".join(item.directory for item in unreadable[:SHOWN_DIRECTORIES])
+        return ElsewhereRule(approval_id, engagement, None, True, 0, (
+            f"approval {approval_id} is named by a call ledger that cannot be read in {names}, beside "
+            f"{engagement}. The owner's limit is one limit for the approval, and the calls there cannot be "
+            f"counted. Restore that ledger from your backup; until then no directory beside it sends "
+            f"anything under {approval_id}"
+        ))
+    own_first, _ids = own_first_reserve(directory, approval_id)
+    holders = [(item.first_at or "9999", item.directory, item.used) for item in others]
+    if used:
+        holders.append((own_first or "9999", engagement, used))
+    holders.sort()
+    keeper = holders[0][1]
+    tie = len(holders) > 1 and holders[0][0] == holders[1][0]
+    stopped = [name for _at, name, _used in holders[1:]]
+    if not used and engagement not in stopped:
+        stopped.append(engagement)
+    listed = ", ".join(
+        f"{name} ({count} call(s), first at {at if at != '9999' else 'an unrecorded time'})"
+        for at, name, count in holders[:SHOWN_DIRECTORIES + 1]
+    )
+    more = len(holders) - (SHOWN_DIRECTORIES + 1)
+    listed += f", and {more} more" if more > 0 else ""
+    if len(holders) == 1:
+        why = "the directory that holds its calls"
+    elif tie:
+        why = ("the first by name, as the first calls have the same time; its count adds the calls of the "
+               "other directory that its own ledger does not hold")
+    else:
+        why = "its ledger has the earlier first call, and its count adds the calls of the other directory"
+    one = len(stopped) == 1
+    stop_names = ", ".join(stopped[:SHOWN_DIRECTORIES]) + (" and others" if len(stopped) > SHOWN_DIRECTORIES else "")
+    first_stopped = stopped[0] if stopped else engagement
+    listing = f"approval {approval_id} has calls counted in {listed}"
+    advice = (
+        f"The owner's limit is one limit for the approval, whatever the directory. Go on in {keeper} ({why}): "
+        f"./bin/sippycup ready {keeper}. "
+        f"{stop_names} send{'s' if one else ''} nothing more under {approval_id}: "
+        f"use {'it' if one else 'them'} again only under a new written approval from the owner, "
+        f"recorded with ./bin/sippycup scope answer {first_stopped} authorization.approval_id and "
+        f"./bin/sippycup scope compile {first_stopped}"
+    )
+    text = f"{listing}. {advice}"
+    if keeper != engagement:
+        return ElsewhereRule(approval_id, engagement, keeper, True, 0, text, advice)
+    return ElsewhereRule(approval_id, engagement, keeper, False, sum(item.extra or 0 for item in others),
+                         text, advice)
 
 
 @dataclass
@@ -763,11 +908,26 @@ class CallsStatus:
     # directories that count calls under this reference.
     other_references: tuple[ReferenceCount, ...] = ()
     elsewhere: tuple[ElsewhereCount, ...] = ()
+    # The one rule for an owner's approval counted in a sibling directory too
+    # (wave 12, finding 1); None for the benches' references and when no
+    # sibling counts calls. Filled by status(context=True).
+    rule: "ElsewhereRule | None" = None
 
     @property
     def elsewhere_blocks(self) -> bool:
-        """True when a sibling directory spends the same (non-bench) approval's limit."""
+        """True when this directory may send nothing more under the approval: a sibling
+        directory spends the same (non-bench) approval's limit and is where the count
+        goes on, or a sibling ledger cannot be read (:class:`ElsewhereRule`)."""
+        if self.rule is not None:
+            return self.rule.blocks
+        # No rule was computed (a status built by hand): the strict reading.
         return bool(self.elsewhere) and self.approval_id not in BENCH_APPROVAL_IDS
+
+    @property
+    def elsewhere_used(self) -> int:
+        """Calls of sibling directories that count against the limit here (only in the
+        directory where the count goes on)."""
+        return self.rule.extra if self.rule is not None and not self.rule.blocks else 0
 
     def notes(self) -> list[str]:
         """Sentences that must stand beside the count; empty when there is nothing to add."""
@@ -796,7 +956,11 @@ class CallsStatus:
             shown += f", and {more} more director{'y' if more == 1 else 'ies'}" if more > 0 else ""
             if self.approval_id in BENCH_APPROVAL_IDS:
                 tail = ("That is expected for this practice reference, which every practice directory shares; "
-                        "an owner's approval reference used in two directories would be refused by ready")
+                        "an owner's approval reference used in two directories is refused by ready, by "
+                        "rehearse and by every command that places a call")
+            elif self.rule is not None:
+                # The same sentences from every directory involved (finding 4).
+                tail = self.rule.advice or (self.rule.text[0].upper() + self.rule.text[1:])
             else:
                 tail = ("The owner's limit is one limit for the approval: the calls there are NOT in the count "
                         f"above. Keep working in that directory, or use {engagement} only with a new written "
@@ -808,7 +972,7 @@ class CallsStatus:
     def left(self) -> int | None:
         if self.limit is None or self.used is None:
             return None
-        return max(0, self.limit - self.used)
+        return max(0, self.limit - self.used - self.elsewhere_used)
 
     @property
     def trusted(self) -> bool:
@@ -821,6 +985,9 @@ class CallsStatus:
             value["otherReferences"] = [item.as_dict() for item in self.other_references]
         if self.elsewhere:
             value["sameApprovalElsewhere"] = [item.as_dict() for item in self.elsewhere]
+            if self.rule is not None:
+                value["sameApprovalRule"] = {"goOnIn": self.rule.keeper, "refusedHere": self.rule.blocks,
+                                             "countedElsewhere": self.rule.extra}
         return value
 
     def line(self, placing: int | None = None, command: str = "command", notes: bool = True) -> str:
@@ -836,11 +1003,17 @@ class CallsStatus:
         elif self.left is None:
             text = f"Calls: no call limit is recorded for approval {self.approval_id}"
         else:
-            text = (f"Calls: {self.used} of {self.limit} used, {self.left} left "
+            beside = self.elsewhere_used
+            used = (f"{self.used + beside} of {self.limit} used ({self.used} here and {beside} in another "
+                    "directory under the same approval)" if beside else f"{self.used} of {self.limit} used")
+            text = (f"Calls: {used}, {self.left} left "
                     f"(approval {self.approval_id}, counted in {self.ledger})")
             if placing is not None:
                 text += f"; this {command} would place {placing}"
-                if placing > self.left:
+                if self.elsewhere_blocks:
+                    text += (", but it would be refused: this directory sends nothing more under "
+                             "this approval")
+                elif placing > self.left:
                     text += (f", more than the {self.left} left, so it would be refused"
                              if self.left else ", but none are left, so it would be refused")
         extra = self.notes() if notes else []
@@ -866,13 +1039,16 @@ def status(directory: str | Path, approval_id: str, ceiling: int | None, *, cont
     try:
         found = check(directory, approval_id)
     except LedgerError as error:
-        return CallsStatus(approval_id, shown, error=str(error), other_references=others, elsewhere=elsewhere)
+        return CallsStatus(approval_id, shown, error=str(error), other_references=others, elsewhere=elsewhere,
+                           rule=elsewhere_rule(directory, approval_id, None, elsewhere) if context else None)
     except OSError as error:
         return CallsStatus(approval_id, shown, error=f"cannot read {shown}: {error.strerror or error}",
-                           other_references=others, elsewhere=elsewhere)
+                           other_references=others, elsewhere=elsewhere,
+                           rule=elsewhere_rule(directory, approval_id, None, elsewhere) if context else None)
     limit = found.budget if found.budget is not None else ceiling
     return CallsStatus(approval_id, shown, limit=limit if isinstance(limit, int) else None, used=found.used,
-                       other_references=others, elsewhere=elsewhere)
+                       other_references=others, elsewhere=elsewhere,
+                       rule=elsewhere_rule(directory, approval_id, found.used, elsewhere) if context else None)
 
 
 def reserve(
@@ -897,8 +1073,17 @@ def reserve(
     with _locked(directory):
         found = check(directory, approval_id)
         limit = effective_ceiling(found, ceiling)
-        if found.used + calls > limit:
-            raise CeilingRefused(refusal_text(directory, approval_id, limit, found.used, calls, command))
+        # One owner's approval counted in a sibling directory too (wave 12,
+        # finding 1): only one of the directories goes on, and it adds the
+        # calls of the others. The benches' own references are exempt.
+        rule = elsewhere_rule(directory, approval_id, found.used)
+        if rule is not None and rule.blocks:
+            raise CeilingRefused(rule.refusal(command))
+        beside = rule.extra if rule is not None else 0
+        if found.used + beside + calls > limit:
+            raise CeilingRefused(
+                refusal_text(directory, approval_id, limit, found.used, calls, command, elsewhere=beside)
+            )
         identifier = uuid.uuid4().hex
         _append(directory, {
             "event": "reserve", "id": identifier, "approval": approval_id, "calls": calls,

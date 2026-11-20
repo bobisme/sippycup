@@ -84,6 +84,10 @@ ss -Hlun "src ${peer_address}:${peer_port}" | grep -q . || fail "echo peer did n
 stage="write profile"
 valid_from="$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
 valid_until="$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+# The approval reference is this run's own (it carries the run directory's
+# name): every run writes a new directory beside the earlier ones, and one
+# reference counted in two directories under one parent is refused before
+# anything is sent (call_ledger.elsewhere_rule).
 cat >"${root}/profile.yaml" <<YAML
 schema_version: sippycup.dev/target-profile/v1
 name: call-selftest
@@ -95,7 +99,7 @@ target:
 authorization:
   status: approved
   approved_by: call-integration-selftest
-  approval_id: SELFTEST-LOOPBACK
+  approval_id: SELFTEST-LOOPBACK-${root##*/}
   valid_from: "${valid_from}"
   valid_until: "${valid_until}"
 limits:

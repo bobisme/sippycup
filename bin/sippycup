@@ -667,6 +667,7 @@ if [[ -n "${SIPPYCUP_ROUTED_PRACTICE:-}" ]]; then
     fi
     if (( practice != 0 || admin != 0 )); then
         printf 'SIPPYCUP_ROUTED_PRACTICE cannot be combined with --practice or --admin.\n' >&2
+        printf 'Nothing was sent; no container or network activity was started. Unset SIPPYCUP_ROUTED_PRACTICE, or drop --practice.\n' >&2
         exit 2
     fi
     join_routed_practice "${SIPPYCUP_ROUTED_PRACTICE}"

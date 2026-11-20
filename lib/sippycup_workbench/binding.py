@@ -192,13 +192,17 @@ def load_binding(
                 f"({seconds}s from now; valid_until {_stamp(valid_until)})"
             )
     if reasons:
+        from .profile import _engagement_beside
+
+        # The real directory where it is known (rehearsal 4, finding 6).
+        where = _engagement_beside(_resolve_profile_path(path)) or "DIR"
         raise BindingError(
             f"the profile {shown} does not allow sending now",
             reasons,
             f"run `./bin/sippycup rehearse {shown}` and fix what it reports; "
             "for an approval or window problem ask the owner for a new written approval, "
-            "record it in scope.yaml (the approval itself: `./bin/sippycup scope answer DIR 2`) and run "
-            "`./bin/sippycup scope compile DIR`.",
+            f"record it in scope.yaml (the approval itself: `./bin/sippycup scope answer {where} 2`) and run "
+            f"`./bin/sippycup scope compile {where}`.",
         )
     return Binding(
         path=shown,

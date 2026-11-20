@@ -160,7 +160,11 @@ while the call runs (bn-2jg, `docs/SAFETY-AUDIT.md`):
   `mediaGuard` (`active`, `rules`, `blocked.rtp`, `blocked.rtcp`,
   `blocked.other`, `destinations`). PJSUA's own `RTP (PJSUA): sent N` counts a
   dropped packet as sent; the Media guard line says how many of them never
-  left. `make smoke` checks the guard in the image.
+  left. A call the guard watched without dropping anything prints
+  `Media guard:  active (nothing was dropped)`. Under a TLS server name the
+  guard is preloaded into PJSUA only (by `env`, after the name-pin helpers),
+  so its banner is in `softphone-console.txt` once, for PJSUA.
+  `make smoke` checks the guard in the image.
 
 Behind a proxy or SBC the media address usually differs from the signaling
 address; approve both (see the practice proxy in `docs/PRACTICE-TARGET.md`).

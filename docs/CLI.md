@@ -53,6 +53,9 @@ The registry makes execution location explicit:
   the other run and sends nothing. `SIPPYCUP_ALLOW_OVERLAP=NAME[,NAME]` names
   the runs it may knowingly run beside; the run then records `overlap` in its
   result, and `diagnose` and the owner report call its verdict unreliable.
+  It is for deliberately running two senders, not a way past the refusal: it
+  can put more calls on the target at once than `limits.concurrent_calls`
+  allows, and the owner report then raises `concurrent-calls-exceeded`.
   Commands started at the same instant are held apart too: the check runs
   under a file lock and leaves a claim (`work/.sender-claims/`) that the next
   start sees before any container exists; exactly one starts, the others are

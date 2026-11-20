@@ -2921,6 +2921,29 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
                     "recordings and verdicts may mix the traffic of both runs, whatever the verdict says; they "
                     "need to be repeated one at a time before anything is concluded from them.",
         })
+    # Wave 12, finding 1: this report counts one directory. Calls placed under
+    # the same owner's approval reference from a directory beside it are named
+    # here with their count, so the report of a copied directory is not read
+    # as the whole of what the approval was used for.
+    from sippycup import call_ledger as _ledger
+
+    for row in call_limits:
+        beside = [] if row["approvalId"] in _ledger.BENCH_APPROVAL_IDS else _ledger.same_approval_elsewhere(
+            root, row["approvalId"])
+        if not beside:
+            continue
+        named = "; ".join(
+            f"{_reviewed(item.directory)} counts {item.used} call(s)" if item.used is not None
+            else f"{_reviewed(item.directory)} has a call ledger that names it and cannot be read"
+            for item in beside[:_ledger.SHOWN_DIRECTORIES]
+        )
+        limitations.insert(0, {
+            "code": "same-approval-in-another-directory",
+            "text": f"Approval {row['approvalId']} was also used from another directory on the assessor's machine: "
+                    f"{named}. Those calls are not in this report or its totals. The call limit of this approval "
+                    "is one limit for all of them together, so the count in this report is not the whole count "
+                    "for the approval.",
+        })
     stale_judged = [
         r for r in owner_runs if r["id"] in set(unrecorded_runs) and r["readable"] != "unreadable"
     ]
