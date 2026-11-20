@@ -108,9 +108,9 @@ OBSERVATIONS: dict[str, dict[str, str]] = {
     },
     "oracle-assertion-failed": {
         "severity": "info",
-        "title": "A call-path assertion failed on an answered call",
-        "summary": "The offline packet oracle reported failed assertions for an answered call.",
-        "recommendation": "Review the failing assertions in the run's assertion output before drawing a conclusion; reproduce independently.",
+        "title": "A call-path check failed on an answered call",
+        "summary": "The automatic check of the captured packets reported failed checks for an answered call.",
+        "recommendation": "Review the failing checks in the run's check output before drawing a conclusion; reproduce independently.",
     },
     # bn-3vxl: the campaign re-checks the approval window before every step
     # and stopped itself. A safety stop, not a result about the target.
@@ -379,6 +379,9 @@ class Source:
     # The dial strings this record approves (None: it does not restrict the
     # destination). Not part of as_dict, so report bytes are unchanged.
     dial_list: list[str] | None = None
+    # A campaign manifest's own copy of the approval (id, window) it was
+    # compiled with. Shown to the reader; never a window or approval source.
+    held_approval: dict[str, Any] | None = None
 
     def covers(self, address: str | None, port: int | None, transport: str | None) -> bool:
         if address is None:
@@ -403,7 +406,9 @@ class Source:
         return book.approved(address)
 
     def as_dict(self) -> dict[str, Any]:
+        held = {"held": self.held_approval} if self.held_approval else {}
         return {
+            **held,
             "kind": self.kind,
             "ref": self.ref,
             "approvalId": self.approval_id,
@@ -537,6 +542,14 @@ def _manifest_source(document: dict[str, Any], ref: str) -> Source:
         ports=_int_list(auth.get("signalingPorts")),
         transports=[t for t in _str_list(auth.get("transports")) if t in {"udp", "tcp", "tls"}],
     )
+    approval = _dict(auth.get("approval"))
+    held_from, held_until = parse_time(approval.get("validFrom")), parse_time(approval.get("validUntil"))
+    if approval.get("id") is not None or held_from or held_until:
+        source.held_approval = {
+            "approvalId": _reviewed(approval.get("id"), 80),
+            "validFrom": iso(held_from),
+            "validUntil": iso(held_until),
+        }
     # Media-only networks (authorization.mediaNetworks): approved for media
     # and evidence, never as a signaling target.
     source.media_networks = [n for n in _str_list(auth.get("mediaNetworks")) if _is_network(n)]
@@ -953,6 +966,28 @@ def _destination_user(uri: Any) -> str | None:
     return match.group(1) if match else None
 
 
+# Words for the owner. The call result's notes are written for the operator;
+# the report says the same thing without tool names. A note that only repeats
+# a fact the report states once elsewhere (a loopback target) is dropped.
+_LOOPBACK_NOTE = "The target is a loopback address inside the container's own network namespace; no NAT applies."
+_PLAIN_WORDS = (
+    ("the packet oracle", "the automatic packet check"),
+    ("The packet oracle", "The automatic packet check"),
+    ("The offline packet oracle", "The automatic packet check"),
+    ("PJSUA's own log", "the test softphone's own log"),
+    ("PJSUA call statistics", "test softphone call statistics"),
+    ("PJSUA", "the test softphone"),
+)
+
+
+def _plain_words(text: str | None) -> str | None:
+    if text is None or text == _LOOPBACK_NOTE:
+        return None
+    for old, new in _PLAIN_WORDS:
+        text = text.replace(old, new)
+    return text
+
+
 def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, prefix: str) -> None:
     result = run.docs.get("result.json")
     san = ctx.sanitizer
@@ -971,8 +1006,10 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
     model["state"] = _ident(result.get("state"))
     model["profile"] = san.identifier(result.get("profile"), f"{prefix}.profile", limit=80)
     model["reasons"] = [
-        san.text(note, f"{prefix}.reasons[{index}]", limit=400)
+        text
         for index, note in enumerate(_list(result.get("notes"))[:20])
+        for text in [_plain_words(san.text(note, f"{prefix}.reasons[{index}]", limit=400))]
+        if text
     ]
     softphone = _dict(result.get("softphone"))
     preflight = result.get("preflight")
@@ -1042,7 +1079,7 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
             "peerPort": media_port,
             "toPeerPackets": _int(tls_media.get("outbound")) if tls_media else rtp_tx,
             "fromPeerPackets": _int(tls_media.get("inbound")) if tls_media else rtp_rx,
-            "countSource": "capture (TLS media decode)" if tls_media else "PJSUA call statistics",
+            "countSource": "packet capture (decoded TLS media)" if tls_media else "test softphone call statistics",
         },
         "tls": None
         if not tls
@@ -1312,6 +1349,32 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
     model["targets"] = [
         _target(scope, item.get("address"), item.get("port"), item.get("transport")) for item in resolved[:32]
     ]
+    # Every target the campaign actually used (a step that ran or a preflight
+    # that was sent), so a mixed UDP and TLS campaign names both.
+    used: list[dict[str, Any]] = []
+    for item in [c["target"] for c in cases if c["outcome"] != "not-run"] + [p["target"] for p in preflight_entries]:
+        public = {k: v for k, v in item.items() if not k.startswith("_")}
+        if public not in used:
+            used.append(public)
+    model["usedTargets"] = used
+    # A campaign that never began (for example the packet capture could not
+    # start) sent nothing: it is a failure on the assessor's side, not a
+    # result about the target. It has no event stream, no step started, and
+    # no preflight went out.
+    model["notStarted"] = bool(
+        model["state"] in {"failed", "cancelled"}
+        and not events
+        and not preflight_entries
+        and not completed
+        and all(c["outcome"] == "not-run" for c in cases)
+    )
+    if model["notStarted"]:
+        model["verdict"] = "not-started"
+        model["reasons"] = [r for r in model["reasons"] if not r.startswith("campaign ended ")]
+        model["reasons"].append(
+            "This run never started: Sippycup could not begin it on the assessor's side, so nothing was "
+            "sent to your system. It is not a result about your system"
+        )
     model["sent"] = {
         "optionsRequests": totals["options"] + len(preflight_entries),
         "optionsLowerBound": totals["optionsLowerBound"],
@@ -1865,7 +1928,7 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
                     f"Step {case['step']}" + (f"; RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else "."),
                 ))
                 break
-        if run.get("state") not in (None, "succeeded"):
+        if run.get("state") not in (None, "succeeded") and not run.get("notStarted"):
             reason = details.get("stopReason") or run.get("state")
             if reason in {"capture_process_died", "capture_failed"}:
                 found.append(_observation("capture-incomplete", run))
@@ -2239,20 +2302,21 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         run_scope = run_scopes.get(raw.name, scope)
         if raw.name in recorded_scopes:
             model["reasons"].append(
-                "judged against the scope in force when it ran "
-                f"({run_scope.sources[0].ref}, recorded when it ran)"
+                "checked against the approval that was in force when it ran (a copy of that approval was kept at the time)"
             )
+            model["approvalInForce"] = _in_force(run_scope.sources[0])
         if raw.name in practice_scopes:
             model["practiceApproval"] = run_scope.sources[0].ref
             model["reasons"].append(
-                "practice target run (loopback-only practice namespace; checked against "
-                f"{run_scope.sources[0].ref}, not owner traffic)"
+                "practice run against the local practice target (loopback only); checked against the "
+                "practice approval that was in force, not owner traffic"
             )
         if model["readable"] != "unreadable":
             raw_targets = []
             for target in [model.get("target")] + list(model.get("targets") or []) + [c.get("target") for c in model["details"].get("cases", [])]:
                 if target and target.get("_raw"):
                     raw_targets.append(target["_raw"])
+            model["loopback"] = any(_is_loopback(a) for a in raw_targets)
             model["integrity"].extend(_target_check(run_scope, model, model.get("target"), "target"))
             for case in model["details"].get("cases", []):
                 if case["outcome"] != "not-run":
@@ -2356,6 +2420,13 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     totals["optionsRequests"]["lowerBound"] = any(r["sent"].get("optionsLowerBound") for r in owner_runs)
     ceilings = _engagement_ceilings(sources)
     limitations = _limitations(owner_runs, sources, source_warnings + discovery_warnings, journal)
+    loopback_runs = [r for r in owner_runs if r.get("loopback") and r["readable"] != "unreadable"]
+    if loopback_runs:
+        limitations.insert(0, {
+            "code": "loopback-target",
+            "text": f"{len(loopback_runs)} run(s) ({_label_ranges([r['label'] for r in loopback_runs])}) were placed to a "
+                    "loopback address inside the container's own network namespace; no NAT applies.",
+        })
     practice_runs = [r for r in runs if r.get("practiceApproval")]
     if practice_runs:
         limitations.insert(0, {
@@ -2371,10 +2442,10 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     if recorded_sources and stale_judged:
         limitations.append({
             "code": "approval-in-force-unrecorded",
-            "text": f"{len(stale_judged)} run(s) ({', '.join(r['label'] for r in stale_judged)}) carry no record of "
-                    "the scope in force when they ran (they predate the record, or used a profile or manifest that "
-                    "scope compile did not write), so they were judged against the current records, not the "
-                    f"{len(recorded_sources)} scope version(s) on record in {RECORDED_SCOPES}/.",
+            "text": f"{len(stale_judged)} run(s) ({_label_ranges([r['label'] for r in stale_judged])}) carry no record of "
+                    "the approval that was in force when they ran (they predate the record, or used a profile or "
+                    "campaign file that the scope compile step did not write), so they were checked against the "
+                    f"current approval records, not the {len(recorded_sources)} earlier approval version(s) on record.",
         })
     for matrix in matrices:
         if matrix["state"] in {"stopped", "cancelled"} or matrix["notRun"]:
@@ -2419,6 +2490,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         "authorization": {
             "sources": [source.as_dict() for source in sources + practice_sources],
             "window": window,
+            "windowsInForce": _windows_in_force(runs, run_scopes, scope),
             "approvedAddresses": sorted({str(n) for n in addresses.networks}),
             # Approved for media only (owner-approved media networks): never
             # a signaling target; included in approvedAddresses for evidence.
@@ -2460,6 +2532,66 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     return model, ctx
 
 
+def _is_loopback(address: Any) -> bool:
+    try:
+        return ipaddress.ip_address(str(address)).is_loopback
+    except ValueError:
+        return False
+
+
+def _in_force(source: Source) -> dict[str, Any]:
+    """The approval record that was in force for a run: id, window, and archive name."""
+    return {
+        "approvalId": source.approval_id,
+        "validFrom": iso(source.valid_from),
+        "validUntil": iso(source.valid_until),
+        "ref": source.ref,
+    }
+
+
+def _label_ranges(labels: list[str]) -> str:
+    """``R1, R2, R3, R5`` as ``R1-R3, R5`` (labels are R followed by a number)."""
+    numbers = sorted({int(label[1:]) for label in labels if label[1:].isdigit()})
+    parts: list[str] = []
+    start = previous = None
+    for number in numbers + [None]:
+        if start is not None and (number is None or number != previous + 1):
+            parts.append(f"R{start}" if start == previous else f"R{start}-R{previous}")
+            start = None
+        if number is not None:
+            if start is None:
+                start = number
+            previous = number
+    return ", ".join(parts)
+
+
+def _windows_in_force(runs: list[dict[str, Any]], run_scopes: dict[str, "_Scope"], current: "_Scope") -> list[dict[str, Any]]:
+    """The approval windows that were in force for the runs the report lists.
+
+    A renewed window replaces the one before it in the scope file; each run
+    kept the approval it ran under (``approved-scopes/``), so the report can
+    show every window and which runs fell inside which.
+    """
+    found: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for run in runs:
+        if run["readable"] == "unreadable" or run.get("practiceApproval"):
+            continue
+        sources = run_scopes.get(run["id"], current).sources
+        windowed = [s for s in sources if s.valid_from and s.valid_until]
+        preferred = [s for s in windowed if s.kind in {"scope", "scope-in-force"}] or windowed
+        for source in preferred[:1]:
+            key = (source.approval_id, iso(source.valid_from), iso(source.valid_until))
+            entry = found.setdefault(
+                key,
+                {"approvalId": source.approval_id, "from": key[1], "until": key[2], "runs": [], "ref": source.ref},
+            )
+            entry["runs"].append(run["label"])
+    ordered = sorted(found.values(), key=lambda w: (w["from"], w["until"], str(w["approvalId"])))
+    for entry in ordered:
+        entry["runs"] = sorted(entry["runs"], key=lambda label: int(label[1:]))
+    return ordered
+
+
 def _engagement_ceilings(sources: list[Source]) -> list[dict[str, Any]]:
     rows = []
     for source in sources:
@@ -2479,7 +2611,8 @@ STAGES = (
 
 def _limitations(runs: list[dict[str, Any]], sources: list[Source], warnings: list[str], journal: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    readable = [r for r in runs if r["readable"] != "unreadable"]
+    readable = [r for r in runs if r["readable"] != "unreadable" and not r.get("notStarted")]
+    blind: list[dict[str, Any]] = []
     for code, label, test in STAGES:
         if not any(test(r) for r in readable):
             items.append({"code": f"stage-not-run:{code}", "text": f"{label}: not run in this engagement."})
@@ -2502,7 +2635,13 @@ def _limitations(runs: list[dict[str, Any]], sources: list[Source], warnings: li
         if run["kind"] == "campaign":
             if run["details"].get("windowBound") is False:
                 items.append({"code": "campaign-window-unbound", "text": f"Campaign {run['id']} ran from a plan that carries no approval window, so Sippycup did not enforce a window during that run."})
-            for case in run["details"].get("cases", []):
+            if run.get("notStarted"):
+                items.append({"code": "run-not-started", "text": (
+                    f"Campaign {run['id']} never started: Sippycup could not begin it on the assessor's side, so none "
+                    f"of its {run['details'].get('plannedSteps')} planned step(s) ran and nothing was sent to your "
+                    "system. It says nothing about your system; the steps need to be run again."
+                )})
+            for case in ([] if run.get("notStarted") else run["details"].get("cases", [])):
                 if case["outcome"] == "not-run":
                     items.append({"code": "step-not-run", "text": f"Campaign {run['id']} step {case['step']} ({case['case']}) was never run."})
             for entry in run["details"].get("notExercised", []):
@@ -2515,7 +2654,13 @@ def _limitations(runs: list[dict[str, Any]], sources: list[Source], warnings: li
         if run["kind"] == "call":
             oracle = run["details"].get("oracle") or {}
             if not oracle.get("decidesVerdict") and run["details"].get("tls"):
-                items.append({"code": "tls-oracle-blind", "text": f"Call {run['id']}: signaling was TLS-encrypted, so the packet oracle could not inspect SIP; verdict facts come from the softphone log and decoded RTP."})
+                blind.append(run)
+    if blind:
+        items.append({"code": "tls-oracle-blind", "text": (
+            f"Call{'s' if len(blind) != 1 else ''} {_label_ranges([r['label'] for r in blind if r.get('label')])}: signaling was "
+            "TLS-encrypted, so the automatic packet check could not read the SIP messages; the verdict rests on the "
+            "test softphone's log and the decoded RTP."
+        )})
     if not sources:
         items.append({"code": "no-authorization-record", "text": "No scope file, target profile, or campaign manifest was found in the engagement directory; targets and windows could not be re-checked."})
     if journal.get("present") is False:
@@ -2548,12 +2693,24 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         parts.append("No runs were recorded in this engagement directory.")
+    in_force = model["authorization"].get("windowsInForce") or []
     if approval_ids:
-        parts.append(
-            "Activity was checked against approval "
-            + ", ".join(approval_ids)
-            + (f" (window {window['from']} to {window['until']})." if window else ".")
-        )
+        if len(in_force) > 1:
+            # The approval window was renewed: each run is checked against the
+            # window it ran under, so say which window covered which runs.
+            parts.append(
+                "Activity was checked against approval "
+                + ", ".join(approval_ids)
+                + f", whose window was renewed; the windows in force were "
+                + "; ".join(f"{w['from']} to {w['until']} for {_label_ranges(w['runs'])}" for w in in_force)
+                + "."
+            )
+        else:
+            parts.append(
+                "Activity was checked against approval "
+                + ", ".join(approval_ids)
+                + (f" (window {window['from']} to {window['until']})." if window else ".")
+            )
     elif model["authorization"]["present"]:
         parts.append("Activity was checked against the reviewed scope records in the engagement directory.")
     else:
@@ -2569,6 +2726,14 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
         )
         + (f"; the report derived {len(derived)} observation{'s' if len(derived) != 1 else ''} from run results." if derived else ".")
     )
+    not_started = [r for r in runs if r.get("notStarted")]
+    if not_started:
+        many = len(not_started) != 1
+        parts.append(
+            f"{len(not_started)} of the runs ({_label_ranges([r['label'] for r in not_started])}) never started because "
+            f"Sippycup could not begin {'them' if many else 'it'} on the assessor's side; nothing was sent to your "
+            f"system for {'them' if many else 'it'}."
+        )
     if exceptions:
         parts.append(f"{len(exceptions)} integrity exception{'s require' if len(exceptions) != 1 else ' requires'} review before this report is relied on.")
     else:
@@ -2591,8 +2756,10 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
     # A safety stop is Sippycup refusing to continue outside the scope, not a
     # result about the target; it gets its own row.
     stopped = [r for r in runs if r.get("verdict") in SAFETY_STOPS]
-    failed = [r for r in runs if r not in passed and r not in stopped and r.get("kind") != "check"]
+    failed = [r for r in runs if r not in passed and r not in stopped and r.get("kind") != "check" and not r.get("notStarted")]
     filler = []
+    if not_started:
+        filler.append({"ref": "-", "severity": "none", "title": f"{len(not_started)} run{'s' if len(not_started) != 1 else ''} never started (a problem on the assessor's side; nothing was sent to your system)", "where": "-", "source": "run results", "runs": len(not_started)})
     if not runs:
         filler.append({"ref": "-", "severity": "none", "title": "No runs were recorded", "where": "-", "source": "run results", "runs": 0})
     if not findings:

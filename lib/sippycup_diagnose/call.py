@@ -8,6 +8,7 @@ next commands built from the run's own recorded profile and flags.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from .callrun import CallRun, MAX_ANSWER_TIMEOUT
@@ -349,8 +350,45 @@ def h_pass(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     if isinstance(journal, list) and journal and journal[:2] == ["./bin/sippycup", "journal"]:
         from .core import command
 
-        d.step("Record this call in the engagement journal.", command(*journal[1:]))
+        entry = _journal_entry_for(run, journal)
+        if entry is not None:
+            d.evidence("journal", f"this call is already recorded in the engagement journal (entry #{entry})")
+        else:
+            d.step("Record this call in the engagement journal.", command(*journal[1:]))
     d.step("Draw the ladder of the passing call (keep it as the reference for comparisons).", run.cmd_ladder())
+
+
+def _journal_entry_for(run: CallRun, journal: list) -> int | None:
+    """The sequence number of the journal entry that already names this run's result, else None.
+
+    The run's own journal command lists the evidence it would record
+    (``--evidence calls/RUN/result.json``); an entry of the engagement journal
+    (two directories above the run) that lists one of them means the operator
+    has already run it. Read only, bounded; a missing or unreadable journal
+    means "not recorded".
+    """
+    import json
+
+    wanted = {journal[i + 1] for i, item in enumerate(journal[:-1]) if item == "--evidence"}
+    path = Path(run.dir).resolve().parent.parent / "journal.jsonl"
+    if not wanted or path.is_symlink() or not path.is_file():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for number, line in enumerate(handle):
+                if number >= 5000:
+                    break
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                evidence = entry.get("evidence") if isinstance(entry, dict) else None
+                if isinstance(evidence, list) and wanted.intersection(item for item in evidence if isinstance(item, str)):
+                    sequence = entry.get("sequence")
+                    return sequence if isinstance(sequence, int) else number + 1
+    except OSError:
+        return None
+    return None
 
 
 def h_preflight(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
@@ -1001,7 +1039,8 @@ def h_scope_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     soft = run.softphone
     rules = scope.get("rules") or {}
     d.stage("safety stop", "the negotiated media peer was outside the approved scope, so the call was hung up")
-    if scope.get("admittedBy") and scope.get("portAdmitted") is False:
+    port_only = bool(scope.get("admittedBy") and scope.get("portAdmitted") is False)
+    if port_only:
         why = "its port is outside the approved media port range"
     else:
         why = "its address is neither an approved address nor inside an owner-approved media network"
@@ -1009,15 +1048,24 @@ def h_scope_stop(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     d.attribute(
         OUR, MEDIUM,
         [
-            "Our approved scope is incomplete for this platform, not a platform failure: the toolbox's scope rule worked as designed. Signaling succeeded, and the far end's SDP named a media address that was never approved.",
+            "Our approved scope is incomplete for this platform, not a platform failure: the toolbox's scope rule worked as designed. Signaling succeeded, and "
+            + (
+                "the far end's SDP named a media port outside the approved media port range (its address was approved, so only the port range is missing)."
+                if port_only
+                else "the far end's SDP named a media address that was never approved."
+            ),
             f"Rules in force: {len(rules.get('approvedAddresses') or [])} approved address(es), {len(rules.get('mediaNetworks') or [])} media network(s)"
             + (f", media ports {rules['mediaPorts'][0]}-{rules['mediaPorts'][1]}" if rules.get("mediaPorts") else ", no media port range")
             + ".",
         ],
-        ["Only the owner can approve another media address or range; nothing on the toolbox side should widen the profile by itself."],
+        ["Only the owner can approve " + ("another media port range" if port_only else "another media address or range") + "; nothing on the toolbox side should widen the profile by itself."],
     )
     d.stop_and_ask(
-        "Stop and ask the owner for the media-server addresses or range this platform uses (./bin/sippycup scope questions has the question sheet); do not edit the profile to admit the address yourself."
+        "Stop and ask the owner for the "
+        + ("RTP port range the media servers use" if port_only else "media-server addresses or range this platform uses")
+        + " (./bin/sippycup scope questions has the question sheet); do not edit the profile to admit "
+        + ("the port" if port_only else "the address")
+        + " yourself."
     )
     from .core import command
 

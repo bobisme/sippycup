@@ -810,12 +810,51 @@ def dry_run_plan(
     }
 
 
+def _journal_title(verdict: str, profile_name: str, facts: dict[str, Any] | None) -> str:
+    """What the journal entry says this run was (not just "a baseline call").
+
+    The destination, the transport and port, and the options that make one
+    run different from another (SRTP, the codecs the operator named, DTMF).
+    Digits and secrets are never in it.
+    """
+    if not facts:
+        return f"Guided call ({profile_name}): {verdict}"
+    where = f"{facts['transport']} {facts['host']}:{facts['port']}"
+    extras = []
+    if facts.get("srtp") and facts["srtp"] != "off":
+        extras.append(f"SRTP {facts['srtp']}")
+    if facts.get("codecs"):
+        extras.append("codec " + "/".join(facts["codecs"]))
+    if facts.get("dtmf"):
+        extras.append("DTMF")
+    return (
+        f"Guided call to {facts['destination']} over {where} ({profile_name}): {verdict}"
+        + (f" [{', '.join(extras)}]" if extras else "")
+    )
+
+
+def _journal_facts(
+    options: "CallOptions", host: str, port: Any, transport: str, srtp: str, softphone: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    codec = (softphone or {}).get("codec")
+    return {
+        "destination": options.destination,
+        "host": host,
+        "port": port,
+        "transport": transport,
+        "srtp": srtp,
+        "codecs": [codec] if isinstance(codec, str) and codec else [],
+        "dtmf": bool(options.dtmf),
+    }
+
+
 def _journal_command(
     engagement: Path,
     run_dir: Path,
     work_root: Path,
     verdict: str,
     profile_name: str,
+    facts: dict[str, Any] | None = None,
 ) -> list[str]:
     try:
         relative = run_dir.resolve().relative_to(engagement.resolve())
@@ -830,7 +869,7 @@ def _journal_command(
         "--kind",
         "action",
         "--summary",
-        f"Guided baseline call ({profile_name}): {verdict}",
+        _journal_title(verdict, profile_name, facts),
     ]
     if prefix is not None:
         for name in ("result.json", "evidence-manifest.json", "capture.pcap"):
@@ -2464,7 +2503,9 @@ def _execute(
         loopback=ipaddress.ip_address(host).is_loopback,
         host=host,
     )
-    journal = _journal_command(engagement, run_dir, work_root, verdict, profile_name)
+    journal = _journal_command(
+        engagement, run_dir, work_root, verdict, profile_name, _journal_facts(options, host, port, transport, srtp, softphone_result)
+    )
     value = {
         "apiVersion": RESULT_VERSION,
         "state": state,

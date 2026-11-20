@@ -1752,7 +1752,17 @@ def _run_command(args: argparse.Namespace) -> int:
     try:
         plan = load_plan(args.plan)
         manifest_bytes = args.manifest.read_bytes()
-        verify_frozen_plan(plan, manifest_bytes)
+        try:
+            verify_frozen_plan(plan, manifest_bytes)
+        except ManifestError as error:
+            from sippycup_workbench.replan import replan_command
+
+            raise ManifestError(
+                f"{error}. Nothing was sent. {operator_path(args.plan)} was frozen from a different "
+                f"{operator_path(args.manifest)} than the one given (scope compile wrote the campaign file "
+                "again, or it was edited). To freeze a new plan from the current file and keep the old one, "
+                "run: " + replan_command(operator_path(args.plan), operator_path(args.manifest))
+            ) from error
         env_names = _parse_assignments(args.secret_env, "--secret-env")
         raw_fds = _parse_assignments(args.secret_fd, "--secret-fd")
         try:
@@ -1896,6 +1906,17 @@ def main(argv: list[str] | None = None) -> int:
     except (ManifestError, OSError) as error:
         _emit_error(args, "invalid_manifest", str(error))
         return 2
+    # A manifest scope compile wrote must still be what it wrote, from the
+    # current scope file: the same check campaign run makes before sending.
+    try:
+        from sippycup_workbench.scope_derive import integrity_error
+
+        problem = integrity_error(args.manifest)
+    except ImportError:  # pragma: no cover - the workbench ships beside this module
+        problem = None
+    if problem:
+        _emit_error(args, "manifest_integrity", f"refusing to plan: {problem}")
+        return 2
     refused, warnings = plan_window_check(plan)
     if refused is None:
         # The scope file beside the manifest is the live approval record: a
@@ -1913,7 +1934,16 @@ def main(argv: list[str] | None = None) -> int:
         try:
             _write_plan_atomic(args.output, plan)
         except (ManifestError, OSError) as error:
-            _emit_error(args, "plan_write_failed", str(error))
+            message = str(error)
+            if message.startswith("refusing to overwrite existing frozen plan"):
+                from sippycup_workbench.replan import replan_command
+
+                message += (
+                    ". A frozen plan is never replaced. Nothing was written and nothing was sent. To freeze a "
+                    "new plan and keep the old one, run: "
+                    + replan_command(operator_path(args.output), operator_path(args.manifest))
+                )
+            _emit_error(args, "plan_write_failed", message)
             return 2
         credentials = plan.get("authorization", {}).get("credentialRefs") or []
         secret_hint = "".join(f" --secret-env {ref}=VARIABLE" for ref in credentials)

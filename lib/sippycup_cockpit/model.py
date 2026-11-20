@@ -268,7 +268,10 @@ def _target_summary(profile: dict[str, Any], scope: dict[str, Any]) -> dict[str,
         target = {"host": first.get("address"), "port": first.get("port"), "transport": first.get("transport"),
                   "tls_server_name": first.get("tls_server_name")}
     required = account.get("required") if isinstance(account.get("required"), bool) else None
+    scope_targets = document.get("targets") if isinstance(document.get("targets"), list) else []
+    first_name = scope_targets[0].get("name") if scope_targets and isinstance(scope_targets[0], dict) else None
     return {
+        "name": first_name if isinstance(first_name, str) else None,
         "host": target.get("host"),
         "port": target.get("port"),
         "transport": target.get("transport"),
@@ -441,7 +444,9 @@ def _go_label(facts: dict[str, Any]) -> str:
         return "go/no-go check says GO for this profile (ready)"
     when = facts.get("generatedAt")
     if not facts.get("current"):
-        return f"go/no-go check says GO for this profile (ready; the last one, {when}, was for another profile)"
+        changed = facts.get("changedProfiles") or []
+        why = f"was made before {', '.join(changed)} changed" if changed else "does not cover the profiles on disk now"
+        return f"go/no-go check says GO for this profile (ready; the last one, {when}, {why})"
     return f"go/no-go check says GO for this profile (ready; last {facts.get('verdict')} at {when})"
 
 

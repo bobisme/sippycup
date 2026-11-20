@@ -83,6 +83,25 @@ def _scope_lines(scope: dict[str, Any], *, limit: int) -> list[str]:
     return [f"[ok] complete and consistent; derivatives {scope['derivatives']}"]
 
 
+def _destinations_text(target: dict[str, Any]) -> str:
+    """This target's destinations, then each further target's under its own name.
+
+    A scope with two targets lists every destination of both; reading them as
+    one list showed the same user twice ("echo (echo), dtmf (echo), echo (echo)").
+    """
+    first = target.get("name")
+    groups: dict[str | None, list[str]] = {}
+    for item in target.get("destinations", []):
+        owner = item.get("target")
+        key = None if owner in (None, first) else str(owner)
+        text = f"{item['user']} ({item['expect']})"
+        if text not in groups.setdefault(key, []):
+            groups[key].append(text)
+    parts = [", ".join(groups[None])] if groups.get(None) else []
+    parts += [f"on target {name}: {', '.join(items)}" for name, items in groups.items() if name is not None]
+    return "; ".join(parts) or "none recorded"
+
+
 def _target_line(target: dict[str, Any]) -> str:
     if not target.get("host"):
         return "[  ] no target yet"
@@ -93,9 +112,7 @@ def _target_line(target: dict[str, Any]) -> str:
         account_text = f"account yes ({account.get('username') or 'username missing'})"
     else:
         account_text = "account no"
-    destinations = ", ".join(
-        f"{item['user']} ({item['expect']})" for item in target.get("destinations", [])
-    ) or "none recorded"
+    destinations = _destinations_text(target)
     tls = f", TLS name {target['tlsServerName']}" if target.get("tlsServerName") else ""
     if target.get("literal") is None:
         literal = "from scope.yaml; not compiled into a profile yet"
@@ -140,12 +157,20 @@ def _journal_line(journal: dict[str, Any]) -> str:
             f"{last['kind']}: {last['summary']}")
 
 
+def _before_changed(facts: dict[str, Any]) -> str:
+    """Why the last go/no-go record no longer covers the profiles on disk."""
+    changed = facts.get("changedProfiles") or []
+    if not changed:
+        return "does not cover the profiles on disk now"
+    return f"was made before {', '.join(changed)} changed"
+
+
 def _go_line(facts: dict[str, Any], model: dict[str, Any]) -> str:
     command = f"./bin/sippycup ready {model['engagement']['display']}"
     if not facts.get("present"):
         return f"[  ] not run yet ({command}, right before the first live packet)"
     if not facts.get("current"):
-        return f"[!!] last check {facts.get('generatedAt')} was for another profile; run {command}"
+        return f"[!!] last check {facts.get('generatedAt')} {_before_changed(facts)}; run {command}"
     if facts.get("verdict") != "GO":
         return f"[!!] NO-GO at {facts.get('generatedAt')} ({facts.get('path')}); fix and run {command}"
     return f"[ok] GO at {facts.get('generatedAt')}; source address {facts.get('sourceAddress') or '-'}"
@@ -236,7 +261,8 @@ def render_dashboard(model: dict[str, Any], *, now: datetime | None = None, ques
     if not shown:
         lines.append("   none")
     for index, action in enumerate(shown, 1):
-        lines.extend("  " + line for line in action_line(index, action))
+        # The session's fixed number when there is one (line mode types it).
+        lines.extend("  " + line for line in action_line(action.get("number", index), action))
     if action_limit is not None and len(actions) > action_limit:
         lines.append(f"   ... {len(actions) - action_limit} more")
     lines.append("")

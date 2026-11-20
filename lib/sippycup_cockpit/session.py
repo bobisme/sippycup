@@ -57,6 +57,13 @@ class Session:
         self._image: dict[str, Any] | None = None
         self.host_has_tshark = shutil.which("tshark") is not None if host_has_tshark is None else host_has_tshark
         self.model: dict[str, Any] = {}
+        # Action numbers are fixed for the session: an action keeps the number
+        # it was first shown with, and a number is never reused. The dashboard
+        # order changes with the stage (so a number can move up or down the
+        # list), but "26" stays the same action: typing a number read a moment
+        # ago, after a refresh, cannot select a different one.
+        self._numbers: dict[str, int] = {}
+        self._titles: dict[int, str] = {}
         self.refresh(probe_image=True)
 
     # -- model -------------------------------------------------------------
@@ -65,7 +72,24 @@ class Session:
             self._image = self.image_probe()
         self.model = build_model(self.engagement, repo=self.repo, now=self.clock(), image=self._image,
                                  commands=self.commands)
+        self._number_actions()
         return self.model
+
+    def _number_actions(self) -> None:
+        for action in self.model.get("actions", []):
+            key = str(action["id"])
+            if key not in self._numbers:
+                self._numbers[key] = max(self._numbers.values(), default=0) + 1
+            action["number"] = self._numbers[key]
+            self._titles[action["number"]] = action["title"]
+
+    def action_numbered(self, number: int) -> dict[str, Any] | None:
+        """The action that carries this number now, or None."""
+        return next((item for item in self.actions if item.get("number") == number), None)
+
+    def retired_title(self, number: int) -> str | None:
+        """The title a number had when it was last offered, if it is not offered now."""
+        return None if self.action_numbered(number) else self._titles.get(number)
 
     def toggle_skip_practice(self) -> bool:
         """Flip the 'skip the practice stage' UI preference; returns the new value."""

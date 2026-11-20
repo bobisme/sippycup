@@ -66,6 +66,29 @@ Rehearse the real step: run `scope answer` and type the example's values
 | 17 to 19 | `40`, `2`, `1`; `200`, `200000`, `50000000`; `60`, `3600` |
 | 20 to 23 | `3`, `yes`, `20`; `options, call`, `none`; `you`, `this terminal`, `yes`; `7`, `private` |
 
+**Proxy shape (practice proxy at `127.0.0.3`).** Answer the same questions with
+these rows changed; every other row is as in the table above. This was run
+end to end on the practice target: `scope answer` ended `Scope: COMPLETE and
+CONSISTENT`, `rehearse` printed `Ready: yes`, and a call placed with the
+resulting profile passed.
+
+| Question | Type |
+|---|---|
+| 4 | `127.0.0.3` (the proxy: the only address SIP goes to) |
+| 5 | `5060, 5061`, `udp, tls`; target `practice` `127.0.0.3` `udp` `5060`, `y`; target `tls` `127.0.0.3` `tls` `5061`, certificate name `sippycup-proxy`, CA `work/practice/ca.crt`, `n` |
+| 8 to 10 | `yes`; `practice`, `sippycup-proxy` (the realm); `practice-password`, `other` |
+| 12 to 16 | `127.0.0.2/31` (the media servers' range, as an owner gives a pool; the literal `127.0.0.2` also works); then `20000`, `20019`; `rtp, sdes-srtp`; `PCMU, PCMA`, `rfc4733`; `yes` |
+
+After `scope compile`, `rehearse` prints `Signaling and media: 127.0.0.3 ...`
+and `Media only: 127.0.0.2/31 (2 addresses) (owner-approved media networks;
+never a signaling target)`. The call prints `Media scope: peer 127.0.0.2:20014
+admitted by the approved media network 127.0.0.2/31 (media only)`. (The port
+differs from call to call.) If the media answer is only the signaling address
+(`127.0.0.3`; run this way), the call stops `Guided call: MEDIA-OUTSIDE-SCOPE`
+with `Media scope: peer 127.0.0.2:20012 NOT approved`: the scope is missing the
+media servers, which is not a fault of the proxy. Question numbers follow `scope questions`; `scope answer` prints the
+one it is asking.
+
 It ends with `Scope: COMPLETE and CONSISTENT` and
 `Next: ./bin/sippycup scope compile work/acme`. A typing mistake is refused
 with the reason and asked again; `quit` stops and keeps what you typed, and
@@ -90,8 +113,10 @@ in the past on purpose: until you set it, `scope check` stops with
 `practice-password`. It has two targets, `practice` (UDP, profile
 `target-profile.yaml`) and `tls` (TLS, profile `target-profile-tls.yaml`,
 which the SRTP call and the matrix below use). The TLS target trusts the CA
-that `practice-target up` writes to `work/practice/ca.crt`; that is a new
-file after every `up`, so run `scope compile` again after every `up`.
+that `practice-target up` writes to `work/practice/ca.crt`. That is a new file
+after every `up`, and a frozen campaign plan pins the old one. `scope compile`
+does not change that. After every `up`, freeze a new plan (section 5, "When
+the plan is stale"); the same applies after any `down` and `up`.
 
 **The `credential_ref` format:** lowercase letters, digits and `-`, starting
 with a letter, at most 63 characters. `PRACTICE_PASSWORD`, `practice_password`
@@ -384,8 +409,27 @@ When they are right, the output contains these lines:
 - The plan is bound to the approval window from `scope.yaml`. `run` checks
   the window before every step and stops before a step that could end after
   it (`Campaign: AUTHORIZATION_LAPSED`, exit 1). After any change to the
-  approval in `scope.yaml`, run `scope compile`, move `plan.json` aside, and
-  plan again.
+  approval in `scope.yaml`, run `scope compile`, then freeze a new plan (below).
+- **When the plan is stale.** A frozen plan is never overwritten:
+  `campaign plan` refuses with `refusing to overwrite existing frozen plan`
+  and writes nothing. The plan goes stale when the approval window is renewed
+  (`scope compile`), when the campaign file is written again, or when a CA
+  file changes (every `practice-target up`). `ready` says so (`NO-GO` or
+  `WARN`), and `campaign run` refuses with `source manifest SHA-256 does not
+  match frozen plan` or a similar line; nothing is sent in either case. All
+  three print the same line under `fix:` or `run:`. It keeps the old plan
+  under a dated name and freezes a new one from the current campaign file:
+
+  ```sh
+  mv -n work/acme/plan.json work/acme/plan-STAMP.json && \
+    ./bin/sippycup campaign plan work/acme/campaign.yaml --output work/acme/plan.json
+  ```
+
+  (`STAMP`: a date and time such as `20261119T234928Z`; the printed line has
+  it filled in, so run that line.) Do not delete the old plan, and do not
+  overwrite it by any other means. Read the new plan before you run it. Run
+  `scope compile` first only when `scope.yaml` changed; `campaign plan` refuses
+  a campaign file that `scope.yaml` no longer backs and says so.
 - Use `--interface lo` only with `--practice`. Against the owner's target,
   leave out `--interface` (the default is `any`).
 
@@ -443,17 +487,28 @@ ID=$(podman image inspect --format '{{.Id}}' localhost/sippycup:latest)
     prints `EARLIER report(s), do not send: ...`. Send only the directory on
     the `Engagement report:` line of your last `summary`.
   - `pack verify` prints `- Verdict: **pass**`.
-- `export-ci` refuses while privacy findings are open. Read them with
-  `evidence lint` (it prints JSON). If you accept them, add
+- `pack create` and `pack verify` print the privacy findings first, on
+  standard error (`WARNING: N privacy finding(s) ...`), and they are the
+  findings `evidence lint` reports for the same run. A real run nearly always
+  has some: the capture holds the account's SIP Digest authorization, and call
+  records hold user names. **A pack with findings is evidence you keep. Do not
+  send it to anyone as it stands**, plain or not. `pack create` does not stop
+  you (the pack stays on your disk); `export-ci` does, until you add
   `--allow-privacy-findings`.
 - **Send to the owner:**
   - the `Send to the owner:` file that your last `summary` printed (the
     newest `report` or `report-STAMP` directory; `engagement-report.html`, or
-    `.md`);
-  - the `.tar` packs.
+    `.md`). It holds no password, Digest response, or full Call-ID;
+  - the CI export of each run, which has the verification result and copies
+    no capture, audio, or other artifact:
+    `./bin/sippycup pack export-ci work/acme/packs/RUN.tar work/acme/ci-RUN --allow-privacy-findings`;
+  - only if the owner needs the capture itself: a pack encrypted to the
+    owner's age key (ask the owner for it). Add `--recipient AGE_PUBLIC_KEY`
+    to `pack create`; the result is `RUN.tar.age`, readable only with the
+    owner's private key. Send nothing else from `runs/` or `calls/`.
 
-  Make one pack for each run that you hand over. Do not send capture files
-  outside a pack.
+  Make one pack for each run that you hand over. Never send capture files
+  outside an encrypted pack.
 
 Clean up at the end:
 
@@ -461,6 +516,32 @@ Clean up at the end:
 ./bin/sippycup doctor --cleanup     # dry run; add --apply only for images you own
 ./bin/sippycup practice-target down
 ```
+
+## Practice only: rehearse the failures
+
+Before the engagement, see each failure once. The drill places the guided call
+against the practice target's fault destinations (no answer, silence, 503, 403,
+busy, a wrong password, a closed port, and the others) and checks that the
+verdict you would read on the day is the one Sippycup reports:
+
+```sh
+./bin/sippycup practice-target up      # "container ... already exists" means it is already up: carry on
+./bin/sippycup practice-target drill --list     # what it will do and for how long; sends nothing
+./bin/sippycup practice-target drill            # about 2 minutes
+```
+
+- When it is right: one block for each scenario with its verdict and the
+  `explain` text, then a table whose `result` column says `PASS` for every
+  scenario, and `Drill: PASS in 124.1 s; evidence work/practice/drills/...`
+  (exit 0). `MISMATCH` and exit 1 mean a verdict was not what was expected;
+  exit 2 means it could not start and nothing was sent.
+- It reaches only the practice target and cannot be pointed anywhere else.
+  Leave the practice target alone while it runs: a call, a campaign, or the
+  cockpit placing a call at the same time spoils both verdicts. Wait for
+  `Drill: PASS`.
+- Read the page for a scenario you expect to meet, for example
+  `./bin/sippycup explain call.call-forbidden`. `PRACTICE-TARGET.md`,
+  "Rehearse failures", lists the scenarios.
 
 ## Stop conditions
 
@@ -499,7 +580,11 @@ To stop everything this checkout is sending, from any terminal:
 
 It ends each run with its normal shutdown (BYE, unregister), kills what is
 left after 30 s, then checks that nothing is still sending and prints
-`Silence: PROVED`. It prints a journal line; run it. `./bin/sippycup stop
+`Silence: PROVED`, then a `Record it:` line. With one engagement under `work/`
+it is ready to run. With none or several it ends in the placeholder
+`work/NAME`: replace `NAME` with your engagement directory (for example
+`work/acme`) and run the line, or give `--engagement work/acme` to `stop`
+next time. `./bin/sippycup stop
 --dry-run` lists what it would stop and signals nothing. Do not run `stop`
 while you want another run from this checkout to continue.
 

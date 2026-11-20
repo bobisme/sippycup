@@ -33,6 +33,19 @@ and a minimal SPDX 2.3 package record. The SPDX record identifies the
 Sippycup pack producer; it is deliberately not presented as a complete
 dependency SBOM.
 
+`pack create` and `pack verify` print the privacy findings before anything
+else, on standard error. `create` runs the same lint as `evidence lint RUN_DIR`
+on the run directory and prints `WARNING: N privacy finding(s) ...` with each
+code and file (never a value), a `privacy` object in its JSON result, and what
+to send instead of the pack. `verify` prints the findings the pack's evidence
+manifest recorded, as a `privacy` object in its JSON result and as the second
+line of the Markdown rendering. Neither command refuses or changes its exit
+status because of findings: the pack is local evidence, and a refusal would
+stop the operator from keeping it. The gate is sending: `export-ci`. A pack
+with findings is not for sending as it stands; send the owner report, the
+`export-ci` output, or a pack created with `--recipient` for the owner's key
+(below).
+
 Pack creation fixes tar order, modes, owners, and timestamps. Repacking the
 same evidence and image digest is byte deterministic.
 

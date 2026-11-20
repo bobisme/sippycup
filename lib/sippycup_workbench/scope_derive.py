@@ -107,12 +107,32 @@ class CompileResult:
             return 0
         return 1
 
+    @property
+    def profile_not_usable(self) -> str | None:
+        """Why the profiles are written ``pending`` although the scope says approved, else None.
+
+        ``_build_profile`` downgrades an approved scope that has errors, so the
+        profile says pending. That is not the owner's answer: it is this scope
+        error, and the operator should read the error, not "pending".
+        """
+        document = self.report.document or {}
+        if (
+            self.profile_status == "pending"
+            and (document.get("authorization") or {}).get("status") == "approved"
+            and self.report.errors
+        ):
+            first = self.report.errors[0]
+            more = len(self.report.errors) - 1
+            return f"{first.code} [{first.field}]: {first.message}" + (f" (and {more} more scope error(s))" if more else "")
+        return None
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "apiVersion": COMPILE_VERSION,
             "scope": {"path": self.report.path, "sha256": self.report.sha256},
             "ok": self.exit_code == 0,
             "profileStatus": self.profile_status,
+            "profileNotUsable": self.profile_not_usable,
             "generated": self.generated,
             "skipped": {
                 name: [item.as_dict() for item in items]

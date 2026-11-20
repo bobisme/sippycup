@@ -31,7 +31,12 @@ Modes:
 - A terminal at least 60x20 with a usable `TERM` gets the curses UI.
 - `TERM=dumb`, a smaller terminal, or `--line` gets the line UI: numbered
   actions and typed commands. It works in any terminal and over a screen
-  reader.
+  reader. An action keeps its number for the whole session: the list is
+  ordered by what you should do next, so a number can move up or down it
+  after a refresh, but it never becomes a different action, and a number that
+  is not offered any more says so instead of selecting something else. No
+  number starts anything by itself: the cockpit shows the action and its exact
+  command, and a `[LIVE]` action still needs the typed approval token.
 - With no terminal (a pipe, CI), the cockpit prints the plain dashboard once.
   The last line is always `Next: <command>`.
 
@@ -160,8 +165,8 @@ A wrong or empty token starts nothing. The cockpit refuses a LIVE action, and
 offers no token prompt, when:
 
 - there is no GO from `./bin/sippycup ready DIR` for the current profile (the
-  last check said NO-GO, was for an earlier version of the profile, or was
-  never run). The practice call is not gated. A GO older than 12 hours is
+  last check said NO-GO, was made before a profile changed (the line names
+  the file), or was never run). The practice call is not gated. A GO older than 12 hours is
   shown with a reminder to run `ready` again;
 - the profile has no approval id;
 - the profile is not ready (`rehearse` would refuse it: expired, not yet
@@ -181,6 +186,9 @@ account, answer the prompt with one of:
   `--secret-file PATH`.
 - `env NAME`: an environment variable that is already set. The command gets
   `--secret-env NAME`.
+
+Press Enter, or type `yes`, to take the default shown in the prompt
+(`file work/NAME/account.password`).
 
 To create a file without the password reaching shell history:
 

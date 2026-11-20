@@ -44,6 +44,70 @@ def _target(target: dict[str, Any] | None) -> str:
     return text
 
 
+def _run_target(run: dict[str, Any]) -> str:
+    """Every target a run used (a mixed UDP and TLS campaign names both)."""
+    if run.get("notStarted"):
+        return "none (the run never started; nothing was sent)"
+    used = run.get("usedTargets") or []
+    if len(used) > 1:
+        return "; ".join(dict.fromkeys(_target(t) for t in used))
+    return _target(used[0] if used else run.get("target"))
+
+
+_KIND_WORDS = {
+    "scope": "scope file (the owner's written approval)",
+    "target-profile": "compiled target profile",
+    "campaign-manifest": "campaign file",
+    "practice-target-profile": "practice target approval",
+    "scope-in-force": "earlier scope file",
+}
+
+
+def _source_cells(s: dict[str, Any]) -> tuple[str, str, str, str]:
+    """(approval, status, valid from, valid until) for one authorization record.
+
+    A campaign file has no status of its own: it carries the approval id and
+    window it was compiled with, which the table shows as held, not decided.
+    """
+    held = s.get("held")
+    if held and not s.get("approvalId"):
+        return (
+            _value(held.get("approvalId")),
+            "copy of the scope's approval (not a record of its own)",
+            _value(held.get("validFrom")),
+            _value(held.get("validUntil")),
+        )
+    return _value(s["approvalId"]), _value(s["status"]), _value(s["validFrom"]), _value(s["validUntil"])
+
+
+def _window_lines(auth: dict[str, Any]) -> list[str]:
+    """Plain lines naming the approval window(s) the listed runs ran under."""
+    in_force = auth.get("windowsInForce") or []
+    lines = []
+    if len(in_force) > 1:
+        lines.append("The approval window was renewed. Each run was checked against the window that was in force when it ran:")
+        for w in in_force:
+            lines.append(f"{_value(w['from'])} to {_value(w['until'])} (approval {_value(w['approvalId'])}): {_runs_text(w['runs'])}")
+    elif auth["window"]:
+        lines.append(f"Approval window: {_value(auth['window']['from'])} to {_value(auth['window']['until'])}")
+    return lines
+
+
+def _runs_text(labels: list[str]) -> str:
+    numbers = sorted(int(x[1:]) for x in labels if x[1:].isdigit())
+    parts: list[str] = []
+    start = previous = None
+    for number in numbers + [None]:
+        if start is not None and (number is None or number != previous + 1):
+            parts.append(f"R{start}" if start == previous else f"R{start}-R{previous}")
+            start = None
+        if number is not None:
+            if start is None:
+                start = number
+            previous = number
+    return ", ".join(parts)
+
+
 def _sent(sent: dict[str, Any]) -> str:
     parts = []
     labels = (
@@ -271,8 +335,12 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
     # Authorization
     auth = model["authorization"]
     out += ["## Authorization", ""]
-    if auth["window"]:
-        out.append(f"- Approval window: {md(auth['window']['from'])} to {md(auth['window']['until'])}")
+    window_lines = _window_lines(auth)
+    if len(window_lines) > 1:
+        out.append(f"- {md(window_lines[0])}")
+        out += [f"  - {md(line)}" for line in window_lines[1:]]
+    elif window_lines:
+        out.append(f"- {md(window_lines[0])}")
     out.append("- Approved addresses: " + (", ".join(code(a) for a in auth["approvedAddresses"]) or "none recorded"))
     if auth.get("mediaOnlyNetworks"):
         out.append("- Of these, approved for media only (never a signaling target): "
@@ -283,12 +351,12 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
         (
             [
                 code(s["ref"]),
-                md(s["kind"]),
-                md(s["approvalId"]),
+                md(_KIND_WORDS.get(s["kind"], s["kind"])),
+                md(_source_cells(s)[0]),
                 md(s["approvedBy"]),
-                md(s["status"]),
-                md(s["validFrom"]),
-                md(s["validUntil"]),
+                md(_source_cells(s)[1]),
+                md(_source_cells(s)[2]),
+                md(_source_cells(s)[3]),
                 md(", ".join(s["networks"] + s["mediaNetworks"])),
                 md(", ".join(str(p) for p in s["ports"])),
                 md(", ".join(s["transports"])),
@@ -314,7 +382,7 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
                 md(r["kind"]),
                 md(r["started"]),
                 md(r["finished"]),
-                md(_target(r.get("target"))),
+                md(_run_target(r)),
                 md(_sent(r["sent"])),
                 md(r.get("verdict") or r["readable"]),
                 md("; ".join(x for x in (r.get("reasons") or []) if x) or ("; ".join(p for p in r["problems"] if p) if r["problems"] else "—")),
@@ -336,7 +404,7 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
     out += ["## Results", "", "### Guided calls", ""]
     calls = [r for r in model["runs"] if r["kind"] == "call" and r["readable"] != "unreadable"]
     out += _md_table(
-        ["Run", "Destination", "Preflight", "Registration", "Answer", "Setup s", "RTP to/from peer", "Codec", "TLS", "Oracle p/f/u", "Failing assertions"],
+        ["Run", "Destination", "Preflight", "Registration", "Answer", "Setup s", "RTP to/from peer", "Codec", "TLS", "Packet check pass/fail/unknown", "Failing checks"],
         (
             [
                 code(r["id"]),
@@ -517,6 +585,15 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
         ["Run", "Content identity", "Source"],
         ([code(i["run"]), code(i["contentIdentity"]), md(i["source"])] for i in model["integrity"]["runContentIdentities"]),
     )
+    if model["authorization"].get("windowsInForce"):
+        out += ["Approval records the runs were checked against (technical):", ""]
+        out += _md_table(
+            ["Approval", "Window", "Record", "Runs"],
+            (
+                [md(w["approvalId"]), md(f"{_value(w['from'])} to {_value(w['until'])}"), code(w["ref"]), md(_runs_text(w["runs"]))]
+                for w in model["authorization"]["windowsInForce"]
+            ),
+        )
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -558,7 +635,7 @@ def media_rows(model: dict[str, Any]) -> list[dict[str, Any]]:
         elif run["kind"] == "campaign":
             for case in run["details"].get("cases", []):
                 if case["type"] == "call" and (case.get("rtpToPeer") is not None or case.get("rtpFromPeer") is not None):
-                    rows.append({"run": f"{run['id']} step {case['step']}", "label": f"{run.get('label', '')} step {case['step']}", "to": case.get("rtpToPeer"), "from": case.get("rtpFromPeer"), "source": "PJSUA call statistics"})
+                    rows.append({"run": f"{run['id']} step {case['step']}", "label": f"{run.get('label', '')} step {case['step']}", "to": case.get("rtpToPeer"), "from": case.get("rtpFromPeer"), "source": "test softphone call statistics"})
     return rows
 
 
@@ -819,8 +896,11 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
     out.append('<section aria-labelledby="authorization">')
     out.append('<h2 id="authorization">Authorization</h2>')
     out.append("<ul>")
-    if auth["window"]:
-        out.append(f"<li>Approval window: {h(auth['window']['from'])} to {h(auth['window']['until'])}</li>")
+    window_lines = _window_lines(auth)
+    if len(window_lines) > 1:
+        out.append(f"<li>{h(window_lines[0])}<ul>" + "".join(f"<li>{h(line)}</li>" for line in window_lines[1:]) + "</ul></li>")
+    elif window_lines:
+        out.append(f"<li>{h(window_lines[0])}</li>")
     out.append("<li>Approved addresses: " + (", ".join(_c(a) for a in auth["approvedAddresses"]) or "none recorded") + "</li>")
     if auth.get("mediaOnlyNetworks"):
         out.append("<li>Of these, approved for media only (never a signaling target): "
@@ -832,8 +912,8 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             ["Record", "Kind", "Approval", "Approved by", "Status", "Valid from", "Valid until", "Addresses", "Ports", "Transports", "Server names"],
             (
                 [
-                    _c(s["ref"]), h(s["kind"]), h(s["approvalId"]), h(s["approvedBy"]), h(s["status"]),
-                    h(s["validFrom"]), h(s["validUntil"]), h(", ".join(s["networks"] + s["mediaNetworks"])),
+                    _c(s["ref"]), h(_KIND_WORDS.get(s["kind"], s["kind"])), h(_source_cells(s)[0]), h(s["approvedBy"]), h(_source_cells(s)[1]),
+                    h(_source_cells(s)[2]), h(_source_cells(s)[3]), h(", ".join(s["networks"] + s["mediaNetworks"])),
                     h(", ".join(str(p) for p in s["ports"])), h(", ".join(s["transports"])), h(", ".join(s["serverNames"])),
                 ]
                 for s in auth["sources"]
@@ -864,7 +944,7 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             ["Lane", "Run", "Kind", "Start", "End", "Target", "Sent", "Verdict", "Reason"],
             (
                 [
-                    h(r.get("label")), _c(r["id"]), h(r["kind"]), h(r["started"]), h(r["finished"]), h(_target(r.get("target"))), h(_sent(r["sent"])),
+                    h(r.get("label")), _c(r["id"]), h(r["kind"]), h(r["started"]), h(r["finished"]), h(_run_target(r)), h(_sent(r["sent"])),
                     h(r.get("verdict") or r["readable"]),
                     h("; ".join(x for x in (r.get("reasons") or []) if x) or ("; ".join(p for p in r["problems"] if p) if r["problems"] else None)),
                 ]
@@ -902,7 +982,7 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
     out.append(
         _html_table(
             "Guided call results",
-            ["Run", "Destination", "Preflight", "Registration", "Answer", "Setup s", "RTP to / from peer", "Codec", "TLS", "Oracle p/f/u", "Failing assertions"],
+            ["Run", "Destination", "Preflight", "Registration", "Answer", "Setup s", "RTP to / from peer", "Codec", "TLS", "Packet check pass/fail/unknown", "Failing checks"],
             (
                 [
                     _c(r["id"]), h(r["details"].get("destination")), h(_preflight(r["details"].get("preflight"))),
@@ -1093,6 +1173,17 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             ([_c(i["run"]), _c(i["contentIdentity"]), h(i["source"])] for i in model["integrity"]["runContentIdentities"]),
         )
     )
+    if model["authorization"].get("windowsInForce"):
+        out.append(
+            _html_table(
+                "Approval records the runs were checked against (technical)",
+                ["Approval", "Window", "Record", "Runs"],
+                (
+                    [h(w["approvalId"]), h(f"{_value(w['from'])} to {_value(w['until'])}"), _c(w["ref"]), h(_runs_text(w["runs"]))]
+                    for w in model["authorization"]["windowsInForce"]
+                ),
+            )
+        )
     out.append("</footer>")
     out += ["</main>", "</body>", "</html>"]
     return "\n".join(out) + "\n"
@@ -1116,11 +1207,14 @@ def render_text(model: dict[str, Any], report_sha256: str) -> str:
     for row in model["executiveSummary"]["rows"]:
         out.append(f"  {row['ref']:<5} {SEVERITY_LABEL.get(row['severity'], row['severity']):<7} {row['title']} ({row['source']})")
     out += ["", "APPROVAL", ""]
+    for line in _window_lines(model["authorization"]):
+        out.append(f"  {line}")
     for s in model["authorization"]["sources"]:
-        out.append(f"  {s['ref']} [{s['kind']}] approval {_value(s['approvalId'])}, {_value(s['validFrom'])} to {_value(s['validUntil'])}, addresses {', '.join(s['networks']) or '-'}")
+        cells = _source_cells(s)
+        out.append(f"  {s['ref']} [{_KIND_WORDS.get(s['kind'], s['kind'])}] approval {cells[0]}, {cells[2]} to {cells[3]}, addresses {', '.join(s['networks']) or '-'}")
     out += ["", "ACTIVITY", ""]
     for r in model["runs"]:
-        out.append(f"  {r['id']}  {r['kind']:<8} {_value(r['started'])}  {_target(r.get('target'))}  {r.get('verdict') or r['readable']}")
+        out.append(f"  {r['id']}  {r['kind']:<8} {_value(r['started'])}  {_run_target(r)}  {r.get('verdict') or r['readable']}")
         out.append(f"      sent: {_sent(r['sent'])}")
     for matrix in model.get("matrices", []):
         out += ["", "CALL MATRIX", "", "  " + _matrix_heading(matrix)]
