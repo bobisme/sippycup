@@ -121,7 +121,8 @@ class OwnerReportSafetyStopTests(unittest.TestCase):
         self.assertEqual("info", stop["severity"])
         self.assertTrue(stop["title"].startswith("Safety stop:"))
         self.assertIn("This is a safety stop, not a target failure.", stop["summary"])
-        self.assertIn("RTP packets sent to that address before the stop: 3.", stop["summary"])
+        self.assertIn("RTP packets sent to that address before the stop: 3 (", stop["summary"])
+        self.assertIn("RTCP control packets sent beside it before the stop are not counted", stop["summary"])
         self.assertNotIn("before media was sent", stop["summary"])
 
     def test_an_ordinary_oracle_failure_is_still_reported(self) -> None:
@@ -131,7 +132,9 @@ class OwnerReportSafetyStopTests(unittest.TestCase):
         self.assertIn("obs-oracle-assertion-failed", found)
 
     def test_the_integrity_exception_discloses_the_packets(self) -> None:
-        self.assertEqual("; the media-scope stop hung the call up after 3 RTP packets were sent to it",
+        self.assertEqual("; the media-scope stop hung the call up after 3 RTP packets were sent to it "
+                         "(the count is the test softphone's and covers RTP only; RTCP control packets sent "
+                         "beside it before the stop are not counted)",
                          summary_model._stop_detail(stopped_run()))
         single = stopped_run()
         single["details"]["media"]["toPeerPackets"] = 1

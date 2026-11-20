@@ -57,6 +57,11 @@ FILENAMES = {
 # ``target-profile-TARGETNAME.yaml`` (the scope's ``targets[].name``), recorded
 # in the sidecar under the key ``profile:TARGETNAME``.
 PROFILE_KEY_PREFIX = f"{PROFILE}:"
+# Files scope compile writes as a record only (no sender reads them). They are
+# recorded in the sidecar by hash like the derivatives, so the report can tell
+# the file compile wrote from an edited one; `derivative_state` leaves them
+# out (the application record has its own state, `scope_app_derive.state_for`).
+RECORD_ONLY = {"application-surfaces": "application-surfaces.yaml"}
 
 
 def profile_filename(target_name: str | None) -> str:
@@ -638,9 +643,11 @@ def read_sidecar(directory: Path) -> tuple[dict[str, Any] | None, str | None]:
             raise ValueError("derivatives must be an object")
         for name, entry in derivatives.items():
             extra = _key_target(name) if isinstance(name, str) else None
-            if (name not in FILENAMES and extra is None) or not isinstance(entry, dict) or not all(
+            if (name not in FILENAMES and name not in RECORD_ONLY and extra is None) or not isinstance(entry, dict) or not all(
                 isinstance(entry.get(key), str) for key in ("path", "sha256", "scopeSha256")
             ):
+                raise ValueError("malformed derivative entry")
+            if name in RECORD_ONLY and entry["path"] != RECORD_ONLY[name]:
                 raise ValueError("malformed derivative entry")
             # A further target's profile lives only at its predictable name
             # (compile removes it when the target leaves the scope).
@@ -830,6 +837,15 @@ def compile_scope(
             )
             derivatives[artifact]["target"] = generated["target"]
         result.generated.append(generated)
+    # The application record is written by compile too: write it before the
+    # sidecar and record its hash there, like every other file compile wrote.
+    result.application, app_notes = scope_app_derive.finish(root, report, app_data, _write_atomic)
+    if app_data is not None:
+        derivatives[scope_app_derive.ARTIFACT] = {
+            "path": scope_app_derive.FILENAME,
+            "sha256": _sha256(app_data),
+            "scopeSha256": report.sha256,
+        }
     scope_file = Path(report.path)
     try:
         recorded_path = str(scope_file.resolve().relative_to(root.resolve()))
@@ -852,7 +868,6 @@ def compile_scope(
         replace=sidecar_path.exists(),
     )
     result.generated_at = generated_at
-    result.application, app_notes = scope_app_derive.finish(root, report, app_data, _write_atomic)
     result.notes.extend(app_notes)
     targets_raw = [item for item in doc.get("targets") or [] if isinstance(item, dict)]
     by_name = {item["name"]: item for item in targets_raw if "name" in item}
@@ -1108,6 +1123,8 @@ def derivative_state(
         key=lambda pair: (0 if pair[0] == PROFILE else 1 if _key_target(pair[0]) else 2, pair[0]),
     )
     for name, entry in ordered:
+        if name in RECORD_ONLY:
+            continue
         path = root / entry["path"]
         if not path.is_file() or path.is_symlink():
             state, edited, changed = "missing", False, False

@@ -1186,6 +1186,21 @@ def h_inconclusive(d: Diagnosis, run: CallRun, ladder: Lazy) -> None:
     d.stage("oracle", "the oracle returned unknown for something the verdict needs")
     d.outcome("The call was answered, but the evidence cannot decide pass or fail (unknown is never reported as pass).")
     d.evidence("not judged", ", ".join(oracle_unknown(run)) or "no assertion detail recorded")
+    from sippycup import run_overlap
+
+    beside = run_overlap.sibling_overlaps(run.dir)
+    if beside or isinstance(run.result.get("overlap"), dict):
+        # The real cause (rehearsal 3, finding 8): another run's packets are
+        # in this capture, so the oracle cannot tell the two calls apart.
+        d.attribute(OUR, HIGH, [
+            "Another run of this engagement was active at the same time (named above): this capture "
+            "holds both runs' packets, so the oracle could not tell the calls apart. "
+            "Nothing about the platform's behavior can be concluded from this run."
+        ])
+        d.gap("the oracle's unknown results are listed above; the other run's packets in this capture are the cause")
+        d.step("Wait until no other run is active, then repeat the call alone.", run.cmd_call())
+        d.step("Read the reference text.", run.cmd_explain())
+        return
     d.attribute(UNKNOWN, LOW, ["Encrypted signaling, a truncated capture, or missing RTP counts leave the oracle without enough to decide."])
     d.gap("the oracle's unknown results are listed above; a truncated or encrypted capture is the usual cause")
     d.step("Draw the ladder from whatever the capture and softphone log hold.", run.cmd_ladder())

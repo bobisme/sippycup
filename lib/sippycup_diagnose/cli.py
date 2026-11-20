@@ -170,20 +170,30 @@ def diagnose(path: Path, arguments: argparse.Namespace, width: int):
 
 
 def _mark_overlap(data: dict, path: Path) -> None:
-    """A run started beside another run of this checkout (result ``overlap``, finding 6).
+    """A run that was active beside another run of its engagement (findings 6 and 8).
 
-    Its capture, ladder, and oracle may hold the other run's packets, so the
-    diagnosis says first that its verdict is unreliable.
+    The run started second carries the record (result ``overlap``). The run
+    started first, or one of two started in the same instant, has none, so
+    the times the sibling run directories recorded are compared too. Either
+    way its capture, ladder, and oracle may hold the other run's packets, and
+    the diagnosis says first that its verdict is unreliable.
     """
+    from sippycup import run_overlap
+
     try:
         result = json.loads((path / "result.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return
+        result = None
     overlap = result.get("overlap") if isinstance(result, dict) else None
-    if not isinstance(overlap, dict):
+    recorded = isinstance(overlap, dict)
+    runs = []
+    if recorded:
+        runs = [str(item.get("name")) for item in overlap.get("activeRuns") or [] if isinstance(item, dict)]
+    siblings = run_overlap.sibling_overlaps(path)
+    if not recorded and not siblings:
         return
-    runs = [str(item.get("name")) for item in overlap.get("activeRuns") or [] if isinstance(item, dict)]
-    beside = f" (beside {', '.join(runs)})" if runs else ""
+    runs += [name for name in siblings if name not in runs]
+    beside = f" (beside {', '.join(runs[:4])}{', and more' if len(runs) > 4 else ''})" if runs else ""
     data["overlap"] = {"activeRuns": runs, "unreliable": True}
     data["outcome"] = (f"Another run was active; this verdict is unreliable{beside}: its capture and "
                        f"ladder may hold the other run's packets. Repeat it alone. " + str(data.get("outcome") or ""))

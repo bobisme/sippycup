@@ -80,6 +80,15 @@ range), the TLS trust anchor, reviewed server name and verification error, and w
 side sent the TLS alert (read from the capture's handshake records), the
 SDP offer and answer addresses, and the stage timings.
 
+A run that was active at the same time as another run of the same engagement
+starts WHAT HAPPENED with "Another run was active; this verdict is unreliable
+(beside RUN)". The run that was started second records this itself
+(`SIPPYCUP_ALLOW_OVERLAP`); for the run started first, and for two commands
+started in the same instant, `diagnose` finds it from the times the sibling
+run directories recorded (`ENG/calls`, `ENG/runs`, `ENG/checks`). An
+inconclusive call in that state is attributed to our side: the other run's
+packets are in its capture. Repeat it alone.
+
 ## The attribution
 
 The side is a judgment from recorded evidence, never a proof. The page always

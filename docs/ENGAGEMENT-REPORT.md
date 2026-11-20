@@ -122,21 +122,42 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
 
 1. **Integrity exceptions** (only when present), first.
 2. **Executive summary**: one paragraph and a three-to-five row "what we
-   found" table.
+   found" table. The table shows at most four findings; when there are more,
+   a sentence under the table says how many are in the Findings section
+   (there is no table row for it). The paragraph says, each in its own
+   sentence, when runs were stopped by the tester, when runs were active at
+   the same time as another run, and when the call limit was exceeded.
 3. **Authorization**: every reviewed record with approval identifier, who
    approved, status, validity window, approved addresses, ports, transports,
    server names, and limits. A campaign file has no status of its own; its row
    shows the approval id and window it was compiled with, marked as a copy of
    the scope's approval. When the approval window was renewed, the section
    (and the executive summary) lists each window that was in force and which
-   runs (R1-R12, R13) fell under it, so "every run fell inside the approved
-   window" can be read off the page. The approval records behind those
-   windows are named in the Integrity section.
+   runs (R1-R12, R13) fell under it, in the order the windows were used, so
+   "every run fell inside the approved window" can be read off the page. The
+   approval records behind those windows are named in the Integrity section.
+   **Approved addresses** are the addresses the current records approve. An
+   address that only an earlier answer named (for example a media address the
+   owner later replaced) is listed apart, as "approved by an earlier answer
+   only, and not part of the current approval", with the runs whose approval
+   named it (`authorization.earlierAddresses` in `report.json`).
    A **Call limit** block (`CALL LIMIT` in the text
    report) gives, per approval id, `Calls: N of M used, K left`: the approved
    call limit, the calls counted in `ENG/call-ledger.jsonl` (the count every
    command checks before it sends), and the calls left; and the calls the
-   runs in the report placed. A call counts from its first INVITE on, as the
+   runs in the report placed. There is one line for every approval reference
+   that has runs in the report, not only the current one: after the reference
+   in the scope was changed, the earlier reference keeps its line (marked as
+   an earlier reference, with the limit of the approval that was in force for
+   its runs, and without a "left" number), its count, and any overrun. The
+   block ends with one total, "Calls placed by the runs in this report: N",
+   split per reference, which is the same number as "Calls placed" in the
+   totals table (where the two rules differ for a run, the line says so).
+   Each run is judged against the limit that was in force when it ran (the
+   approval record kept in `ENG/approved-scopes/`, as for windows). When the
+   limit changed, the line lists each limit with the runs judged against it;
+   a count that stands above a limit lowered afterwards is explained and is
+   not an overrun. A call counts from its first INVITE on, as the
    ledger counts it. The ledger can be higher (runs outside the report's run
    roots or filters, a command still running, attempts an older rule counted:
    a preflight or a REGISTER was sent, no INVITE); it is never lower unless it
@@ -147,7 +168,16 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
    reason; a run that never started (for example packet capture could not
    start on the assessor's side) says so, names no target, and is not a
    finding about the owner's system (it is listed under Limitations and in the
-   executive summary); engagement totals; a static SVG
+   executive summary). A run the tester stopped (the `stop` command, Ctrl-C,
+   or a signal on the tester's machine) has the verdict `stopped-by-tester`
+   and a reason that says it was the tester's own action, not a result about
+   the owner's system; it is not a finding and is not counted under "did not
+   pass". An inconclusive call always gives a reason (what the automatic
+   packet check could decide, or that another run was active). Every run that
+   was active at the same time as another run of the same engagement says
+   "another run was active; this verdict is unreliable", the run started
+   first as well as the one started second (see "Runs at the same time").
+   Then: engagement totals; a static SVG
    timeline of the runs across the approval window and a per-call media bar
    (RTP packets to and from the peer), each next to a text table with the
    same numbers.
@@ -180,7 +210,10 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
    table in `lib/sippycup_workbench/summary_model.py` (`OBSERVATIONS`).
 8. **Limitations**: stages never run, checks skipped or not approved and
    why, campaign steps never run, matrix factors not exercised, unreadable
-   runs, and the fact that totals are recorded numbers.
+   runs, runs the tester stopped, runs that were active at the same time as
+   another run, calls that left the assessor's machine through address
+   translation (said once here, not on every row), and the fact that totals
+   are recorded numbers.
 9. **Evidence index**: per run, every artifact with size, SHA-256, and
    sensitivity, from the evidence manifest (or computed with a bounded
    streaming hash when there is none, labelled as such), the manifest's
@@ -202,7 +235,7 @@ Derived observations and their severity:
 | `media-outside-scope` | low | A call verdict is `media-outside-scope` |
 | `oracle-assertion-failed` | info | The automatic packet check (the offline oracle) failed on an answered, non-TLS call |
 | `campaign-window-ended` | info | A campaign ended `authorization_lapsed`: Sippycup stopped it before a step because the approval window ended, was too short for that step, or the approval was withdrawn (a safety stop, not a target failure) |
-| `campaign-stopped` | info | A campaign ended in any other state but `succeeded`, after at least one step or preflight started. A campaign that never started (no event stream, no preflight, no step) is not an observation: it is the assessor's failure and nothing was sent |
+| `campaign-stopped` | info | A campaign ended in any other state but `succeeded`, after at least one step or preflight started. A campaign that never started (no event stream, no preflight, no step) is not an observation: it is the assessor's failure and nothing was sent. A campaign the tester stopped (state `cancelled` with stop reason `SIGTERM`, `SIGINT` or `SIGHUP`) is not an observation either: it is the tester's action, reported as such |
 | `capture-incomplete` | low | Capture failed or died during a run |
 
 ## Independent re-check
@@ -220,9 +253,10 @@ from the recorded artifacts, and lists any exception at the top:
 | `ceiling-exceeded` | Recorded packets, bytes, calls, or call time exceed the frozen ceiling |
 | `unapproved-address-in-artifact` | A run artifact's text named an address outside the approved set |
 | `destination-not-approved` | A call dialed a destination that is not on the approved destination list |
-| `call-limit-exceeded` | The calls placed under one approval id in the engagement, counted in start order across all commands, went above its limit (`limits.calls`), or the engagement's call ledger counts more than the limit. Only runs of the practice bench (`work/practice`) are left out; an engagement that rehearses under the practice approval id is counted |
+| `call-limit-exceeded` | The calls placed under one approval id in the engagement, counted in start order across all commands, went above the limit that was in force when the run ran (`limits.calls` of the approval record kept for the run; for a run without one, of the current scope file), or the engagement's call ledger counts more than the current limit and the report's runs do not show that every counted call was inside an earlier, higher limit. Reported for earlier approval references too. Only runs of the practice bench (`work/practice`) are left out; an engagement that rehearses under the practice approval id is counted |
 | `call-ledger-unaccounted` | The engagement's call ledger does not account for every run directory that placed or may have placed calls under the approval (it was emptied, shortened or replaced), so the calls cannot be confirmed against the limit |
-| `approval-record-edited` | A compiled profile or manifest was edited after `scope compile`, or is not recorded by it; it is not used as an approval record |
+| `concurrent-calls-exceeded` | More calls were in progress at once than the owner's `limits.concurrent_calls` in force allowed, counted from the times the runs recorded (two commands started in the same instant, or an overlap the operator allowed). One exception per run involved |
+| `approval-record-edited` | A file `scope compile` wrote (a profile, the manifest, the expectations, or the `application-surfaces.yaml` record) was edited after the compile, or a YAML file beside the scope is not recorded by it; it is not used as an approval record. `scope compile` records `application-surfaces.yaml` by hash in `scope-derivatives.json` like the other files, so a clean `--platform` engagement has no exception; a record written by an older compile (not listed there) is accepted while its own content hash still matches |
 
 Windows come from the scope file and target profiles. A campaign manifest's
 `authorization.approval` window is what `campaign run` enforced, but it has no
@@ -250,15 +284,44 @@ before this change, or with a hand-written profile or manifest) are judged
 against the current records; when other runs do have a record, the report
 lists them under Limitations (`approval-in-force-unrecorded`).
 
+## Runs at the same time
+
+A verdict is only as good as the run's own packet capture, and a capture
+holds whatever was on the wire. The report compares the times every run
+recorded (`timestamps.json`: the capture window, else start to finish) within
+one engagement directory. Two runs whose times overlap are both marked
+(`overlap`, `overlapWith` in `report.json`): each row says "another run was
+active; this verdict is unreliable", Limitations names them, the executive
+summary counts them, and neither is counted as "completed as expected" or
+"did not pass". This covers the run started first under
+`SIPPYCUP_ALLOW_OVERLAP` (only the second one records the overlap itself) and
+two commands started in the same instant. When the calls in progress at once
+were more than the owner's `limits.concurrent_calls` in force, each run
+involved is also an integrity exception (`concurrent-calls-exceeded`). A
+campaign counts as one call in progress for this check. `diagnose` on either
+run says the same, from the sibling run directories, and the cockpit shows it
+as the reason of an inconclusive call.
+
 ## Wording
 
 The report is for the system owner, who does not know the tool. Owner text uses
 plain words: "the automatic packet check" for the offline oracle, "the test
-softphone" for the softphone's own log and statistics, and no engagement-file
-names in a run's reasons. The precise names (the approval record file of each
-window, the evidence file names) stay in the Integrity and Evidence index
-sections. A loopback target is stated once, under Limitations (or, for practice
-runs, in the practice-runs item), not on every row.
+softphone" for the softphone's own log and statistics, "packets were recorded
+and counted against the approved limits" for a campaign's capture count,
+"stopped by the tester" for a signal, and no engagement-file names in a run's
+reasons. A note written for the operator is not repeated to the owner: a
+command to run (`./bin/sippycup ...`) is left out of a row's reason, and the
+note about the assessor's own network path (a loopback target, address
+translation) is stated once under Limitations (or, for practice runs, in the
+practice-runs item), not on every row. The precise names (the approval record
+file of each window, the evidence file names) stay in the Integrity and
+Evidence index sections; the table of approval records there says that it
+needs nothing from the owner.
+
+The media-scope stop is reported with the RTP packets the test softphone
+counted before the stop, and says that RTCP control packets sent beside them
+are not in that count. A run that records both counts in `result.json`
+(`mediaScope.sentBeforeStop` with `rtp` and `rtcp`) is quoted with both.
 
 ## Privacy
 
