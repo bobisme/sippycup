@@ -254,7 +254,9 @@ engagement directory that holds the profile or manifest:
   count adds the calls of the other directories that its own ledger does not
   hold; in every other directory `ready` is `NO-GO`, `rehearse` is
   `Ready: no`, and `call`, `matrix run`, `campaign plan`, `campaign run` and
-  a `checks run` that places a call refuse before anything is sent, all with
+  `checks run` (also one that places no call, since wave 13: the rule says
+  that directory sends nothing more under the reference) refuse before
+  anything is sent, all with
   the same sentences, which name that one directory from every side. A
   sibling ledger that names the reference and cannot be read stops every
   directory beside it. The owner report names the other directory's count as

@@ -168,6 +168,29 @@ def live_claims(directory: Path, proc: Path) -> list[dict[str, Any]]:
     return live
 
 
+def peek_claims(directory: Path, proc: Path) -> list[dict[str, Any]]:
+    """Claims whose process is alive, read only: nothing is created, deleted or locked.
+
+    For ``stop`` (and ``stop --dry-run``, which must change nothing). A claim
+    that cannot be read is skipped here; the next start removes it.
+    """
+    try:
+        paths = sorted(directory.glob("*.json")) if directory.is_dir() and not directory.is_symlink() else []
+    except OSError as error:
+        raise ClaimError(f"cannot read {directory}: {error.strerror or error}") from error
+    live: list[dict[str, Any]] = []
+    for path in paths:
+        try:
+            claim = json.loads(path.read_text(encoding="utf-8")) if not path.is_symlink() else None
+        except (OSError, ValueError):
+            continue
+        valid = (isinstance(claim, dict) and claim.get("v") == CLAIM_VERSION and type(claim.get("pid")) is int
+                 and isinstance(claim.get("startTime"), str) and claim.get("id") == path.stem)
+        if valid and process_start(proc, claim["pid"]) == claim["startTime"]:
+            live.append(claim)
+    return live
+
+
 def write_claim(directory: Path, proc: Path, pid: int, command: str) -> str:
     """Record that the launcher ``pid`` is about to start a sender. Call under the lock."""
     started = process_start(proc, pid)
@@ -201,7 +224,7 @@ def claim_targets(claims: list[dict[str, Any]], *, own: set[int], running_claims
         found.append(stop.Target(
             "launcher", str(pid), f"launcher-{pid}",
             f"{claim.get('command') or '?'}: starting (claimed at {claim.get('at') or '?'}; its container is not "
-            "listed yet, or has just ended)", "claim of this checkout"))
+            "listed yet, or has just ended)", "claim of this checkout", start=claim["startTime"]))
     return found
 
 
@@ -256,6 +279,22 @@ def active_senders(host: stop.Host, *, checkout: str, image: str, practice_conta
     return [*ours, *processes]
 
 
+def run_command(item: stop.Target) -> str:
+    """The public command of an active run, for the run that starts beside it.
+
+    A container's ``dev.sippycup.command`` label and a claim's command both
+    open the detail (``call: ...``, ``matrix run: starting ...``); a host
+    process is named by its bin/ program. The run that places calls holds it
+    against the owner's limit on calls at once
+    (``sippycup.overlap_record.concurrency_refusal``); a name it does not
+    know is refused there.
+    """
+    if item.kind == "process":
+        return item.name.removeprefix("sippycup-")[:40]
+    words = item.detail.replace(":", " ").split()
+    return words[0][:40] if words else "?"
+
+
 def refusal(others: list[stop.Target], command: str) -> str:
     lines = [f"{command}: another sending command of this checkout is active:"]
     for item in others:
@@ -264,14 +303,14 @@ def refusal(others: list[stop.Target], command: str) -> str:
         "Two runs against one target spoil each other's verdicts (the capture, ladder, and oracle mix both).",
         f"Wait for it to finish, or end it with {stop.LAUNCHER} stop. Nothing was sent.",
         *([f"A launcher-PID entry is a command that claimed its start and whose container is not listed yet: "
-           f"{stop.LAUNCHER} stop --dry-run shows it once it runs."]
+           f"{stop.LAUNCHER} stop --dry-run shows it, and {stop.LAUNCHER} stop ends it."]
           if any(item.kind == "launcher" for item in others) else []),
         # Rehearsal 4, finding 2: the override is not a routine way on.
         f"Only for running two senders at once on purpose (not a way past this refusal): "
         f"{ALLOW_ENV}={','.join(item.name for item in others)}. With it both runs' verdicts are unreliable "
-        f"(their results say \"{UNRELIABLE}\"), and it can put more calls on the target at once than the "
-        "owner's concurrent_calls allows; the owner report then raises concurrent-calls-exceeded as an "
-        "integrity exception.",
+        f"(their results say \"{UNRELIABLE}\"). It does not go past the owner's limit on calls at once: a "
+        "command that places calls is still refused, before it sends anything, when it and the run beside it "
+        "would exceed limits.concurrent_calls.",
     ]
     return "\n".join(lines)
 
@@ -327,7 +366,8 @@ def _decide(args: argparse.Namespace, host: stop.Host, environ: dict[str, str], 
         if not allowed or any(item.name not in allowed and item.ident not in allowed for item in others):
             print(refusal(others, args.command), file=sys.stderr)
             return 2
-        record = {"activeRuns": [{"name": item.name, "kind": item.kind, "detail": item.detail[:160]}
+        record = {"activeRuns": [{"name": item.name, "kind": item.kind, "detail": item.detail[:160],
+                                  "command": run_command(item)}
                                  for item in others],
                   "allowedBy": ALLOW_ENV, "note": UNRELIABLE}
     if directory is not None and args.claim_pid is not None:
@@ -335,9 +375,8 @@ def _decide(args: argparse.Namespace, host: stop.Host, environ: dict[str, str], 
         print(f"claim {write_claim(directory, host.proc, args.claim_pid, args.command)}")
     if record is not None:
         print(f"{args.command}: running beside {', '.join(item.name for item in others)} ({ALLOW_ENV}); "
-              f"{UNRELIABLE}. Two senders at once can put more calls on the target than the owner's "
-              "concurrent_calls allows; the owner report then raises concurrent-calls-exceeded as an "
-              "integrity exception.", file=sys.stderr)
+              f"{UNRELIABLE}. A command that places calls is refused, before it sends anything, when it and "
+              "the run beside it would exceed the owner's limits.concurrent_calls.", file=sys.stderr)
         print(json.dumps(record, sort_keys=True, separators=(",", ":")))
     return 0
 

@@ -737,10 +737,10 @@ It names the other run and sends nothing. Wait for it, or end it with
 `./bin/sippycup stop`. That is the way on. `SIPPYCUP_ALLOW_OVERLAP=<the name
 it printed>` exists only for running two senders at once on purpose: both
 verdicts are then reported as "another run was active; this verdict is
-unreliable", and two calls at once can be more than the owner's
-`concurrent_calls` allows, which the owner report raises as the integrity
-exception `concurrent-calls-exceeded`. Do not use it on an engagement unless
-the owner agreed to it.
+unreliable". It does not go past the owner's `concurrent_calls`: with
+`1 at once`, a second command that places calls is refused with
+`calls at once: ...` and sends nothing, whatever the variable says. Do not
+use it on an engagement unless the owner agreed to it.
 
 ## Troubleshooting
 

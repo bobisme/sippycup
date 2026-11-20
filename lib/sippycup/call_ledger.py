@@ -894,6 +894,24 @@ def elsewhere_rule(
                          text, advice)
 
 
+def stopped_elsewhere(directory: str | Path, approval_id: str, command: str) -> str | None:
+    """Read-only: the refusal for a command that reserves no call, in a directory the rule stops.
+
+    The rule says a stopped directory "sends nothing more under" the approval,
+    so a ``checks run`` that places no call (and therefore reserves nothing)
+    is refused there too (wave 13). None when the rule does not stop this
+    directory. The own count is read the way :func:`status` reads it: a
+    ledger that cannot be counted is no count. Never raises.
+    """
+    directory = Path(directory)
+    try:
+        used: int | None = check(directory, approval_id).used
+    except (LedgerError, OSError):
+        used = None
+    rule = elsewhere_rule(directory, approval_id, used)
+    return rule.refusal(command) if rule is not None and rule.blocks else None
+
+
 @dataclass
 class CallsStatus:
     """The ``Calls: N of M used, K left`` line, read-only, from :func:`check`."""
@@ -1059,12 +1077,25 @@ def reserve(
     calls: int,
     command: str,
     source: str,
+    concurrent_limit: int | None = None,
 ) -> Reservation:
     """Reserve ``calls`` under ``approval_id`` or raise CeilingRefused / LedgerError.
 
     The check and the reservation happen under one exclusive lock, so two
     commands started at once cannot both pass.
+
+    ``concurrent_limit`` is the owner's limit on calls at once that the
+    caller's profile or plan carries. A command that the launcher let start
+    beside another run (SIPPYCUP_ALLOW_OVERLAP) is refused here, before
+    anything is reserved or sent, when the two would exceed it (wave 13;
+    ``overlap_record.concurrency_refusal``). Every caller that sends passes it.
     """
+    if concurrent_limit is not None:
+        from sippycup.overlap_record import concurrency_refusal
+
+        beside = concurrency_refusal(concurrent_limit, command)
+        if beside is not None:
+            raise CeilingRefused(beside)
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise LedgerError(f"the engagement directory {operator_path(directory)} is missing or a symlink")

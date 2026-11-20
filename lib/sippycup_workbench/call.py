@@ -492,6 +492,13 @@ def ledger_terms(document: dict[str, Any]) -> tuple[str, int]:
     return str(authorization.get("approval_id") or ""), int(limits.get("max_calls") or 0)
 
 
+def concurrent_limit(document: dict[str, Any]) -> int:
+    """The profile's limit on calls at once (``limits.max_concurrency``); 1 when it states none."""
+    limits = document.get("limits") if isinstance(document.get("limits"), dict) else {}
+    value = limits.get("max_concurrency")
+    return value if type(value) is int and value >= 1 else 1
+
+
 def ledger_blocking(profile_path: str | Path, document: dict[str, Any], calls: int, command: str) -> list[str]:
     """Read-only: why the engagement's call ledger would refuse ``calls`` more (bn-2sfn).
 
@@ -2189,6 +2196,7 @@ def _execute(
             reservation = call_ledger.reserve(
                 profile_path.parent, approval_id=approval, ceiling=ceiling, calls=1,
                 command="call", source=profile_path.name,
+                concurrent_limit=concurrent_limit(document),
             )
         except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
             return EXIT_REFUSED, {
