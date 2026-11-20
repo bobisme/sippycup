@@ -1008,12 +1008,60 @@ _PLAIN_WORDS = (
 )
 
 
+# Notes that describe the assessor's own network path. They are written for
+# the operator and repeat on every row; the report states the fact once, in
+# Limitations (rehearsal 3, finding 10).
+_NAT_NOTE_START = "Isolated mode: signaling and media leave the container's private network namespace"
+_NETWORK_NOTE_STARTS = (
+    "The target is a loopback address inside the container's own network namespace",
+    _NAT_NOTE_START,
+    "Host network namespace: traffic uses the host's addresses directly",
+    "Network namespace is unknown to this process",
+)
+# The operator's hint after a failed preflight to a loopback address ("run the
+# command as ./bin/sippycup --practice ..."), said for the owner instead.
+_LOOPBACK_PREFLIGHT_MARK = " is a loopback address: the practice target answers only inside its own namespace"
+_LOOPBACK_PREFLIGHT_OWNER = (
+    "Nothing answered at this address, which is a local practice address on the assessor's own machine "
+    "(not your system). This was an error on the assessor's side, not a result about your system"
+)
+_SENTENCE_BREAK = re.compile(r"(?<=[.;])\s+")
+OPERATOR_SIGNALS = frozenset({"SIGTERM", "SIGINT", "SIGHUP"})
+
+
 def _plain_words(text: str | None) -> str | None:
-    if text is None or text == _LOOPBACK_NOTE:
+    if text is None or text.startswith(_NETWORK_NOTE_STARTS):
         return None
+    if _LOOPBACK_PREFLIGHT_MARK in text:
+        return _LOOPBACK_PREFLIGHT_OWNER
+    if "./bin/sippycup" in text:
+        # A command is an instruction for the tester, never a statement for the owner.
+        text = " ".join(part for part in _SENTENCE_BREAK.split(text) if "./bin/sippycup" not in part).strip()
+        if not text:
+            return None
     for old, new in _PLAIN_WORDS:
         text = text.replace(old, new)
     return text
+
+
+_OPERATOR_STOP_CALL = (
+    "The tester stopped this call before it finished. That was the tester's own action, not a result "
+    "about your system"
+)
+
+
+def _stop_packets(result: dict[str, Any]) -> dict[str, int] | None:
+    """Packets sent to the unapproved media peer before the media-scope stop, per kind.
+
+    Read from ``result.json`` ``mediaScope.sentBeforeStop`` (``rtp`` and
+    ``rtcp`` packet counts) when a run records it; None for a run that does
+    not, where only the softphone's RTP count is known.
+    """
+    recorded = _dict(_dict(result.get("mediaScope")).get("sentBeforeStop"))
+    counts = {key: _int(recorded.get(key)) for key in ("rtp", "rtcp")}
+    if not all(isinstance(value, int) and value >= 0 for value in counts.values()):
+        return None
+    return counts  # type: ignore[return-value]
 
 
 def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, prefix: str) -> None:
@@ -1039,11 +1087,27 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
         for text in [_plain_words(san.text(note, f"{prefix}.reasons[{index}]", limit=400))]
         if text
     ]
+    if any(isinstance(note, str) and note.startswith(_NAT_NOTE_START) for note in _list(result.get("notes"))):
+        # Sent through address translation on the assessor's side: said once, in Limitations.
+        model["natPath"] = True
     softphone = _dict(result.get("softphone"))
     preflight = result.get("preflight")
     pre_code, pre_reason = _status_line(_dict(preflight).get("detail")) if isinstance(preflight, dict) else (None, None)
     oracle = _dict(result.get("oracle"))
     oracle_summary = _dict(oracle.get("summary"))
+    if model["verdict"] == "cancelled":
+        # The tester's own stop (Ctrl-C or the stop command): not a result about the target.
+        model["operatorStop"] = True
+        model["verdict"] = "stopped-by-tester"
+        model["reasons"].insert(0, _OPERATOR_STOP_CALL)
+    if model["verdict"] == "inconclusive" and not model["reasons"]:
+        counts = [_int(oracle_summary.get(key)) for key in ("pass", "fail", "unknown")]
+        model["reasons"].append(
+            "The automatic packet check could not decide"
+            + (f" ({counts[0]} of its checks passed, {counts[1]} failed, {counts[2]} could not be judged)"
+               if all(isinstance(value, int) for value in counts) else "")
+            + ", so this call is recorded as neither a pass nor a failure"
+        )
     recording = _dict(result.get("recording"))
     triage_doc = _dict(run.docs.get("triage.json"))
     triage_meta = _dict(triage_doc.get("metadata"))
@@ -1109,6 +1173,7 @@ def _call_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Context, p
             "toPeerPackets": _int(tls_media.get("outbound")) if tls_media else rtp_tx,
             "fromPeerPackets": _int(tls_media.get("inbound")) if tls_media else rtp_rx,
             "countSource": "packet capture (decoded TLS media)" if tls_media else "test softphone call statistics",
+            "stopPackets": _stop_packets(result),
         },
         "tls": None
         if not tls
@@ -1364,7 +1429,19 @@ def _campaign_run(run: RawRun, model: dict[str, Any], scope: _Scope, ctx: Contex
         },
     }
     model["_mediaPeersRaw"] = media_peers
-    if model["state"] not in (None, "succeeded"):
+    # A campaign the tester stopped (the stop command, Ctrl-C, or a signal on
+    # the tester's machine) is the tester's action, not a result about the
+    # target (rehearsal 3, finding 10).
+    model["operatorStop"] = bool(model["state"] == "cancelled" and stop_reason in OPERATOR_SIGNALS)
+    if model["operatorStop"]:
+        model["verdict"] = "stopped-by-tester"
+        model["details"]["stopReason"] = "stopped by the tester"
+        model["reasons"].append(
+            "The tester stopped this campaign before its last step"
+            + (f" ({completed} of {len(steps)} steps had completed)" if isinstance(completed, int) else "")
+            + ". That was the tester's own action, not a result about your system"
+        )
+    elif model["state"] not in (None, "succeeded"):
         model["reasons"].append(
             san.text(
                 f"campaign ended {model['state']}" + (f" ({stop_reason})" if stop_reason else ""),
@@ -1588,25 +1665,41 @@ def _run_call_terms(raw: RawRun, model: dict[str, Any]) -> tuple[str, int | None
     return (approval if isinstance(approval, str) else ""), ceiling, calls
 
 
+def _limit_in_force(scope: "_Scope | None") -> tuple[bool, int | None]:
+    """(a record of the approval in force exists for the run, its ``limits.calls``)."""
+    if scope is None or not scope.sources or scope.sources[0].kind != "scope-in-force":
+        return False, None
+    value = scope.sources[0].limits.get("calls")
+    return True, value if isinstance(value, int) else None
+
+
 def _engagement_call_check(
-    runs: list[dict[str, Any]], raws: dict[str, RawRun], sources: list[Source]
-) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]], raws: dict[str, RawRun], sources: list[Source],
+    run_scopes: "dict[str, _Scope] | None" = None, reviewed: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """The owner's call limit holds for the engagement, across runs (bn-2sfn).
 
     Owner runs (not practice runs) are counted per approval id in start
     order; a run is an exception when the calls placed under its approval,
-    with its own, exceed the limit: the smaller of the ceiling recorded with
-    the run and ``limits.calls`` of a scope file that states the same
-    approval id.
+    with its own, exceed the limit that was in force when it ran: the smaller
+    of the ceiling recorded with the run and ``limits.calls`` of the approval
+    record kept for the run (``approved-scopes/``). A run without such a
+    record is held to ``limits.calls`` of the current scope file that states
+    the same approval id. Lowering the limit later therefore does not turn
+    earlier runs into exceptions (rehearsal 3, finding 10).
+
+    Also returns, per approval id: ``placed`` (calls by the runs), ``limits``
+    (each limit in force with the run labels judged against it, in run
+    order), and ``over`` (labels of the runs that exceeded their limit).
     """
     scope_limits: dict[str, int] = {}
-    reviewed = {source.approval_id for source in sources if source.approval_id}
+    reviewed = set(reviewed or ()) | {source.approval_id for source in sources if source.approval_id}
     for source in sources:
         calls = source.limits.get("calls")
         if source.kind == "scope" and source.approval_id and isinstance(calls, int):
             scope_limits[source.approval_id] = min(calls, scope_limits.get(source.approval_id, calls))
     exceptions = []
-    placed: dict[str, int] = {}
+    facts: dict[str, dict[str, Any]] = {}
     for run in runs:
         raw = raws.get(run["id"])
         if raw is None or run["readable"] == "unreadable" or _bench_run(raw, run):
@@ -1617,21 +1710,29 @@ def _engagement_call_check(
         approval, recorded, calls = _run_call_terms(raw, run)
         if not calls:
             continue
-        placed[approval] = placed.get(approval, 0) + calls
-        limits = [value for value in (recorded, scope_limits.get(approval)) if isinstance(value, int)]
+        fact = facts.setdefault(approval, {"placed": 0, "limits": [], "over": []})
+        fact["placed"] += calls
+        known, in_force = _limit_in_force((run_scopes or {}).get(run["id"]))
+        limits = [value for value in (recorded, in_force if known else scope_limits.get(approval)) if isinstance(value, int)]
         if not limits:
             continue
         limit = min(limits)
-        if placed[approval] > limit:
+        if fact["limits"] and fact["limits"][-1]["limit"] == limit:
+            fact["limits"][-1]["runs"].append(run.get("label"))
+        else:
+            fact["limits"].append({"limit": limit, "runs": [run.get("label")]})
+        if fact["placed"] > limit:
+            fact["over"].append(run.get("label"))
             # Only an approval id a reviewed record names is shown; a run's
             # own text is not repeated in the report.
             shown = approval if approval in reviewed else "the run's recorded approval"
             exceptions.append(_exception(
                 "call-limit-exceeded", run["id"],
                 f"this run brought the calls placed under {shown} in this engagement to "
-                f"{placed[approval]}, above the approved limit of {limit}",
+                f"{fact['placed']}, above the approved limit of {limit}"
+                + (" that was in force when it ran" if known else ""),
             ))
-    return exceptions
+    return exceptions, facts
 
 
 def _bench_run(raw: RawRun, run: dict[str, Any]) -> bool:
@@ -1659,9 +1760,14 @@ def _bench_run(raw: RawRun, run: dict[str, Any]) -> bool:
 
 
 def _call_limits(
-    root: Path, runs: list[dict[str, Any]], raws: dict[str, RawRun], sources: list[Source]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    root: Path, sources: list[Source], facts: dict[str, dict[str, Any]], reviewed: set[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Per approval id: the approved call limit, the calls counted, and the calls left (bn-y3er).
+
+    One row for every approval reference the current records name and for
+    every earlier reference that has runs in the report (rehearsal 3,
+    finding 2): changing the reference does not remove the calls placed
+    under the old one, or their overrun, from the report.
 
     ``counted`` is the engagement's call ledger, read with the count every
     sender makes before it reserves (the run-directory cross-check included);
@@ -1670,12 +1776,26 @@ def _call_limits(
     or filters, a command still running, attempts an older rule counted); it
     holds fewer only when it was emptied or shortened, which its cross-check
     reports.
+
+    ``exceeded`` is true when a run exceeded the limit in force when it ran,
+    or when the ledger counts more than the current limit and the runs in the
+    report do not show that every one of those calls was inside an earlier,
+    higher limit. Also returns the totals line: calls by the report's runs,
+    per approval reference.
     """
     from sippycup import call_ledger
 
+    totals = {
+        "placedByRuns": sum(fact["placed"] for fact in facts.values()),
+        "byApproval": [
+            {"approvalId": approval, "calls": fact["placed"]}
+            for approval, fact in sorted(facts.items()) if approval in reviewed and fact["placed"]
+        ],
+        "underNoNamedApproval": sum(fact["placed"] for approval, fact in facts.items() if approval not in reviewed),
+    }
     if call_ledger.is_practice_bench(root):
         # The bench is not an engagement: its budget is per approval window.
-        return [], []
+        return [], [], totals
     ledger_present = (root / call_ledger.LEDGER_FILE).exists() or (root / call_ledger.LEDGER_FILE).is_symlink()
     scope_limits: dict[str, int] = {}
     profile_limits: dict[str, int] = {}
@@ -1686,19 +1806,25 @@ def _call_limits(
             scope_limits[source.approval_id] = min(source.limits["calls"], scope_limits.get(source.approval_id, source.limits["calls"]))
         elif source.kind == "target-profile" and isinstance(source.limits.get("max_calls"), int):
             profile_limits[source.approval_id] = min(source.limits["max_calls"], profile_limits.get(source.approval_id, source.limits["max_calls"]))
-    placed: dict[str, int] = {}
-    for run in runs:
-        raw = raws.get(run["id"])
-        if raw is None or run["readable"] == "unreadable" or _bench_run(raw, run):
-            continue
-        approval, _recorded_limit, calls = _run_call_terms(raw, run)
-        if approval:
-            placed[approval] = placed.get(approval, 0) + calls
+    current = set(scope_limits) | set(profile_limits)
+    current_ids = {source.approval_id for source in sources if source.approval_id}
+    # An earlier approval reference: no current record names it, runs in the
+    # report were placed under it, and a kept approval record states it.
+    earlier = {
+        approval for approval, fact in facts.items()
+        if approval in reviewed and approval not in current_ids and fact["placed"] and fact["limits"]
+    }
     rows: list[dict[str, Any]] = []
     exceptions: list[dict[str, Any]] = []
-    for approval in sorted(set(scope_limits) | set(profile_limits)):
-        limit = scope_limits.get(approval, profile_limits.get(approval))
-        source = "limits.calls in scope.yaml" if approval in scope_limits else "limits.max_calls of the target profile"
+    for approval in sorted(current | earlier):
+        fact = facts.get(approval) or {"placed": 0, "limits": [], "over": []}
+        is_current = approval in current
+        if is_current:
+            limit = scope_limits.get(approval, profile_limits.get(approval))
+            source = "limits.calls in scope.yaml" if approval in scope_limits else "limits.max_calls of the target profile"
+        else:
+            limit = fact["limits"][-1]["limit"]
+            source = "the approval that was in force when its runs ran"
         status = call_ledger.status(root, approval, limit)
         if not ledger_present:
             # No ledger at all (runs from before it, or none placed yet): the
@@ -1706,21 +1832,34 @@ def _call_limits(
             status = call_ledger.CallsStatus(approval, status.ledger, limit=limit, used=None)
         row = {
             "approvalId": approval,
+            "current": is_current,
             "limit": status.limit if status.limit is not None else limit,
             "limitSource": "the practice bench budget of this approval window" if status.limit != limit and status.limit is not None else source,
             "counted": status.used,
-            "left": status.left,
-            "placedByRuns": placed.get(approval, 0),
+            "left": status.left if is_current else None,
+            "placedByRuns": fact["placed"],
             "ledger": status.ledger,
             "ledgerTrusted": status.error is None,
             "ledgerProblem": status.error,
             "ledgerPresent": ledger_present,
+            # Each limit that was in force, with the runs judged against it.
+            "limitsInForce": [dict(item) for item in fact["limits"]],
+            "runsOverLimit": list(fact["over"]),
         }
-        if not ledger_present:
+        if not ledger_present and is_current:
             row["left"] = max(0, limit - row["placedByRuns"]) if isinstance(limit, int) else None
         effective = row["limit"]
-        highest = max([value for value in (status.used, row["placedByRuns"]) if isinstance(value, int)] or [0])
-        row["exceeded"] = isinstance(effective, int) and highest > effective
+        in_force = [item["limit"] for item in fact["limits"]]
+        over_current = isinstance(effective, int) and isinstance(status.used, int) and status.used > effective
+        # The count may stand above a limit that was lowered afterwards, but
+        # only when the report's runs account for every counted call and each
+        # of them was inside the limit in force when it ran.
+        explained = bool(
+            over_current and not fact["over"] and in_force
+            and status.used <= max(in_force) and status.used <= fact["placed"]
+        )
+        row["exceeded"] = bool(fact["over"]) or (over_current and not explained)
+        row["aboveLoweredLimit"] = explained
         rows.append(row)
         if status.error is not None:
             exceptions.append(_exception(
@@ -1728,13 +1867,92 @@ def _call_limits(
                 f"the call ledger for approval {approval} cannot be trusted, so the calls placed under it "
                 f"cannot be confirmed against the limit of {limit}: {status.error}",
             ))
-        elif isinstance(effective, int) and isinstance(status.used, int) and status.used > effective:
+        elif over_current and not explained:
+            unjudged = status.used - fact["placed"]
             exceptions.append(_exception(
                 "call-limit-exceeded", None,
                 f"the call ledger {status.ledger} counts {status.used} calls under {approval}, above the "
-                f"approved limit of {effective}",
+                f"approved limit of {effective}"
+                + (f"; {unjudged} of them are not among the runs in this report, so they could not be "
+                   "judged against an earlier limit" if unjudged > 0 and not fact["over"] and in_force
+                   and max(in_force) > effective else ""),
             ))
-    return rows, exceptions
+    return rows, exceptions, totals
+
+
+def _mark_overlaps(
+    runs: list[dict[str, Any]], raws: dict[str, RawRun], run_scopes: "dict[str, _Scope]", current: "_Scope",
+) -> list[dict[str, Any]]:
+    """Mark every run that was active beside another run of its engagement (rehearsal 3, findings 1 and 8).
+
+    The run that was started second may carry its own ``overlap`` record; the
+    first one cannot. Both are found here from the recorded times, so both
+    rows say the verdict is unreliable. Returns the integrity exceptions for
+    runs whose calls were in progress at the same time as more other calls
+    than the owner's ``limits.concurrent_calls`` in force allowed.
+    """
+    from sippycup import run_overlap
+
+    timed: list[tuple[dict[str, Any], RawRun, Any, Any]] = []
+    for run in runs:
+        raw = raws.get(run["id"])
+        if raw is None or run["readable"] == "unreadable" or run.get("notStarted"):
+            continue
+        stamps = _dict(raw.docs.get("timestamps.json")) or _dict(_dict(raw.docs.get("result.json")).get("timestamps"))
+        fallback = {"started": run.get("started"), "finished": run.get("finished")}
+        window = run_overlap.window(stamps) or run_overlap.window(fallback)
+        if window is None:
+            continue
+        calling = run_overlap.call_window(stamps) if raw.kind == "call" else window
+        timed.append((run, raw, window, calling or window))
+    exceptions: list[dict[str, Any]] = []
+    for run, raw, window, calling in timed:
+        engagement = raw.path.parent.parent
+        beside = [
+            other for other, other_raw, other_window, _ in timed
+            if other is not run and other_raw.path.parent.parent == engagement
+            and run_overlap.overlaps(window, other_window)
+        ]
+        if beside:
+            run["overlap"] = True
+            run["overlapWith"] = [other["label"] for other in beside]
+            if run_overlap.UNRELIABLE not in run["reasons"]:
+                run["reasons"].append(run_overlap.UNRELIABLE)
+        # More calls at once than the owner allowed. A practice-bench run is
+        # not owner traffic; a campaign counts as one call in progress.
+        if not (run.get("sent") or {}).get("calls") or _bench_run(raw, run):
+            continue
+        others = [
+            (other, other_calling) for other, other_raw, _, other_calling in timed
+            if other is not run and other_raw.path.parent.parent == engagement
+            and (other.get("sent") or {}).get("calls") and not _bench_run(other_raw, other)
+            and run_overlap.overlaps(calling, other_calling)
+        ]
+        if not others:
+            continue
+        # The most calls in progress at any one moment of this run's call.
+        edges = sorted(
+            [(max(start, calling[0]), 1) for _, (start, _end) in others]
+            + [(min(end, calling[1]), -1) for _, (_start, end) in others],
+            key=lambda edge: (edge[0], edge[1]),
+        )
+        at_once = level = 1
+        for _moment, step in edges:
+            level += step
+            at_once = max(at_once, level)
+        sources = run_scopes.get(run["id"], current).sources
+        allowed = [
+            source.limits["concurrent_calls"] for source in sources
+            if source.kind in {"scope", "scope-in-force"} and isinstance(source.limits.get("concurrent_calls"), int)
+        ]
+        if allowed and at_once > min(allowed):
+            exceptions.append(_exception(
+                "concurrent-calls-exceeded", run["id"],
+                f"{at_once} calls were in progress at once while this run's call was up (with "
+                f"{_label_ranges([other['label'] for other, _ in others])}), above the approved limit of "
+                f"{min(allowed)} call{'s' if min(allowed) != 1 else ''} at once (limits.concurrent_calls)",
+            ))
+    return exceptions
 
 
 RECORDED_SCOPES = "approved-scopes"
@@ -1947,7 +2165,28 @@ def _tampered_record(path: Path) -> str | None:
     }
     if state not in reasons:
         return None
+    if state == "unrecorded" and _unrecorded_application_record(path):
+        return None
     return f"{reasons[state]}, so it was not used as an approval record; runs are checked against the other records"
+
+
+def _unrecorded_application_record(path: Path) -> bool:
+    """True for an ``application-surfaces.yaml`` that an older ``scope compile`` wrote.
+
+    Before rehearsal 3 (finding 6) compile wrote that record without listing
+    its hash in ``scope-derivatives.json``, so every platform engagement was
+    reported as edited. Such a file is accepted only while it is byte for
+    byte self-consistent (its own ``contentSha256``); an edited one is still
+    reported. The file is a record for review: no sender reads it and the
+    report never uses it as an approval record. A compile from this version
+    on records its hash like every other file it writes.
+    """
+    from . import scope_app_derive
+
+    try:
+        return path.name == scope_app_derive.FILENAME and scope_app_derive.existing_state(path) == "managed"
+    except Exception:  # noqa: BLE001 - an unreadable file is reported as before
+        return False
 
 
 def _destination_check(scope: _Scope, model: dict[str, Any], raw: RawRun) -> list[dict[str, Any]]:
@@ -1996,13 +2235,26 @@ def _ceiling_check(model: dict[str, Any], scope: _Scope) -> list[dict[str, Any]]
 
 
 def _stop_detail(model: dict[str, Any]) -> str:
-    """How much media reached an unapproved peer before the media-scope stop."""
+    """How much media reached an unapproved peer before the media-scope stop.
+
+    The softphone's own count covers RTP only. A run that records what left
+    before the stop per kind (``stopPackets``) is quoted with both counts;
+    otherwise the sentence says that control packets (RTCP) are not in it.
+    """
     media = (model.get("details") or {}).get("media") or {}
     sent = media.get("toPeerPackets")
     if model.get("verdict") != "media-outside-scope" or not isinstance(sent, int):
         return ""
     noun = "RTP packet was" if sent == 1 else "RTP packets were"
-    return f"; the media-scope stop hung the call up after {sent} {noun} sent to it"
+    return f"; the media-scope stop hung the call up after {sent} {noun} sent to it" + _rtcp_words(media)
+
+
+def _rtcp_words(media: dict[str, Any]) -> str:
+    stop = media.get("stopPackets")
+    if isinstance(stop, dict) and isinstance(stop.get("rtcp"), int):
+        count = stop["rtcp"]
+        return f" (and {count} RTCP control packet{'s' if count != 1 else ''})"
+    return " (the count is the test softphone's and covers RTP only; RTCP control packets sent beside it before the stop are not counted)"
 
 
 def _observation(code: str, run: dict[str, Any], detail: str | None = None) -> dict[str, Any]:
@@ -2031,7 +2283,10 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
     if run["kind"] == "call":
         if verdict == "media-outside-scope":
             sent = (details.get("media") or {}).get("toPeerPackets")
-            detail = f"RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else None
+            detail = (
+                f"RTP packets sent to that address before the stop: {sent}{_rtcp_words(details.get('media') or {})}."
+                if isinstance(sent, int) else None
+            )
             found.append(_observation(verdict, run, detail))
         elif verdict in OBSERVATIONS:
             found.append(_observation(verdict, run))
@@ -2070,7 +2325,7 @@ def _observations(run: dict[str, Any]) -> list[dict[str, Any]]:
                     f"Step {case['step']}" + (f"; RTP packets sent to that address before the stop: {sent}." if isinstance(sent, int) else "."),
                 ))
                 break
-        if run.get("state") not in (None, "succeeded") and not run.get("notStarted"):
+        if run.get("state") not in (None, "succeeded") and not run.get("notStarted") and not run.get("operatorStop"):
             reason = details.get("stopReason") or run.get("state")
             if reason in {"capture_process_died", "capture_failed"}:
                 found.append(_observation("capture-incomplete", run))
@@ -2397,6 +2652,9 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     # archived practice approval they used (see summary_practice), never
     # against a run's own copy of a profile.
     practice_scopes = _practice_scopes(root, raws, scope)
+    # What the current records (and the practice approvals) approve; an
+    # address only an earlier approval named is listed apart (finding 10).
+    current_networks = list(addresses.networks)
     # Owner runs are judged by the scope in force when they ran (bn-2rgk).
     recorded_scopes, unrecorded_runs, recorded_sources = _recorded_scopes(
         root, raws, scope, set(practice_scopes)
@@ -2451,6 +2709,7 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         if overlap:
             # Started beside another run of this checkout (finding 6).
             model["overlap"] = True
+            model["overlapRecorded"] = True
             model["reasons"].append("another run was active; this verdict is unreliable")
         if raw.name in practice_scopes:
             model["practiceApproval"] = run_scope.sources[0].ref
@@ -2507,9 +2766,15 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     runs.sort(key=lambda r: (r.get("started") or "9999", r["id"]))
     for index, run in enumerate(runs, 1):
         run["label"] = f"R{index}"
-    exceptions.extend(_engagement_call_check(runs, {raw.name: raw for raw in filtered}, sources))
-    call_limits, limit_exceptions = _call_limits(root, runs, {raw.name: raw for raw in filtered}, sources)
+    # Approval references a reviewed record names: the current records and
+    # the approval records kept for the runs (approved-scopes/).
+    reviewed_ids = {source.approval_id for source in sources + recorded_sources if source.approval_id}
+    by_name = {raw.name: raw for raw in filtered}
+    call_exceptions, call_facts = _engagement_call_check(runs, by_name, sources, run_scopes, reviewed_ids)
+    exceptions.extend(call_exceptions)
+    call_limits, limit_exceptions, call_limit_totals = _call_limits(root, sources, call_facts, reviewed_ids)
     exceptions.extend(limit_exceptions)
+    exceptions.extend(_mark_overlaps(runs, by_name, run_scopes, scope))
     for run in runs:
         exceptions.extend(run["integrity"])
         candidate_findings.extend(_observations(run) if run["readable"] != "unreadable" else [])
@@ -2579,8 +2844,26 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     if loopback_runs:
         limitations.insert(0, {
             "code": "loopback-target",
-            "text": f"{len(loopback_runs)} run(s) ({_label_ranges([r['label'] for r in loopback_runs])}) were placed to a "
-                    "loopback address inside the container's own network namespace; no NAT applies.",
+            "text": f"{len(loopback_runs)} run(s) ({_label_ranges([r['label'] for r in loopback_runs])}) went to a local "
+                    "practice address on the assessor's own machine (a loopback address), not to a system on the "
+                    "network.",
+        })
+    nat_runs = [r for r in owner_runs if r.get("natPath") and r["readable"] != "unreadable"]
+    if nat_runs:
+        limitations.insert(0, {
+            "code": "assessor-nat",
+            "text": f"{len(nat_runs)} call(s) ({_label_ranges([r['label'] for r in nat_runs])}) left the assessor's "
+                    "machine through address translation (NAT). Your system may have seen a different source "
+                    "address than the one named inside the call setup, so missing return audio on these calls is "
+                    "not by itself a fault of your system.",
+        })
+    stopped_by_tester = [r for r in runs if r.get("operatorStop")]
+    if stopped_by_tester:
+        limitations.append({
+            "code": "stopped-by-tester",
+            "text": f"{len(stopped_by_tester)} run(s) ({_label_ranges([r['label'] for r in stopped_by_tester])}) were "
+                    "stopped by the tester before they finished. That was the tester's own action, not a finding "
+                    "about your system; the steps that did not complete say nothing about it.",
         })
     practice_runs = [r for r in runs if r.get("practiceApproval")]
     if practice_runs:
@@ -2595,9 +2878,10 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
     if overlapped:
         limitations.append({
             "code": "overlapping-runs",
-            "text": f"{len(overlapped)} run(s) ({', '.join(r['label'] for r in overlapped)}) started while another "
-                    "run of this checkout was active (the operator allowed it): another run was active; this "
-                    "verdict is unreliable. Their captures and verdicts may mix both runs' traffic.",
+            "text": f"{len(overlapped)} run(s) ({_label_ranges([r['label'] for r in overlapped])}) were active at the "
+                    "same time as another run: another run was active; this verdict is unreliable. Their "
+                    "recordings and verdicts may mix the traffic of both runs, whatever the verdict says; they "
+                    "need to be repeated one at a time before anything is concluded from them.",
         })
     stale_judged = [
         r for r in owner_runs if r["id"] in set(unrecorded_runs) and r["readable"] != "unreadable"
@@ -2654,12 +2938,16 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
             "sources": [source.as_dict() for source in sources + practice_sources],
             "window": window,
             "windowsInForce": _windows_in_force(runs, run_scopes, scope),
-            "approvedAddresses": sorted({str(n) for n in addresses.networks}),
+            # What the current approval records approve.
+            "approvedAddresses": sorted({str(n) for n in current_networks}),
             # Approved for media only (owner-approved media networks): never
             # a signaling target; included in approvedAddresses for evidence.
             "mediaOnlyNetworks": sorted(
-                {str(n) for n in addresses.networks if n not in addresses.signaling}
+                {str(n) for n in current_networks if n not in addresses.signaling}
             ),
+            # Approved by an earlier answer only: the approval in force for
+            # the listed runs named it, the current approval does not.
+            "earlierAddresses": _earlier_addresses(addresses, current_networks, recorded_sources, runs, run_scopes),
             "present": bool(sources),
         },
         "integrityExceptions": exceptions,
@@ -2670,6 +2958,8 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         "ceilings": ceilings,
         # The owner's call limit per approval: limit, counted, left (bn-y3er).
         "callLimits": call_limits,
+        # Calls by the report's runs, per approval reference (one total line).
+        "callLimitTotals": call_limit_totals,
         "findings": findings,
         "findingCounts": {
             severity: sum(1 for f in findings if f["severity"] == severity) for severity in SEVERITIES
@@ -2695,6 +2985,29 @@ def build_report(root: Path, options: Options) -> tuple[dict[str, Any], Context]
         ],
     }
     return model, ctx
+
+
+def _earlier_addresses(
+    addresses: AddressBook, current: list[Any], recorded: list[Source],
+    runs: list[dict[str, Any]], run_scopes: "dict[str, _Scope]",
+) -> list[dict[str, Any]]:
+    """Addresses only an approval that is no longer current named, with the runs it was in force for."""
+    rows = []
+    for network in sorted((n for n in addresses.networks if n not in current), key=str):
+        naming = [
+            source for source in recorded
+            if _canonical_network(str(network)) in {_canonical_network(n) for n in source.networks + source.media_networks}
+        ]
+        labels = [
+            run["label"] for run in runs
+            if run["id"] in run_scopes and any(source in naming for source in run_scopes[run["id"]].sources)
+        ]
+        rows.append({
+            "network": str(network),
+            "mediaOnly": network not in addresses.signaling,
+            "runs": sorted(labels, key=lambda label: int(label[1:])),
+        })
+    return rows
 
 
 def _is_loopback(address: Any) -> bool:
@@ -2751,10 +3064,10 @@ def _windows_in_force(runs: list[dict[str, Any]], run_scopes: dict[str, "_Scope"
                 {"approvalId": source.approval_id, "from": key[1], "until": key[2], "runs": [], "ref": source.ref},
             )
             entry["runs"].append(run["label"])
-    ordered = sorted(found.values(), key=lambda w: (w["from"], w["until"], str(w["approvalId"])))
-    for entry in ordered:
+    for entry in found.values():
         entry["runs"] = sorted(entry["runs"], key=lambda label: int(label[1:]))
-    return ordered
+    # In the order the windows were used (runs are numbered by start time).
+    return sorted(found.values(), key=lambda w: (int(w["runs"][0][1:]), w["from"], w["until"], str(w["approvalId"])))
 
 
 def _engagement_ceilings(sources: list[Source]) -> list[dict[str, Any]]:
@@ -2863,11 +3176,16 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
         if len(in_force) > 1:
             # The approval window was renewed: each run is checked against the
             # window it ran under, so say which window covered which runs.
+            named = len({w.get("approvalId") for w in in_force}) > 1
             parts.append(
                 "Activity was checked against approval "
                 + ", ".join(approval_ids)
                 + f", whose window was renewed; the windows in force were "
-                + "; ".join(f"{w['from']} to {w['until']} for {_label_ranges(w['runs'])}" for w in in_force)
+                + "; ".join(
+                    f"{w['from']} to {w['until']} for {_label_ranges(w['runs'])}"
+                    + (f" (approval {w['approvalId']})" if named and w.get("approvalId") else "")
+                    for w in in_force
+                )
                 + "."
             )
         else:
@@ -2899,6 +3217,20 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
             f"Sippycup could not begin {'them' if many else 'it'} on the assessor's side; nothing was sent to your "
             f"system for {'them' if many else 'it'}."
         )
+    stopped_by_tester = [r for r in runs if r.get("operatorStop")]
+    if stopped_by_tester:
+        many = len(stopped_by_tester) != 1
+        parts.append(
+            f"{len(stopped_by_tester)} of the runs ({_label_ranges([r['label'] for r in stopped_by_tester])}) "
+            f"{'were' if many else 'was'} stopped by the tester before finishing; that was the tester's own "
+            "action, not a finding about your system."
+        )
+    overlapped = [r for r in runs if r.get("overlap")]
+    if overlapped:
+        parts.append(
+            f"{len(overlapped)} of the runs ({_label_ranges([r['label'] for r in overlapped])}) were active at the "
+            "same time as another run, so their verdicts are unreliable."
+        )
     for row in model.get("callLimits") or []:
         if row.get("exceeded"):
             counted = max(value for value in (row.get("counted"), row.get("placedByRuns")) if isinstance(value, int))
@@ -2927,16 +3259,25 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
                 "runs": len(finding["runs"]),
             }
         )
-    if len(findings) > 4:
-        rows.append({"ref": "-", "severity": "none", "title": f"{len(findings) - 4} more finding{'s' if len(findings) != 5 else ''} in the Findings section", "where": "-", "source": "report", "runs": 0})
-    passed = [r for r in runs if r.get("verdict") in ("pass", "succeeded", "no-findings")]
+    # Findings beyond the table are named in a sentence under it, not in a
+    # table row with a severity of its own (rehearsal 3, finding 10).
+    more = max(0, len(findings) - 4)
+    passed = [r for r in runs if r.get("verdict") in ("pass", "succeeded", "no-findings") and not r.get("overlap")]
     # A safety stop is Sippycup refusing to continue outside the scope, not a
     # result about the target; it gets its own row.
     stopped = [r for r in runs if r.get("verdict") in SAFETY_STOPS]
-    failed = [r for r in runs if r not in passed and r not in stopped and r.get("kind") != "check" and not r.get("notStarted")]
+    failed = [
+        r for r in runs
+        if r not in passed and r not in stopped and r.get("kind") != "check" and not r.get("notStarted")
+        and not r.get("operatorStop") and not r.get("overlap")
+    ]
     filler = []
     if not_started:
         filler.append({"ref": "-", "severity": "none", "title": f"{len(not_started)} run{'s' if len(not_started) != 1 else ''} never started (a problem on the assessor's side; nothing was sent to your system)", "where": "-", "source": "run results", "runs": len(not_started)})
+    if stopped_by_tester:
+        filler.append({"ref": "-", "severity": "none", "title": f"{len(stopped_by_tester)} run{'s were' if len(stopped_by_tester) != 1 else ' was'} stopped by the tester (the tester's own action, not a finding about your system)", "where": "-", "source": "run results", "runs": len(stopped_by_tester)})
+    if overlapped:
+        filler.append({"ref": "-", "severity": "none", "title": f"{len(overlapped)} run{'s' if len(overlapped) != 1 else ''} ran at the same time as another run; their verdicts are unreliable", "where": "-", "source": "run results", "runs": len(overlapped)})
     if not runs:
         filler.append({"ref": "-", "severity": "none", "title": "No runs were recorded", "where": "-", "source": "run results", "runs": 0})
     if not findings:
@@ -2958,4 +3299,4 @@ def _executive(model: dict[str, Any]) -> dict[str, Any]:
         if len(rows) >= 3:
             break
         rows.append(row)
-    return {"paragraph": " ".join(parts), "rows": rows[:5]}
+    return {"paragraph": " ".join(parts), "rows": rows[:5], "moreFindings": more}

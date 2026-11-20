@@ -472,7 +472,7 @@ class ReportTests(unittest.TestCase):
                              media_networks=["127.0.0.48/28"])
         text = render_markdown(self.model(), "0" * 64)
         self.assertIn("127.0.0.50:20004 (authorization.mediaNetworks, media only)", text)
-        self.assertIn("The capture watchdog counted 900 packets against the ceilings, 610 of them media", text)
+        self.assertIn("900 packets were recorded and counted against the approved limits, 610 of them media", text)
 
 
 class StopObservationTests(unittest.TestCase):

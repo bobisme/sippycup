@@ -224,3 +224,4 @@
 1795141581937847	sippycup-2u2m2v	itc:AQ		item.create	bn-3r3e	{"description":"wave11-findings 6,8,10,13,20","kind":"bug","size":"m","title":"Rehearsal 3: owner report (application-surfaces exception, own stop as finding, overlap marks, limit in force)"}	blake3:B4-Q-QFxCaD11qcHxTdJNLfr02p-CLE4lf-3gMfJssI
 1795141582111274	sippycup-2u2m2v	itc:AQ		item.create	bn-6sg1	{"description":"wave11-findings 11,12,14-16,18,19,21-30","kind":"bug","size":"m","title":"Rehearsal 3: scope answer and recovery text, routed rehearsal output, papercuts"}	blake3:NfbxdyuMx1oHipc-j4ZEMQihkBF_S9guPpGnRpJ-DPQ
 1795144137932809	sippycup-2u2m2v	itc:AQ		item.move	bn-1yds	{"state":"done"}	blake3:Z4TLeBjC_Mdn8ebquMHg-LN_MXgUezsl8zC0q76N12g
+1795144583082054	sippycup-2u2m2v	itc:AQ		item.move	bn-3r3e	{"state":"done"}	blake3:DQQJLaJLwUpbONqtQ1Ba6iNyd6NzN0A7QHG-LvtV-Ko

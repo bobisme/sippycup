@@ -236,6 +236,29 @@ def _manifest_privacy(run: Path) -> str | None:
     return status if isinstance(status, str) else "unknown"
 
 
+NETWORK_NOTE_STARTS = (
+    "The target is a loopback address inside the container's own network namespace",
+    "Isolated mode: signaling and media leave the container's private network namespace",
+    "Host network namespace: traffic uses the host's addresses directly",
+    "Network namespace is unknown to this process",
+)
+
+
+def _overlap_reason(run: Path, document: dict[str, Any], summary: dict[str, Any]) -> None:
+    """An inconclusive call that ran beside another run says so (rehearsal 3, findings 8 and 20).
+
+    The run started second records the overlap itself; the first one does
+    not, so the sibling run directories' times are compared (only for an
+    inconclusive call, to keep the run list quick).
+    """
+    if summary.get("verdict") != "inconclusive":
+        return
+    from sippycup import run_overlap
+
+    if isinstance(document.get("overlap"), dict) or run_overlap.sibling_overlaps(run):
+        summary["reason"] = f"{run_overlap.UNRELIABLE}; repeat the call alone"
+
+
 def _call_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
     verdict = document.get("verdict")
     summary["verdict"] = verdict if isinstance(verdict, str) else None
@@ -295,11 +318,20 @@ def _call_summary(document: dict[str, Any], summary: dict[str, Any]) -> None:
     summary["facts"] = facts
     notes = document.get("notes")
     summary["notes"] = [str(item) for item in notes][:20] if isinstance(notes, list) else []
-    reason = summary["notes"][0] if summary["notes"] and verdict != "pass" else None
+    # The note about the network path (loopback, NAT, host) is on every run
+    # and is never why a run failed (rehearsal 3, finding 20): the reason is
+    # the first note that says what happened.
+    telling = [note for note in summary["notes"] if not note.startswith(NETWORK_NOTE_STARTS)]
+    reason = telling[0] if telling and verdict != "pass" else None
     if reason is None and softphone and softphone.get("error"):
         reason = str(softphone["error"])
     if reason is None and oracle is not None:
-        reason = f"oracle {oracle.get('verdict')}"
+        counts = oracle.get("summary") if isinstance(oracle.get("summary"), dict) else {}
+        reason = (
+            f"the packet check could not decide (pass {counts.get('pass', '?')}, fail {counts.get('fail', '?')}, "
+            f"unknown {counts.get('unknown', '?')}); ./bin/sippycup diagnose says why"
+            if verdict == "inconclusive" else f"oracle {oracle.get('verdict')}"
+        )
     if verdict in SAFETY_STOPS:
         # Sippycup stopped the call to stay inside the scope; the target did
         # nothing wrong. Say so first, with what reached the unapproved peer.
@@ -370,6 +402,10 @@ def _campaign_summary(run: Path, document: dict[str, Any], summary: dict[str, An
         notes[0] if notes else
         (f"last event {last.get('event')}" if isinstance(last, dict) and last.get("event") else None)
     )
+    if state == "cancelled" and not notes and isinstance(last, dict) and last.get("signal") in {"SIGTERM", "SIGINT", "SIGHUP"}:
+        # Your own stop (the stop command or Ctrl-C), not a result about the target.
+        summary["reason"] = (f"stopped by you ({last['signal']}) after {document.get('completedSteps')} completed "
+                             "step(s); not a result about the target")
     window = document.get("approvalWindow") if isinstance(document.get("approvalWindow"), dict) else {}
     if window.get("bound") is True:
         facts.append(("Approval window", f"held to the window ending {window.get('validUntil')}"))
@@ -471,6 +507,7 @@ def summarize(run: Path, *, container: str = "", engagement: Path | None = None)
                 )
                 summary["kind"] = "practice-call" if practice else "call"
                 _call_summary(document, summary)
+                _overlap_reason(run, document, summary)
             elif "state" in document:
                 summary["kind"] = "campaign"
                 _campaign_summary(run, document, summary)

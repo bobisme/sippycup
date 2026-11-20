@@ -93,6 +93,37 @@ def _window_lines(auth: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _earlier_address_line(auth: dict[str, Any]) -> str | None:
+    """Addresses only an earlier approval named: not approved now, shown apart."""
+    rows = auth.get("earlierAddresses") or []
+    if not rows:
+        return None
+    parts = []
+    for row in rows:
+        notes = (["for media only"] if row.get("mediaOnly") else []) + (
+            [f"in the approval that was in force for {_runs_text(row['runs'])}"] if row.get("runs") else []
+        )
+        parts.append(str(row["network"]) + (f" ({'; '.join(notes)})" if notes else ""))
+    return ("Approved by an earlier answer only, and not part of the current approval: " + ", ".join(parts)
+            + ". Runs were checked against the approval in force when they ran.")
+
+
+def _more_findings_line(summary: dict[str, Any]) -> str | None:
+    more = summary.get("moreFindings") or 0
+    if not more:
+        return None
+    return (f"{more} more finding{'s are' if more != 1 else ' is'} listed in the Findings section below; "
+            "the table shows the first four.")
+
+
+def _campaign_stop(run: dict[str, Any]) -> tuple[str, str | None]:
+    """(words, stop reason to show as code or None) after a campaign's step count."""
+    if run.get("operatorStop"):
+        return "; stopped by the tester (the tester's own action, not a result about your system)", None
+    reason = (run.get("details") or {}).get("stopReason")
+    return ("; stop reason ", reason) if reason else ("", None)
+
+
 def _runs_text(labels: list[str]) -> str:
     numbers = sorted(int(x[1:]) for x in labels if x[1:].isdigit())
     parts: list[str] = []
@@ -168,15 +199,15 @@ def _campaign_media_peer(case: dict[str, Any]) -> str | None:
 
 
 def _campaign_capture(details: dict[str, Any]) -> str | None:
-    """What the campaign's capture watchdog counted, media included."""
+    """What the campaign's packet recording counted against the limits, media included."""
     capture = details.get("capture") or {}
     packets = capture.get("watchdogPackets")
     if not isinstance(packets, int):
         return None
     media = capture.get("watchdogMediaPackets")
     return (
-        f"The capture watchdog counted {packets} packets against the ceilings"
-        + (f", {media} of them media (RTP/RTCP)" if isinstance(media, int) else "")
+        f"{packets} packets were recorded and counted against the approved limits"
+        + (f", {media} of them media (audio and its control packets)" if isinstance(media, int) else "")
         + "."
     )
 
@@ -284,28 +315,59 @@ def _parse(value: str | None) -> datetime | None:
 
 
 def call_limit_lines(model: dict[str, Any]) -> list[str]:
-    """The owner's call limit per approval, in words: limit, counted, left (bn-y3er)."""
+    """The owner's call limit per approval reference, in words: limit, counted, left (bn-y3er).
+
+    One line for every approval reference with runs in the report, the
+    current one and earlier ones, then one total line for the report's runs.
+    """
     lines: list[str] = []
     for row in model.get("callLimits") or []:
+        current = row.get("current", True)
+        name = f"Approval {row['approvalId']}" + (
+            "" if current else " (an earlier approval reference of this engagement; calls placed under it still count here)"
+        )
+        left = f", {row['left']} left" if row.get("left") is not None else ""
         if row.get("ledgerPresent") is False:
-            text = (f"Approval {row['approvalId']}: Calls: {row['placedByRuns']} of {row['limit']} used, "
-                    f"{row['left']} left, counted from the runs in this report. Approved call limit: "
+            text = (f"{name}: Calls: {row['placedByRuns']} of {row['limit']} used{left}, "
+                    f"counted from the runs in this report. Approved call limit: "
                     f"{row['limit']} ({row['limitSource']}). There is no call ledger ({row['ledger']}): "
                     "the runs predate it, or it was deleted.")
         elif row.get("ledgerTrusted", True):
-            text = (f"Approval {row['approvalId']}: Calls: {row['counted']} of {row['limit']} used, "
-                    f"{row['left']} left. Approved call limit: {row['limit']} ({row['limitSource']}). "
+            text = (f"{name}: Calls: {row['counted']} of {row['limit']} used{left}. "
+                    f"Approved call limit: {row['limit']} ({row['limitSource']}). "
                     f"Calls counted: {row['counted']} (in {row['ledger']}, the count every command "
                     "checks before it sends).")
         else:
-            text = (f"Approval {row['approvalId']}: approved call limit {row['limit']} "
+            text = (f"{name}: approved call limit {row['limit']} "
                     f"({row['limitSource']}); calls counted and calls left cannot be confirmed, because "
                     f"the call ledger does not account for every run: {row.get('ledgerProblem')}")
-        lines.append(text + (" LIMIT EXCEEDED." if row.get("exceeded") else ""))
-        lines.append(
-            f"  Calls placed by the runs in this report: {row['placedByRuns']} (a call counts from its "
-            "first INVITE on; runs from before that rule count from their preflight)"
-        )
+        history = row.get("limitsInForce") or []
+        if len(history) > 1 or (history and history[-1]["limit"] != row["limit"]):
+            text += (" The limit changed during the engagement: "
+                     + ", then ".join(f"{item['limit']} while {_runs_text(item['runs'])} ran" for item in history)
+                     + (f", {row['limit']} now" if history[-1]["limit"] != row["limit"] else "")
+                     + ". Each run was judged against the limit in force when it ran.")
+        if row.get("exceeded"):
+            over = row.get("runsOverLimit") or []
+            text += " LIMIT EXCEEDED" + (f" by {_runs_text(over)}" if over else "") + "."
+        elif row.get("aboveLoweredLimit"):
+            text += (" The count stands above the current limit only because the limit was lowered after "
+                     "those calls were placed; no run exceeded the limit in force when it ran.")
+        text += f" Calls placed under it by the runs in this report: {row['placedByRuns']}."
+        lines.append(text)
+    totals = model.get("callLimitTotals")
+    if totals is not None and (model.get("callLimits") or totals.get("placedByRuns")):
+        parts = [f"{item['calls']} under {item['approvalId']}" for item in totals.get("byApproval") or []]
+        if totals.get("underNoNamedApproval"):
+            parts.append(f"{totals['underNoNamedApproval']} under no approval reference that a record names")
+        text = (f"Calls placed by the runs in this report: {totals['placedByRuns']}"
+                + (f" ({', '.join(parts)})" if len(parts) > 1 or totals.get("underNoNamedApproval") else "")
+                + ". A call counts from its first INVITE on; runs from before that rule count from their preflight.")
+        dialed = ((model.get("totals") or {}).get("calls") or {}).get("total")
+        if isinstance(dialed, int) and dialed != totals["placedByRuns"]:
+            text += (f" The totals table counts {dialed} calls dialed; the two numbers differ where a run was "
+                     "counted for the limit without a call being dialed, or the other way round.")
+        lines.append(text)
     return lines
 
 
@@ -358,6 +420,8 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
             for r in summary["rows"]
         ),
     )
+    if _more_findings_line(summary):
+        out += [md(_more_findings_line(summary)), ""]
     # Authorization
     auth = model["authorization"]
     out += ["## Authorization", ""]
@@ -371,6 +435,8 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
     if auth.get("mediaOnlyNetworks"):
         out.append("- Of these, approved for media only (never a signaling target): "
                    + ", ".join(code(a) for a in auth["mediaOnlyNetworks"]))
+    if _earlier_address_line(auth):
+        out.append(f"- {md(_earlier_address_line(auth))}")
     out.append("")
     out += _md_table(
         ["Record", "Kind", "Approval", "Approved by", "Status", "Valid from", "Valid until", "Addresses", "Ports", "Transports", "Server names"],
@@ -469,7 +535,8 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
         out.append(
             f"**{code(run['id'])}** ({md(run.get('campaign'))}): {md(run.get('state') or run['readable'])}, "
             f"{md(d.get('completedSteps'))} of {md(d.get('plannedSteps'))} steps completed"
-            + (f"; stop reason {code(d['stopReason'])}" if d.get("stopReason") else "")
+            + (md(_campaign_stop(run)[0]) if _campaign_stop(run)[0] else "")
+            + (code(_campaign_stop(run)[1]) if _campaign_stop(run)[1] else "")
             + "."
             + (f" {md(_campaign_capture(d))}" if _campaign_capture(d) else "")
         )
@@ -614,7 +681,9 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
         ([code(i["run"]), code(i["contentIdentity"]), md(i["source"])] for i in model["integrity"]["runContentIdentities"]),
     )
     if model["authorization"].get("windowsInForce"):
-        out += ["Approval records the runs were checked against (technical):", ""]
+        out += ["Approval records the runs were checked against (technical):", "",
+                "The record names are the assessor's kept copies of each approval; this table is for audit and "
+                "needs nothing from the owner.", ""]
         out += _md_table(
             ["Approval", "Window", "Record", "Runs"],
             (
@@ -639,7 +708,8 @@ _METRICS = {
 def _toolbox(toolbox: dict[str, Any]) -> str:
     parts = [f"Sippycup {toolbox.get('cliVersion') or 'unknown'}"]
     for name, versions in sorted((toolbox.get("tools") or {}).items()):
-        parts.append(f"{name} {' / '.join(versions)}")
+        shown = "test softphone (PJSIP)" if name == "pjsua" else name
+        parts.append(f"{shown} {' / '.join(versions)}")
     if toolbox.get("python"):
         parts.append("Python " + " / ".join(toolbox["python"]))
     images = toolbox.get("imageIds") or []
@@ -918,6 +988,8 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             ([h(r["ref"]), _sev(r["severity"]), h(r["title"]), h(r["where"]), h(r["source"])] for r in summary["rows"]),
         )
     )
+    if _more_findings_line(summary):
+        out.append(f"<p>{h(_more_findings_line(summary))}</p>")
     out.append("</section>")
     # Authorization
     auth = model["authorization"]
@@ -933,6 +1005,8 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
     if auth.get("mediaOnlyNetworks"):
         out.append("<li>Of these, approved for media only (never a signaling target): "
                    + ", ".join(_c(a) for a in auth["mediaOnlyNetworks"]) + "</li>")
+    if _earlier_address_line(auth):
+        out.append(f"<li>{h(_earlier_address_line(auth))}</li>")
     out.append("</ul>")
     out.append(
         _html_table(
@@ -1049,7 +1123,7 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
         out.append(
             f"<p>{_c(run['id'])} ({h(run.get('campaign'))}): {h(run.get('state') or run['readable'])}, "
             f"{h(d.get('completedSteps'))} of {h(d.get('plannedSteps'))} steps completed"
-            + (f"; stop reason {_c(d['stopReason'])}" if d.get("stopReason") else "")
+            + h(_campaign_stop(run)[0], "") + (_c(_campaign_stop(run)[1]) if _campaign_stop(run)[1] else "")
             + "."
             + (f" {h(_campaign_capture(d))}" if _campaign_capture(d) else "")
             + "</p>"
@@ -1236,9 +1310,13 @@ def render_text(model: dict[str, Any], report_sha256: str) -> str:
     out += ["EXECUTIVE SUMMARY", "", model["executiveSummary"]["paragraph"], ""]
     for row in model["executiveSummary"]["rows"]:
         out.append(f"  {row['ref']:<5} {SEVERITY_LABEL.get(row['severity'], row['severity']):<7} {row['title']} ({row['source']})")
+    if _more_findings_line(model["executiveSummary"]):
+        out.append(f"  {_more_findings_line(model['executiveSummary'])}")
     out += ["", "APPROVAL", ""]
     for line in _window_lines(model["authorization"]):
         out.append(f"  {line}")
+    if _earlier_address_line(model["authorization"]):
+        out.append(f"  {_earlier_address_line(model['authorization'])}")
     for s in model["authorization"]["sources"]:
         cells = _source_cells(s)
         out.append(f"  {s['ref']} [{_KIND_WORDS.get(s['kind'], s['kind'])}] approval {cells[0]}, {cells[2]} to {cells[3]}, addresses {', '.join(s['networks']) or '-'}")

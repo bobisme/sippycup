@@ -731,9 +731,13 @@ when the SIP part is clean. It is skipped (with the reasons) while an error
 exists in the two sections. Compile does not overwrite a record that was
 edited by hand or that it did not write (`scope.derivative_modified`,
 `scope.derivative_unmanaged`; `--force` overwrites). The record carries its
-own content hash and is not listed in `scope-derivatives.json`; the cockpit
-shows it as `current`, `stale` (the scope changed since), `edited`, or
-`not-compiled`. A stale record does not block a SIP run.
+own content hash, and compile also records its SHA-256 in
+`scope-derivatives.json` (key `application-surfaces`), like every other file
+it writes, so the owner report can tell the record compile wrote from an
+edited one. It is not one of the SIP derivatives: `status` and
+`derivative_state` leave it out, and the cockpit shows it on its own line as
+`current`, `stale` (the scope changed since), `edited`, or `not-compiled`. A
+stale record does not block a SIP run.
 
 ### Staleness and hand edits
 
