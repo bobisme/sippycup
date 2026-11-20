@@ -226,6 +226,7 @@ class RoutedRehearsal(Rehearsal):
         self.created_network = False
         self.source = ""
         self.call_runs: list[str] = []
+        self.nat_addresses: list[str] = []
 
     # -- plumbing -------------------------------------------------------
     def state_root(self) -> Path:
@@ -389,7 +390,28 @@ class RoutedRehearsal(Rehearsal):
         self.cockpit("rehearse")
 
     def preflight(self) -> None:
-        super().preflight()
+        """UDP and TLS, each bound to its compiled profile, as FIRST-ENGAGEMENT.md section 3 says.
+
+        (The dress rehearsals also probe TLS with `preflight HOST PORT tls`,
+        the form the page tells operators not to use on an engagement; here
+        the TLS name and CA come from the TLS target's profile.)
+        """
+        assert self.shape is not None
+        address, name = self.shape.signaling, self.shape.server_name
+        for transport, profile in (("udp", "target-profile.yaml"), ("tls", "target-profile-routed-tls.yaml")):
+            done = self.command([LAUNCHER, *self.route, "preflight", "--profile", f"{self.eng}/{profile}"])
+            self.require("Result: PASS" in done.stdout, f"{transport.upper()} preflight did not PASS")
+            self.require(
+                f"Target:    {address}:{practice.SIGNALING_PORTS[transport]}" in done.stdout
+                and "Scope: profile " in done.stdout and f"approval {self.approval_id}" in done.stdout
+                and "UNBOUND" not in done.stdout,
+                f"the profile-bound {transport.upper()} preflight did not show the profile's target and approval",
+            )
+            if transport == "tls":
+                self.require(f"TLS: verified for name '{name}'" in done.stdout,
+                             "TLS preflight did not PASS with a verified server name")
+        self.fact(f"UDP 200 OK from {address}; TLS 200 OK verified as {name} against the engagement's CA copy; "
+                  "both bound to their profile (approval and window checked first)")
         self.require(not any("--practice" in line for line in self.current.commands),
                      "a routed command used --practice")
 
@@ -397,6 +419,41 @@ class RoutedRehearsal(Rehearsal):
         super().calls()
         for line in self.current.commands:
             self.require("--practice" not in line, f"a routed command used --practice: {line}")
+        self.nat_line()
+
+    def nat_line(self) -> None:
+        """Show the call's `NAT:` line: these calls print JSON, so the line the page says to look for is not on screen."""
+        assert self.engagement is not None
+        seen: list[str] = []
+        for path in sorted((self.engagement / "calls").glob("*/result.json")):
+            try:
+                result = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            seen += [str(item) for item in result.get("natAddresses") or [] if str(item) not in seen]
+        self.require(bool(seen), "no call recorded the address the target saw (natAddresses)")
+        self.nat_addresses = seen
+        self.fact(f"NAT: the target saw our source as {', '.join(seen)} (natAddresses in result.json; our own "
+                  f"address is {self.source}). Without `--format json`, `call` prints this as its `NAT:` line")
+
+    def campaign_run_argv(self, action: dict[str, Any]) -> list[str]:
+        """The command exactly as FIRST-ENGAGEMENT.md section 5 gives it for a real target.
+
+        No `--isolated` and no `--interface`: the launcher always runs
+        `campaign run` in the private network namespace and the capture
+        interface defaults to `any`. The cockpit's own action is the same
+        command with both spelled out, which is checked here.
+        """
+        documented = [LAUNCHER, "campaign", "run", f"{self.eng}/plan.json", "--manifest",
+                      f"{self.eng}/campaign.yaml", "--run-root", f"{self.eng}/runs"]
+        cockpit = [item for item in action["argv"] if item != "--isolated"]
+        if "--interface" in cockpit:
+            index = cockpit.index("--interface")
+            self.require(cockpit[index + 1] == "any", f"the cockpit's campaign run captures on {cockpit[index + 1]!r}")
+            del cockpit[index:index + 2]
+        self.require(cockpit == documented,
+                     f"the cockpit's campaign run is not the documented command: {shlex.join(action['argv'])}")
+        return documented
 
     def call_json(self, argv: list[str], *, expect: tuple[int, ...] = (0,), timeout: float = 180) -> dict[str, Any]:
         return self.run_result(self.command([*argv, "--secret-file", self.password_file, "--format", "json"],
@@ -541,6 +598,29 @@ class RoutedRehearsal(Rehearsal):
 
     def safety_stop(self) -> None:
         super().safety_stop()
+
+    def execute(self) -> int:
+        code = super().execute()
+        if self.stages and code != 2:
+            for line in self.expectation_lines():
+                self.say(line)
+        return code
+
+    def expectation_lines(self) -> list[str]:
+        """What this rehearsal showed that the real engagement will show too (FIRST-ENGAGEMENT.md, NAT)."""
+        saw = ", ".join(self.nat_addresses) or "the address in the `NAT:` line of `call`"
+        own = self.source or "your machine's own address"
+        return [
+            "",
+            "On the real engagement expect the same (docs/FIRST-ENGAGEMENT.md, \"Testing from behind NAT\"):",
+            f"  1. The address the owner must allow is the one the target saw (here {saw}; `call` prints it as"
+            f" `NAT:`, result.json has it as natAddresses), not the address in your SDP and Via (here {own})."
+            " If it is not the address you gave the owner, stop and tell them.",
+            "  2. Media comes back only when the owner's side sends RTP to where yours came from (symmetric RTP)."
+            " If it does not, calls are answered with no audio from them: `diagnose` names it"
+            " possible-nat-one-way-media.",
+            "  3. RTCP may show in one direction only; judge media by RTP.",
+        ]
 
     def teardown(self) -> None:
         os.environ.pop(ENV_NAME, None)

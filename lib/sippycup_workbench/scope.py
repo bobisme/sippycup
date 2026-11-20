@@ -357,7 +357,7 @@ def create_scope(engagement: str | Path, *, name: str | None = None, platform: b
             f"engagement directory does not exist: {root} (nothing was created). Create it first with "
             f"the engagement journal, then run scope init again:\n"
             f"  ./bin/sippycup journal init {shlex.quote(str(root))} --title \"TITLE OF THE TEST\" --owner \"WHO APPROVES THE SCOPE\"\n"
-            f"  ./bin/sippycup scope init {shlex.quote(str(root))}"
+            f"  ./bin/sippycup scope init {shlex.quote(str(root))}{' --platform' if platform else ''}"
         )
     try:
         descriptor = os.open(

@@ -106,6 +106,9 @@ def build_plan(
         refusal = integrity_error(profile_path)
         if refusal:
             blocking.insert(0, refusal)
+        from sippycup_workbench.profile import with_next_command
+
+        blocking = with_next_command(blocking, profile_path)
     if not host_is_approved_literal(document):
         blocking.append("checks require target.host itself to be one of the literal approved_addresses")
     section = _section(document)

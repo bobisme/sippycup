@@ -340,7 +340,8 @@ def destination_refusal(document: dict[str, Any], destination: str) -> str | Non
     return (
         f"destination {destination!r} is not one of the destinations the owner approved for "
         f"this target (approved: {listed}); check the spelling, or ask the owner, record the new "
-        "destination under destinations in scope.yaml, and run scope compile"
+        "destination under destinations in scope.yaml (scope answer DIR destinations), record the "
+        "approval again (scope answer DIR 2), and run scope compile"
     )
 
 
@@ -421,6 +422,50 @@ def approved_media(document: dict[str, Any], errors: list[str]) -> dict[str, Any
         if addresses is not None:
             facts["media_addresses"] = addresses
     return facts
+
+
+PENDING_ERROR = "authorization is pending, not approved"
+
+
+def with_next_command(errors: list[str], profile_path: str | Path | None) -> list[str]:
+    """Give the pending refusal of a compiled profile its next command (rehearsal 3, finding 14).
+
+    ``authorization is pending, not approved`` alone leaves the operator
+    without a step. When a scope file lies beside the profile, the step is
+    known: record the approval (question 2) and compile, or, when the scope
+    file says approved, fix the scope error that made compile write pending.
+    A profile with no scope file beside it is left as it is. Reads one local
+    file; changes no decision: the error stays an error.
+    """
+    if profile_path is None or PENDING_ERROR not in errors:
+        return errors
+    directory = Path(profile_path).parent
+    try:
+        scope_file = directory / "scope.yaml"
+        if scope_file.is_symlink() or not scope_file.is_file() or scope_file.stat().st_size > 1_000_000:
+            return errors
+        scope = yaml.safe_load(scope_file.read_text(encoding="utf-8"))
+        status = scope["authorization"]["status"]
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
+        return errors
+    from sippycup.call_ledger import operator_path
+
+    engagement = operator_path(directory)
+    if status == "approved":
+        step = (
+            f"{engagement}/scope.yaml says approved, so the profile is pending because the scope has an "
+            f"error: run ./bin/sippycup scope check {engagement}, fix what it reports, then run "
+            f"./bin/sippycup scope compile {engagement}"
+        )
+    elif status == "pending":
+        step = (
+            "when you hold the owner's written approval of the scope as it is now, record it with "
+            f"./bin/sippycup scope answer {engagement} 2, then run ./bin/sippycup scope compile {engagement}"
+        )
+    else:
+        return errors
+    return [f"{item}; nothing can be sent with this profile; {step}" if item == PENDING_ERROR else item
+            for item in errors]
 
 
 def rehearse(
@@ -551,7 +596,8 @@ def rehearse(
     if valid_until and instant >= valid_until:
         errors.append(
             f"authorization has expired (valid_until {valid_until.strftime('%Y-%m-%dT%H:%M:%SZ')}); "
-            "send nothing; ask the owner for a new written window, record it in scope.yaml, "
+            "send nothing; ask the owner for a new written window, record it in scope.yaml "
+            "(scope answer DIR authorization.window), record the approval again (scope answer DIR 2), "
             "and run scope compile"
         )
     window_problem = bool(

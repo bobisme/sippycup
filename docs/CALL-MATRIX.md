@@ -46,7 +46,7 @@ Otherwise the plan is blocked (exit 2, nothing sent) with one line per
 profile:
 
 ```text
-BLOCK: work/ENGAGEMENT/target-profile-tls.yaml: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml, and run scope compile
+BLOCK: work/ENGAGEMENT/target-profile-tls.yaml: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml (scope answer DIR destinations), record the approval again (scope answer DIR 2), and run scope compile
 ```
 
 For a profile without the list, the plan prints a `NOTE:` line that the
@@ -83,7 +83,7 @@ example with `limits.calls: 3`:
 
 ```text
 Call matrix plan: BLOCKED - 4 call(s) to echo (--max-calls 6)
-BLOCK: the matrix places 4 calls under approval QUAD-APPROVAL-7Q2X, more than its limits.max_calls 3 (2 through work/eng/target-profile.yaml, 2 through work/eng/target-profile-edge-tls.yaml); the profiles of one approval (one scope) share one call ceiling, it is not a ceiling per profile; narrow --transports, --codecs, or --srtp to 3 call(s) or fewer in total, or ask the owner to approve more calls (limits.calls in scope.yaml) and run scope compile
+BLOCK: the matrix places 4 calls under approval QUAD-APPROVAL-7Q2X, more than its limits.max_calls 3 (2 through work/eng/target-profile.yaml, 2 through work/eng/target-profile-edge-tls.yaml); the profiles of one approval (one scope) share one call ceiling, it is not a ceiling per profile; narrow --transports, --codecs, or --srtp to 3 call(s) or fewer in total, or ask the owner to approve more calls (limits.calls in scope.yaml), record the approval again (scope answer DIR 2), and run scope compile
   udp: work/eng/target-profile.yaml (2 call(s); limits.max_calls 3, approved codecs PCMU, PCMA, SRTP not approved)
   tls: work/eng/target-profile-edge-tls.yaml (2 call(s); limits.max_calls 3, approved codecs PCMU, PCMA, SRTP not approved)
   Shared ceiling: approval QUAD-APPROVAL-7Q2X allows 3 call(s) in total across work/eng/target-profile.yaml, work/eng/target-profile-edge-tls.yaml; this grid places 4.

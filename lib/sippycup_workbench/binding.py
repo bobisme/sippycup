@@ -177,6 +177,9 @@ def load_binding(
     refusal = integrity_error(_resolve_profile_path(path))
     if refusal:
         reasons.insert(0, refusal)
+    from .profile import with_next_command
+
+    reasons = with_next_command(reasons, _resolve_profile_path(path))
     if literal_host and not host_is_approved_literal(document):
         reasons.append("target.host must itself be one of the literal approved_addresses")
     authorization = rehearsal.facts.get("authorization", {}) if rehearsal.facts else {}
@@ -194,7 +197,8 @@ def load_binding(
             reasons,
             f"run `./bin/sippycup rehearse {shown}` and fix what it reports; "
             "for an approval or window problem ask the owner for a new written approval, "
-            "record it in scope.yaml and run `./bin/sippycup scope compile`.",
+            "record it in scope.yaml (the approval itself: `./bin/sippycup scope answer DIR 2`) and run "
+            "`./bin/sippycup scope compile DIR`.",
         )
     return Binding(
         path=shown,
@@ -289,8 +293,8 @@ def media_scope(
             reasons,
             "do not send. Check that the session file holds the SDP of the approved call. "
             "If the far end really uses this address or port, ask the owner to approve it in "
-            "writing (media networks or media ports), record it in scope.yaml and run "
-            "`./bin/sippycup scope compile`.",
+            "writing (media networks or media ports), record it in scope.yaml, record the approval "
+            "again (`./bin/sippycup scope answer DIR 2`) and run `./bin/sippycup scope compile DIR`.",
         )
     return binding.scope_object(destinations=admitted)
 

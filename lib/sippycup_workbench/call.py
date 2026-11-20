@@ -431,6 +431,9 @@ def gate(
         refusal = integrity_error(profile_path)
         if refusal:
             errors.insert(0, refusal)
+        from .profile import with_next_command
+
+        errors = with_next_command(errors, profile_path)
     if destination is not None:
         refusal = destination_refusal(document, destination)
         if refusal:
@@ -2782,6 +2785,10 @@ def render_human(value: dict[str, Any]) -> str:
                 f"  account:         {account['username']} realm={account['realm']} "
                 f"register={'yes' if account['register'] else 'no'} password={account['password_source']}"
             )
+            if account["password_source"] == "none":
+                # The plan is READY, but the real call refuses --username without a password source.
+                lines.append("                   NOTE: no password source was given. The dry run needs none; the"
+                             " real call refuses --username without --secret-file FILE (or --secret-env NAME)")
         lines.append(f"  media required:  {'yes' if softphone['media_required'] else 'no'}")
         srtp = softphone.get("srtp") or {}
         lines.append(

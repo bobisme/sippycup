@@ -84,9 +84,62 @@ Rehearse the real step: run `scope answer` and type the example's values
 | 20 to 23 | `3`, `yes`, `20`; `options, call`, `none`; `you`, `this terminal`, `yes`; `7`, `private` |
 | 2 (asked last) | `approved`, after reading the summary it shows (on a real engagement: only with the owner's written approval of exactly that summary) |
 
-Changing an answer that decides what may be sent (a target, a limit, the
-media ranges) sets the approval back to `pending`; `scope answer work/acme 2`
-asks it again.
+Changing an answer that decides what may be sent (a target, a destination, a
+limit, the window, the media ranges) sets the approval back to `pending`, and
+nothing can be sent until you do both of these, in this order:
+
+```sh
+./bin/sippycup scope answer work/acme 2      # record the approval again (only with the owner's written approval)
+./bin/sippycup scope compile work/acme
+```
+
+Every message that tells you to change such an answer names these two
+commands. If you compile first, `scope compile` says `NOTHING CAN BE SENT with
+what this wrote` and prints the same `Next:` line; a call then prints
+`BLOCK: authorization is pending, not approved; ...` with it too.
+
+**With `--platform`** (see "When the owner wants the whole platform tested"
+below) `scope answer` reaches part 2 after question 23. It asks once:
+
+```text
+== Part 2: the whole platform (questions P1 to P18 and A1 to A6) ==
+  24 of these questions are still open: P1, P2, ...
+  Walk the platform questions now? [y/N] >
+```
+
+Press Enter (or `n`) when the owner has not answered them yet: they stay open,
+nothing is invented, and it goes straight on to question 2. Open platform
+answers are `WARN` lines and do not hold the approval. Type `y` to walk them.
+On the practice target, rehearse them once with these answers:
+
+| Question | Type |
+|---|---|
+| Part 2 offer | `y` |
+| P1 | `Practice platform`; then for the eleven parts: `yes`, `yes` (SIP edge, media servers), and `no` nine times |
+| P2 | `nothing` |
+| P3 to P6 | `dedicated-test`; `no`; `none`; `none` |
+| P7 to P10 | `none` for each company (hosting, CDN or web firewall, phone carrier, SMS, e-mail: five times). Each is then recorded as not involved (`out-of-path`), and its permission and reference are not asked |
+| P11 | `on-net` for each destination (three times: echo, dtmf, echo-tls) |
+| P12, P13 | `none`, Enter (no prefixes); `no-cost` |
+| P14 to P17 | `any time, UTC`; `2`, `1`; `none`; `you`, `this terminal`, `stop` |
+| P18 | `sippycup-practice`, `127.0.0.2`, `no`, `no`, `n` |
+| A1 to A6 | not asked: they apply only when a web part (admin console, customer web app, API, browser calling) is `yes` in P1 |
+| 2 (asked last) | `approved`, after reading the summary; it now has a `Platform dialing` line that says for each destination `stays on the platform`, `REACHES THE PUBLIC PHONE NETWORK`, or `NOT RECORDED` |
+
+To rehearse A1 to A6 as well (your real engagement may have an admin console
+in scope), answer `yes` for the admin console in P1 (the third part) and then:
+
+| Question | Type |
+|---|---|
+| A1 | `admin-console`, `browser`, `yes`, `https://sippycup-practice/admin`, `n` |
+| A2 | `127.0.0.2`, `443`, `sippycup-practice`, `public` |
+| A3 | not asked (no browser calling) |
+| A4 | `admin-test`, `admin`, `practice-tenant`, `admin-test` (a reference NAME, never a password), `n` |
+| A5, A6 | `none`; `none`, Enter |
+
+These are a record only: nothing in Sippycup sends web requests, and the
+practice target has no web console. On a real engagement type the owner's
+answers, `unknown`, or `pending`; never these.
 
 **Proxy shape (practice proxy at `127.0.0.3`).** Answer the same questions with
 these rows changed; every other row is as in the table above. This was run
@@ -205,8 +258,14 @@ edit `work/acme/scope.yaml` by hand (mode 0600); both give the same file. See
 - When it is right, the output contains:
   - `Scope: COMPLETE and CONSISTENT`;
   - after compile, the derived `target-profile.yaml`, `campaign.yaml`, and
-    `expectations.yaml`;
+    `expectations.yaml`, and a `Next: ./bin/sippycup rehearse ...` line;
   - `Ready: yes` from `rehearse`.
+- If compile prints `NOTHING CAN BE SENT with what this wrote`, the scope is
+  not approved (or has an error): the profiles are written as `pending` and
+  every sending command refuses them. Run the `Next:` line it prints
+  (`scope answer work/acme 2`, then `scope compile` again). A `STALE:` line
+  names an earlier `campaign.yaml` that compile did not write again; do not
+  use it (`campaign plan` and `campaign run` refuse it).
 - With platform sections: open answers there are `WARN` lines and do not
   block the SIP steps. `scope check` still prints
   `Scope: COMPLETE and CONSISTENT`, and compile also prints
@@ -456,7 +515,10 @@ When they are right, the output contains these lines:
   leave out `--interface` (the default is `any`). `campaign run` always runs
   in the image's private network namespace (like `call`), where packet
   capture works without root; you need no `--isolated`. If capture cannot
-  start, it says so, nothing is sent, and no run directory is kept.
+  start, it says so, nothing is sent, and no run directory is kept. With
+  `No such interface` in that message, the `--interface` name does not exist
+  where the command runs (`lo` typed without `--practice`, or your host's
+  `eth0`): leave out `--interface` and give the command again.
 
 ## 6. Security checks (LIVE, only if the owner approved them)
 
@@ -473,8 +535,12 @@ Record them with `./bin/sippycup scope answer work/acme 24`: the approved ids
 
 - When it is right: `Findings (most severe first):` followed by a
   `Record it:` line.
-- Exit 1 with findings is normal. Findings are results for the owner, not
-  tool errors.
+- The first line says how it ended, for example
+  `Security checks: COMPLETED (exit 0, fail-on medium)`. Exit 0: completed,
+  and no finding is `medium` or higher (`low` and `info` findings do not
+  change it). Exit 1: completed with at least one finding of `medium` or
+  higher (`--fail-on` moves that line); that is normal too. Findings are
+  results for the owner, not tool errors. Exit 2: refused before any packet.
 
 ## 7. Look at the evidence (offline)
 
@@ -538,7 +604,8 @@ ID=$(podman image inspect --format '{{.Id}}' localhost/sippycup:latest)
 Clean up at the end:
 
 ```sh
-./bin/sippycup doctor --cleanup     # dry run; add --apply only for images you own
+./bin/sippycup doctor --cleanup     # dry run: lists only untagged old builds and stopped containers;
+                                    # --apply never removes a tagged image or one that a container uses
 ./bin/sippycup practice-target down
 ```
 
@@ -581,7 +648,11 @@ Stop and send nothing more if one of these happens:
   `rehearse`, `ready` and every plan print `Calls: N of M used, K left`; watch
   it. A call counts once its INVITE may have left, whatever happened next; an
   attempt that sent no INVITE (preflight unanswered, registration failed) is
-  given back. Only the owner can raise the limit. Do not delete or edit the
+  given back. Only the owner can raise the limit. With the owner's new
+  number in writing: `./bin/sippycup scope answer work/acme limits.calls`,
+  then `./bin/sippycup scope answer work/acme 2` (the change sets the
+  approval back to pending), then `./bin/sippycup scope compile work/acme`.
+  Do not delete or edit the
   ledger (the next command refuses, because the run directories still show
   the calls), and do not copy the engagement directory to send from the copy.
 - A refusal that says a profile or manifest was edited, is stale, or was not
@@ -633,7 +704,8 @@ routed rehearsal shows the same effects on this host. What you will see:
   and moves its Contact there: `call` prints a `NAT:` note with the address
   the target saw, and records it as `natAddresses` in `result.json`. That is
   the address the owner must allowlist; if it is not the one you gave them,
-  stop and tell them.
+  stop and tell them. (`make routed-rehearsal` prints the same `NAT:` fact in
+  its call stage and repeats these points in its last lines.)
 - `evidence lint` accepts that address where it appears as text (a Via
   `received=`), never as a packet's address.
 - RTCP is sparse in the received direction; judge media by RTP.
@@ -669,8 +741,10 @@ Each row is an error or verdict seen in this walk-through:
 | `Guided call: MEDIA-OUTSIDE-SCOPE` (exit 1) with the peer at the signaling address | the owner's media answer (question 12) does not list the signaling address, so media is admitted only where the answer says | Stop. Ask the owner whether the signaling address also carries media; if yes, add it to `media.networks` and run `scope compile`. |
 | `call: another sending command of this checkout is active` (exit 2) | another call, matrix, campaign or checks run of this checkout is still running | Nothing was sent. Wait for it, or `./bin/sippycup stop`. |
 | `campaign: error: packet capture could not start (...)` | `campaign run` was started outside the launcher's container (for example `bin/campaign` on the host) | Nothing was sent and no run directory was kept. Use `./bin/sippycup campaign run ...`. |
-| `Guided call: BLOCKED` / `BLOCK: authorization has expired (valid_until ...)` | window ended | Ask the owner for a new written window, record it, and run `scope compile`. |
-| `campaign: error: refusing to plan: the approval window has ended` / `refusing to plan: the approval in the scope file beside the manifest ... differs` / `refusing to run: ...` (exit 2) | window ended, not open yet, too short for the first step, or the approval in `scope.yaml` was revoked or changed since `campaign.yaml` was written (`scope compile` leaves the old `campaign.yaml` when the scope has an error) | Nothing was sent. Ask the owner for a new written window, record it, run `scope compile`, then `campaign plan` again. |
+| `Guided call: BLOCKED` / `BLOCK: authorization has expired (valid_until ...)` | window ended | Ask the owner for a new written window. Record it (`scope answer work/acme authorization.window`), record the approval again (`scope answer work/acme 2`), and run `scope compile`. |
+| `Guided call: BLOCKED` / `BLOCK: authorization is pending, not approved; ...`, or `Ready: no` with the same text | an answer that decides what may be sent was changed (or the approval was never recorded), and `scope compile` wrote the profile as pending | Nothing was sent. With the owner's written approval of the scope as it is now: `./bin/sippycup scope answer work/acme 2`, then `./bin/sippycup scope compile work/acme`. The line itself ends with these two commands. |
+| `campaign: error: packet capture could not start (No such device exists). ... No such interface` | the `--interface` name does not exist where the command runs (`lo` without `--practice`, or a host interface name) | Nothing was sent and no run directory was kept. Leave out `--interface`. |
+| `campaign: error: refusing to plan: the approval window has ended` / `refusing to plan: the approval in the scope file beside the manifest ... differs` / `refusing to run: ...` (exit 2) | window ended, not open yet, too short for the first step, or the approval in `scope.yaml` was revoked or changed since `campaign.yaml` was written (`scope compile` leaves the old `campaign.yaml` when the scope has an error) | Nothing was sent. Ask the owner for a new written window, record it, record the approval again (`scope answer work/acme 2`), run `scope compile`, then `campaign plan` again. |
 | `Campaign: AUTHORIZATION_LAPSED` (exit 1) and `Safety stop on our side` | the window ended (or the approval was revoked) between two steps | The completed steps are valid. Ask the owner for a new window before you send the rest. |
 | `campaign: WARNING: this campaign plan is not bound to an approval window` | the manifest has no `authorization.approval` (hand-written or old) | Generate the manifest with `scope compile` and plan again. |
 | `ERROR scope.window_not_started` / `scope.window_expired` | window is in the future or in the past | Same: wait, or ask for a new window. |

@@ -280,7 +280,8 @@ def find_images(
         if image.get("Names") or not _is_sippycup_labels(image.get("Labels")):
             continue
         labels = image.get("Labels") or {}
-        detail = f"{ident[:12]} {labels.get('org.opencontainers.image.title', 'sippycup')}"
+        # The label names the build's kind, not a tag: this image has no tag (it is dangling).
+        detail = f"untagged old build of {labels.get('org.opencontainers.image.title', 'sippycup')}"
         if not IDENTIFIER.fullmatch(ident):
             items.append(Item("images", ident[:12], detail, False, "unexpected identifier"))
             continue
@@ -369,7 +370,8 @@ def render(report: Report) -> str:
     for kind, title in (
         ("shm", "Private temporary directories"),
         ("containers", "Stopped Sippycup containers"),
-        ("images", "Dangling Sippycup image builds"),
+        ("images", "Dangling Sippycup image builds (untagged leftovers of earlier builds; an image that has a "
+                   "tag, such as localhost/sippycup:latest, or that a container uses is never removed)"),
     ):
         rows = [item for item in report.items if item.kind == kind]
         lines.append(f"{title}: {len(rows)}")

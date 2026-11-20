@@ -180,6 +180,9 @@ class EngagementScopeProfileTests(ReadyTestCase):
         self.assertEqual("no-go", window["status"])
         self.assertIn("EXPIRED", window["lines"])
         self.assertIn("scope compile", window["fix"])
+        # rehearsal 3, finding 14: a new window sets the approval back to pending, so the fix names it
+        self.assertLess(window["fix"].index(f"scope answer work/{self.root.name} authorization.window"),
+                        window["fix"].index(f"scope answer work/{self.root.name} 2, then"))
         self.assertEqual("NO-GO", result["verdict"])
 
 

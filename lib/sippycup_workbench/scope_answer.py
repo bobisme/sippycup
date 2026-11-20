@@ -145,16 +145,31 @@ def _short(value: Any) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
+def _change_text(name: str, before: Any, after: Any) -> str:
+    """One changed answer; for a list, what was added and removed (two long lists cut short look the same)."""
+    if isinstance(before, list) and isinstance(after, list) and (len(show(before)) > 60 or len(show(after)) > 60):
+        old, new = [_canon(item) for item in before], [_canon(item) for item in after]
+        parts = [f"{word} {_short(item)}" for word, items in (("added", [item for item in after if _canon(item) not in old]),
+                                                             ("removed", [item for item in before if _canon(item) not in new]))
+                 for item in items[:2]]
+        more = sum(1 for item in after if _canon(item) not in old) + sum(1 for item in before if _canon(item) not in new) - len(parts)
+        if parts:
+            return f"{name}: " + ", ".join(parts) + (f", and {more} more" if more > 0 else "")
+        return f"{name}: the same {len(after)} entries in another order"
+    return f"{name}: {_short(before)} -> {_short(after)}"
+
+
 def reapprove_message(changes: list[tuple], engagement: str) -> str:
     facts = [item for item in changes if item[0] in APPROVAL_FACTS]
     what = ("the approval's reference, approver, or window" if facts
             else "what may be sent")
-    detail = "; ".join(f"{name}: {_short(before)} -> {_short(after)}" for name, before, after in changes[:4])
+    detail = "; ".join(_change_text(name, before, after) for name, before, after in changes[:4])
     if len(changes) > 4:
         detail += f"; and {len(changes) - 4} more"
     return (f"authorization.status is pending again: the approval you recorded asserted that the owner approved"
             f" the scope as it was, and this changes {what} ({detail}). If the owner's written approval covers"
-            f" the new answer, record the approval again: {LAUNCHER} scope answer {shlex.quote(engagement)} 2")
+            f" the new answer, record the approval again: {LAUNCHER} scope answer {shlex.quote(engagement)} 2"
+            f"   (then {LAUNCHER} scope compile {shlex.quote(engagement)}; until both are done nothing can be sent)")
 
 
 class Quit(Exception):
@@ -1041,7 +1056,7 @@ class Session:
         self.interactive = interactive
         self.now = now
         self.recorded = 0
-        self.noted: set[tuple[str, str]] = set()
+        self.noted: set[tuple[str, ...]] = set()
         self.asked_count = 0
         self.reapprove = False
         self.escaped = False
@@ -1050,8 +1065,28 @@ class Session:
         self.held: list[str] | None = None
         self.held_header = 0
         self.waiting: list[tuple[Item, list[str]]] = []
+        # WARN lines an answer adds, held until the question ends: printed
+        # between two prompts they read as a reaction to what was just typed.
+        self.notes: list[Finding] = []
+        # What is typed but not saved yet (half of an answer that is stored
+        # whole); said when the session stops there.
+        self.partial: str | None = None
+        # The platform part of a walk: None until the operator was asked.
+        self.walk_platform: bool | None = None
 
     # -- input and output
+
+    def flush_notes(self) -> None:
+        """Print the held WARN lines that still hold, each once per session."""
+        notes, self.notes = self.notes, []
+        current = {_key(item) for item in self.scope.baseline}
+        notes = [item for item in notes if _key(item) in current]
+        if not notes:
+            return
+        self.say("  scope check also notes after the answers above (not an error in what you typed; it is in the"
+                 " summary too):")
+        for finding in notes:
+            self.say(f"    WARN {finding.code} [{finding.field}]: {finding.message}")
 
     def say(self, text: str = "") -> None:
         if self.held is not None:
@@ -1211,13 +1246,16 @@ class Session:
         for finding in outcome.notes:
             if changes and finding.code == "scope.authorization_not_approved":
                 continue
-            if finding.code in PROGRESS_NOTES:
-                # a running count of open answers: once per session is enough (the summary repeats it)
-                if (finding.code, finding.field) in self.noted:
-                    continue
-                self.noted.add((finding.code, finding.field))
-            label = "NOTE" if finding.severity == "error" else "WARN"
-            self.say(f"  {label} {finding.code} [{finding.field}]: {finding.message}")
+            # A running count of open answers changes its text with every answer: once per
+            # session by code; every other note once by its text (the summary repeats them).
+            seen = (finding.code, finding.field) if finding.code in PROGRESS_NOTES else _key(finding)
+            if seen in self.noted:
+                continue
+            self.noted.add(seen)
+            if finding.severity == "error":
+                self.say(f"  NOTE {finding.code} [{finding.field}]: {finding.message}")
+            else:
+                self.notes.append(finding)  # shown when the question ends (flush_notes)
         self.changed_approval(changes)
         return True
 
@@ -1436,6 +1474,7 @@ def _window(session: Session, item: Item, only_open: bool, wanted: tuple[str, ..
                 if outcome.rejected and all(f.code == "scope.window_order" for f in outcome.rejected):
                     held = edits
                     start = moment
+                    session.partial = "the start of the window was not saved: the end is needed too"
                     session.say("    (checked together with the end, which comes next)")
                     break
             result = session.accept(edits, focus, typed)
@@ -1489,6 +1528,7 @@ def _range(session: Session, item: Item, only_open: bool, wanted: tuple[str, ...
                 outcome = session.scope.judge(edits, focus)
                 if outcome.rejected and all(f.code == "scope.media_ports_invalid" for f in outcome.rejected):
                     held = edits
+                    session.partial = "the first media port was not saved: the last port is needed too"
                     session.say("    (checked together with the last port, which comes next)")
                     break
             if session.accept(edits, focus, typed, spec):
@@ -1599,13 +1639,26 @@ def approval_summary(document: dict[str, Any]) -> list[str]:
                      f" {show(checks.get('max_requests'))} requests")
     else:
         lines.append("Security checks: none approved")
-    dialing = at("platform.dialing")
-    if isinstance(dialing, dict) and (dialing.get("reach") or present(dialing.get("never_dial"))):
-        reach = dialing.get("reach")
-        reach_text = (", ".join(f"{name} {show(where)}" for name, where in reach.items())
-                      if isinstance(reach, dict) and reach else "not answered")
-        lines.append(f"Platform dialing: {reach_text}; never dial {listing(dialing.get('never_dial'))};"
-                     f" toll {show(dialing.get('toll'))}")
+    # The platform answers that matter for sending a call: where each
+    # destination goes (scope check warns about each one that is not recorded).
+    if isinstance(at("platform"), dict):
+        dialing = at("platform.dialing") if isinstance(at("platform.dialing"), dict) else {}
+        reach = dialing.get("reach") if isinstance(dialing.get("reach"), dict) else {}
+        names = [str(row.get("name")) for row in destinations if isinstance(row.get("name"), str)]
+        names += [str(name) for name in reach if name not in names]
+        where = {"on-net": "stays on the platform", "pstn": "REACHES THE PUBLIC PHONE NETWORK"}
+        unrecorded = [name for name in names if reach.get(name) not in where]
+        reach_text = "; ".join(
+            f"{name}: {where.get(reach.get(name)) or 'NOT RECORDED' + (f' ({reach[name]})' if present(reach.get(name)) else '')}"
+            for name in names) or "no destinations recorded"
+        lines.append(f"Platform dialing (questions P11 to P13): {reach_text}")
+        lines.append(f"  never dial: {listing(dialing.get('never_dial'))}; cost of public-network calls (toll):"
+                     f" {show(dialing.get('toll'))}")
+        if unrecorded:
+            lines.append(f"  NOT RECORDED = the owner has not said whether {', '.join(unrecorded)}"
+                         f" stay{'s' if len(unrecorded) == 1 else ''} on the platform or"
+                         f" reach{'es' if len(unrecorded) == 1 else ''} the public phone network. scope check warns"
+                         " about it and the approval covers dialing it all the same: ask the owner first")
     carrier = at("platform.third_parties.pstn_carrier")
     calls = at("platform.operations.max_concurrent_calls")
     if isinstance(carrier, dict) and present(carrier.get("provider")) or present(calls):
@@ -1641,6 +1694,12 @@ def _approval(session: Session, item: Item, only_open: bool) -> None:
         session.say(f"      {line}")
     session.say("    Type the word approved ONLY if you hold the owner's written approval of all of the above.")
     session.say("    Any later change to what may be sent sets it back to pending, and it is asked again.")
+    window_end = _as_datetime(auth.get("valid_until"))
+    if window_end is not None and session.now() >= window_end:
+        session.say("    NOTE: the window above has ended, so nothing can be sent with this approval whatever is"
+                    " typed here. A new window sets the approval back to pending: record the owner's new window"
+                    f" first ({LAUNCHER} scope answer {shlex.quote(session.engagement)} authorization.window),"
+                    " then the approval.")
     session.say("    Other answers: pending (not approved yet), revoked (the owner withdrew it),"
                 " Enter = leave it as it is.")
     valid = "Valid: approved, pending, or revoked (the word itself; yes is not enough)"
@@ -1790,10 +1849,13 @@ def _collection(session: Session, *, path: tuple[str, ...], noun: str, fields: C
                     session.say("  Please type it again (or press Enter if the owner has not answered).")
                     continue
                 entry[key] = value
+                session.partial = (f"{noun} {index + 1} was not saved ({', '.join(entry)} typed): a {noun} is"
+                                   " saved when all its fields are answered")
                 if meaning:
                     session.say(f"    ({meaning})")
                 break
             if key not in entry and not optional:
+                session.partial = None
                 if first and (entries or replacing):
                     session.scope.mark(dotted, None)
                     session.say(f"    No more {noun}s: the list is complete as recorded.")
@@ -1809,6 +1871,7 @@ def _collection(session: Session, *, path: tuple[str, ...], noun: str, fields: C
             continue
         entries = candidate
         replacing = False
+        session.partial = None
         session.scope.mark(dotted, f"asking whether there is another {noun}")
         if not session.confirm(f"Another {noun}?"):
             session.scope.mark(dotted, None)
@@ -2097,6 +2160,9 @@ def _security_checks(session: Session, item: Item, only_open: bool, part: str | 
     candidate = session.scope.candidate(edits_for(approved, catalog.MAX_REQUESTS_CEILING))
     needs = security_check_requests(candidate, approved)
     total = sum(item[1] for item in needs)
+    if part != "max_requests":
+        session.partial = (f"the check ids ({', '.join(map(str, approved))}) were not saved: the request ceiling is"
+                           f" needed too. To record both: {LAUNCHER} scope answer {shlex.quote(session.engagement)} 24")
     session.say(f"  These checks may send up to {total} request{'s' if total != 1 else ''} in this scope: "
                 + ", ".join(f"{check_id} {count}" for check_id, count, _ in needs)
                 + ". The owner's ceiling must be at least that.")
@@ -2404,7 +2470,13 @@ def summarize(path: Path, engagement: str, out: TextIO, now: datetime,
     # Open only because of a wrong answer: the fix is the next step, not another walk.
     walk_needed = [item for item in required
                    if item.identifier != "authorization.status" and item.identifier not in broken]
-    if required and (walk_needed or not fixes):
+    only_approval = bool(required) and all(item.identifier == "authorization.status" for item in required)
+    if only_approval and not fixes and not unfinished:
+        # Everything the approval approves is recorded: the one step left is the approval itself,
+        # not another walk (with platform sections a walk passes every open platform question first).
+        out.write(f"Next: {LAUNCHER} scope answer {eng} 2   (record the approval: only with the owner's written"
+                  f" approval of the summary it shows), then {LAUNCHER} scope compile {eng}\n")
+    elif required and (walk_needed or not fixes):
         out.write(f"Next: {LAUNCHER} scope answer {eng}   (when the owner has answered the open questions)\n")
     elif fixes:
         out.write(f"Next: {fixes[0]}\n")
@@ -2414,6 +2486,34 @@ def summarize(path: Path, engagement: str, out: TextIO, now: datetime,
     else:
         out.write(f"Next: {LAUNCHER} scope compile {eng}\n")
     return report
+
+
+def _offer_platform(session: Session, selections: list[Selection]) -> bool:
+    """Once per walk, before the first open platform question: walk them now, or skip them for this session.
+
+    Skipping records nothing and loosens nothing: the questions stay open, scope
+    check keeps its WARN (or ERROR) lines for them, and the approval rule is as
+    it was (an open platform answer never held question 2; see approval_blockers).
+    """
+    view = answered_view(session.scope.report)
+    pending = [selection.item for selection in selections if selection.item.part == 2 and item_state(
+        view, selection.item, session.scope.unfinished) not in ("answered", "not-applicable")]
+    eng = shlex.quote(session.engagement)
+    session.say("")
+    session.say("== Part 2: the whole platform (questions P1 to P18 and A1 to A6) ==")
+    session.say(f"  {len(pending)} of these questions {'is' if len(pending) == 1 else 'are'} still open: "
+                + ", ".join(item.number for item in pending))
+    session.say("  They record the owner's answers about the product around the SIP service. An open one is a WARN"
+                " line in scope check; it does not hold the approval (question 2) or the SIP tests unless scope"
+                " check says ERROR. Where each destination's calls go (P11 to P13) is shown in the approval summary.")
+    session.say("  y = ask each open one now.  Enter or n = the owner has not answered these yet: skip them for"
+                " this session and go straight on (they stay open; nothing is invented).")
+    if session.confirm("Walk the platform questions now?"):
+        return True
+    session.say(f"  Skipped for this session; the platform questions stay open. One of them later: {LAUNCHER} scope"
+                f" answer {eng} {pending[0].number if pending else 'P1'}   (any of the numbers above); all of them:"
+                f" {LAUNCHER} scope answer {eng} and type y here.")
+    return False
 
 
 def run(engagement: str, *, scope: str | None = None, question: str | None = None, change_all: bool = False,
@@ -2456,6 +2556,11 @@ def run(engagement: str, *, scope: str | None = None, question: str | None = Non
                     continue  # question 24 is offered in the summary with its own command
                 if not change_all and state == "answered":
                     continue
+                if item.part == 2 and not change_all:
+                    if session.walk_platform is None:
+                        session.walk_platform = _offer_platform(session, selections)
+                    if not session.walk_platform:
+                        continue
             position = f" of {len(QUESTIONS)}" if item.part == 1 else ""
             if state == "not-applicable":
                 session.say(f"\nQuestion {item.number} is not asked: an earlier answer rules it out (for example"
@@ -2478,7 +2583,9 @@ def run(engagement: str, *, scope: str | None = None, question: str | None = Non
             else:
                 run_selection(session, selection, only_open=only_open)
             asked_approval = asked_approval or item.identifier == "authorization.status"
+            session.partial = None
             unsaid = session.end()
+            session.flush_notes()
             if unsaid is None:
                 asked += 1
             elif question is not None:
@@ -2526,6 +2633,8 @@ def run(engagement: str, *, scope: str | None = None, question: str | None = Non
         out.write(f"error: {exc}; nothing more was written\n")
         code = 2
     session.held = None
+    if session.partial:
+        session.say(f"Not saved: {session.partial}.")
     session.say(f"Answers recorded in this session: {session.recorded}")
     report = summarize(path, engagement, out, clock(), scope_file.unfinished)
     out.write("Network activity: none\n")

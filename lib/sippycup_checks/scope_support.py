@@ -136,16 +136,36 @@ def request_bounds(
     """
     first = targets[0] if targets else None
     first_transport = first.get("transport") if first else None
-    section_like = _section_like(document, targets, destinations)
-    result = []
+    specs = []
     for check_id in approved:
         try:
-            spec = catalog.get(check_id)
+            specs.append(catalog.get(check_id))
         except catalog.CatalogError:
             continue
-        result.append((check_id, catalog.declared_bound(spec, section_like, first_transport),
-                       catalog.invites_declared(spec, section_like, first_transport)))
-    return result
+    # What the compiled profile will carry (``profile_section``): the planner
+    # counts with that section, so the bound here must be counted with the
+    # same one. A destination is in it only when an approved check needs one;
+    # user-enumeration alone gets none and sends its REGISTER pair only (2).
+    full = _section_like(document, targets, destinations)
+    needs = {need for spec in specs for need in spec.needs}
+    section_like = {
+        "account": full["account"] if "account" in needs else None,
+        "destination": full["destination"] if _carries_destination(needs) else None,
+        "cleartext_endpoints": (full["cleartext_endpoints"]
+                                if _carries_endpoints(needs, [spec.id for spec in specs]) else []),
+    }
+    return [(spec.id, catalog.declared_bound(spec, section_like, first_transport),
+             catalog.invites_declared(spec, section_like, first_transport)) for spec in specs]
+
+
+def _carries_destination(needs: set[str]) -> bool:
+    """The profile section names a destination only when an approved check needs one."""
+    return "destination" in needs
+
+
+def _carries_endpoints(needs: set[str], approved: list[str]) -> bool:
+    # srtp-policy uses an approved cleartext endpoint when there is one, but does not require it.
+    return "cleartext_endpoints" in needs or "srtp-policy" in approved
 
 
 def _destination(first: dict[str, Any] | None, destinations: list[dict[str, Any]]) -> str | None:
@@ -178,10 +198,9 @@ def profile_section(document: dict[str, Any]) -> dict[str, Any] | None:
     if "account" in needs and account.get("required") and account.get("username"):
         result["account"] = account["username"]
     destination = _destination(first, destinations)
-    if "destination" in needs and destination:
+    if _carries_destination(needs) and destination:
         result["destination"] = destination
-    # srtp-policy uses an approved cleartext endpoint when there is one, but does not require it.
-    if "cleartext_endpoints" in needs or "srtp-policy" in approved:
+    if _carries_endpoints(needs, list(approved)):
         endpoints = cleartext_endpoints(document, first)
         if endpoints:
             result["cleartext_endpoints"] = endpoints
@@ -225,5 +244,8 @@ def bound_text(spec: Any) -> str:
                 "you also approve a UDP or TCP signaling port")
     if spec.id == "user-enumeration":
         without = catalog.declared_bound(spec, {}, None)
-        return f"at most {_requests(spec.max_requests)}; {without} when no destination is approved"
+        dialing = [item.id for item in catalog.CHECKS if item.state == "runnable" and "destination" in item.needs]
+        return (f"at most {_requests(without)}, two REGISTER queries; {spec.max_requests} when you also approve a"
+                f" check that calls your test destination ({' or '.join(dialing)}), because it then also sends"
+                " INVITEs there")
     return f"at most {_requests(spec.max_requests)}"

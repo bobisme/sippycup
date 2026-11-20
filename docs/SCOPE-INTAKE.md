@@ -219,6 +219,21 @@ open.
 shows each one in UTC. The end may also be relative to the start (`+8h`). For
 the practice target, `now` and `+4h` give a window that is open now.
 
+**Part 2 in the walk.** When the scope has the platform sections, the walk
+asks once, before the first open part 2 question, `Walk the platform questions
+now? [y/N]`. Enter or `n` leaves them open for this session and goes on to the
+approval; `y` walks them. A question you name (`scope answer DIR P11`) and
+`--all` are not offered: they are asked. Open part 2 answers never hold the
+approval prompt.
+
+**WARN lines.** A `WARN` that an accepted answer brings (for example a new
+destination whose reach is not recorded) is printed once, after the question's
+last prompt, under `scope check also notes after the answers above`; it is in
+the closing summary too. An ERROR is shown at once, as a `NOTE`. `quit`
+between two answers that are only recorded together (the check ids and their
+ceiling) prints `Not saved:` with what was dropped and the command that asks
+it again.
+
 **The approval.** `authorization.status: approved` is recorded only when you
 type the word `approved` at the approval prompt. The walk asks it LAST, after
 every other open question (part 2 included), and the prompt shows a compact
@@ -420,7 +435,7 @@ destinations:
 
 ```text
 Guided call: BLOCKED
-BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml, and run scope compile
+BLOCK: destination 'ecoh' is not one of the destinations the owner approved for this target (approved: echo, dtmf); check the spelling, or ask the owner, record the new destination under destinations in scope.yaml (scope answer DIR destinations), record the approval again (scope answer DIR 2), and run scope compile
 Nothing was started and no packets were sent.
 Network activity: none
 ```

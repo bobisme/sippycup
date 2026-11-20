@@ -81,7 +81,7 @@ class UnfinishedListTests(AnswerTestCase):
         from sippycup_workbench.scope_app import TEMPLATE
 
         self.scope.write_text(self.scope.read_text() + TEMPLATE)
-        _, out = self.answer(["quit"] * 0 + [""] * 200)
+        _, out = self.answer(["", "y"] + [""] * 200)   # Enter at question 11, y at the part 2 offer
         self.assertNotIn("== Question P11", out)
         self.assertIn("P11: No destinations are recorded yet (question 11); answer that first.", out)
         for block in out.split("\n== Question ")[1:]:
@@ -441,7 +441,8 @@ class SecurityChecksTests(AnswerTestCase):
         sheet = render_questions()
         self.assertIn("srtp-policy (active, at most 12 requests for two calls; 18 for three calls when your edge uses"
                       " TLS and you also approve a UDP or TCP signaling port)", sheet)
-        self.assertIn("user-enumeration (active, at most 10 requests; 2 when no destination is approved)", sheet)
+        self.assertIn("user-enumeration (active, at most 2 requests, two REGISTER queries; 10 when you also approve a "
+                      "check that calls your test destination (unauthenticated-invite or srtp-policy)", sheet)
         self.assertNotIn("at most 18 requests", sheet)
 
 
