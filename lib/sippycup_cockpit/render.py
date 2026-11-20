@@ -67,12 +67,23 @@ def _scope_lines(scope: dict[str, Any], *, limit: int) -> list[str]:
     if state == "invalid":
         return [f"[!!] scope.yaml is structurally invalid: {', '.join(scope['errors'][:3])}"]
     if state in {"incomplete", "inconsistent"}:
-        lines = [f"[!!] {state}: {len(scope['unanswered'])} unanswered question(s), {len(scope['errors'])} error(s)"]
-        for question in scope["unanswered"][:limit]:
+        opened = [question for question in scope["unanswered"] if not question.get("expired")]
+        lines = [f"[!!] {state}: {len(opened)} unanswered question(s), {len(scope['errors'])} error(s)"]
+        if scope.get("windowExpired"):
+            # Wave 13, finding 5: the window is answered and has ended; the
+            # steps are the ones every shell command prints, not the sheet.
+            eng = str(scope.get("path") or "DIR/scope.yaml").rsplit("/", 1)[0]
+            lines.extend([
+                "       - the approved window has ended (question 3 is answered; it needs the owner's renewal):",
+                f"           1. ./bin/sippycup scope answer {eng} authorization.window",
+                f"           2. ./bin/sippycup scope answer {eng} 2   (the approval again)",
+                f"           3. ./bin/sippycup scope compile {eng}",
+            ])
+        for question in opened[:limit]:
             lines.append(f"       - Q{question['number']} {question['section']}: {question['text']}")
-        if len(scope["unanswered"]) > limit:
-            lines.append(f"       ... and {len(scope['unanswered']) - limit} more (scope questions)")
-        if not scope["unanswered"]:
+        if len(opened) > limit:
+            lines.append(f"       ... and {len(opened) - limit} more (scope questions)")
+        if not opened and not scope.get("windowExpired"):
             for error in scope["errors"][:limit]:
                 lines.append(f"       - {error}")
         return lines

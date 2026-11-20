@@ -158,9 +158,15 @@ Unknown extra fields are ignored. An unknown severity is treated as `info`.
    limit changed, the line lists each limit with the runs judged against it;
    a count that stands above a limit lowered afterwards is explained and is
    not an overrun. A call counts from its first INVITE on, as the
-   ledger counts it. The ledger can be higher (runs outside the report's run
-   roots or filters, a command still running, attempts an older rule counted:
-   a preflight or a REGISTER was sent, no INVITE); it is never lower unless it
+   ledger counts it; a security-check run counts the calls its checks place
+   (`srtp-policy`, the INVITE checks), and its row and the totals show them.
+   Every counted call is attributed to a run through the reservation the run
+   names: calls of a reservation that no run in the report names (a run
+   outside the report's run roots, a removed run directory, a command still
+   running) are stated on the line and raise `call-ledger-unattributed`; a
+   report narrowed with `--runs` or `--since` says so instead. Calls the
+   ledger keeps for a run beyond what the run recorded as placed are stated
+   too. The ledger is never lower than the runs unless it
    was emptied or shortened, which raises `call-ledger-unaccounted`. When the
    limit was exceeded, the executive summary says so in its own sentence.
 4. **Activity ledger**: every run with lane label, start, end, kind, target
@@ -255,6 +261,7 @@ from the recorded artifacts, and lists any exception at the top:
 | `destination-not-approved` | A call dialed a destination that is not on the approved destination list |
 | `call-limit-exceeded` | The calls placed under one approval id in the engagement, counted in start order across all commands, went above the limit that was in force when the run ran (`limits.calls` of the approval record kept for the run; for a run without one, of the current scope file), or the engagement's call ledger counts more than the current limit and the report's runs do not show that every counted call was inside an earlier, higher limit. Reported for earlier approval references too. Only runs of the practice bench (`work/practice`) are left out; an engagement that rehearses under the practice approval id is counted |
 | `call-ledger-unaccounted` | The engagement's call ledger does not account for every run directory that placed or may have placed calls under the approval (it was emptied, shortened or replaced), so the calls cannot be confirmed against the limit |
+| `call-ledger-unattributed` | The engagement's call ledger counts calls under a reservation that no run directory read for this report names, so those calls are in the count and in no row. Read the missing run root too (`--run-root DIR`), or account for the calls to the owner. Not raised for a report narrowed with `--runs` or `--since`, which says so on the Call limit line |
 | `concurrent-calls-exceeded` | More calls were in progress at once than the owner's `limits.concurrent_calls` in force allowed, counted from the times the runs recorded (two commands started in the same instant, or an overlap the operator allowed). One exception per run involved |
 | `approval-record-edited` | A file `scope compile` wrote (a profile, the manifest, the expectations, or the `application-surfaces.yaml` record) was edited after the compile, or a YAML file beside the scope is not recorded by it; it is not used as an approval record. `scope compile` records `application-surfaces.yaml` by hash in `scope-derivatives.json` like the other files, so a clean `--platform` engagement has no exception; a record written by an older compile (not listed there) is accepted while its own content hash still matches |
 

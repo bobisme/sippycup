@@ -208,10 +208,16 @@ class WindowTests(unittest.TestCase):
     def test_campaign_plan_duration_is_added_to_the_margin(self) -> None:
         plan = {"plannedTotals": {"durationSeconds": 7200}}
         item = ready.check_window(
-            dict(self.model(NOW - timedelta(hours=1), NOW + timedelta(hours=2)), files={"planFacts": plan}),
+            dict(self.model(NOW - timedelta(hours=1), NOW + timedelta(hours=2, minutes=30)),
+                 files={"planFacts": plan}),
             NOW, timezone.utc, 60)
         self.assertEqual("warn", item.status)
         self.assertIn("7200 s", item.lines[-1])
+        # Wave 13, finding 6: a window the plan itself barely fits in is not a warning.
+        item = ready.check_window(
+            dict(self.model(NOW - timedelta(hours=1), NOW + timedelta(hours=2)), files={"planFacts": plan}),
+            NOW, timezone.utc, 60)
+        self.assertEqual("no-go", item.status)
 
     def test_pending_authorization_is_no_go(self) -> None:
         item = ready.check_window(self.model(NOW - timedelta(hours=1), NOW + timedelta(hours=2), status="pending"),

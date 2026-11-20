@@ -139,6 +139,13 @@ def _runs_text(labels: list[str]) -> str:
     return ", ".join(parts)
 
 
+def _reasons(reasons: Any) -> str:
+    """A run's reasons on one line; a sentence that ends in a full stop is not followed by ".;"."""
+    items = [str(item) for item in (reasons or []) if item]
+    return "; ".join([item[:-1] if item.endswith(".") and not item.endswith("..") else item
+                      for item in items[:-1]] + items[-1:])
+
+
 def _sent(sent: dict[str, Any]) -> str:
     parts = []
     labels = (
@@ -354,6 +361,33 @@ def call_limit_lines(model: dict[str, Any]) -> list[str]:
             text += (" The count stands above the current limit only because the limit was lowered after "
                      "those calls were placed; no run exceeded the limit in force when it ran.")
         text += f" Calls placed under it by the runs in this report: {row['placedByRuns']}."
+        beside = row.get("sameApprovalElsewhere")
+        if beside:
+            # The line an owner reads first points at the other directory (wave 13, finding 2).
+            once = beside.get("countedOnce")
+            text += (" The same approval is also counted in another directory on the assessor's machine ("
+                     + ", ".join(beside.get("directories") or []) + "): "
+                     + (f"{'at most ' if beside.get('upperBound') else ''}{once} call(s) in all, each counted once"
+                        if isinstance(once, int)
+                        else "the calls there cannot all be counted")
+                     + "; see Limitations.")
+        # Every counted call is attributed to a run or named here (wave 13, finding 1).
+        loose = row.get("unattributedCalls")
+        if loose:
+            items = row.get("unattributedReservations") or []
+            named = ", ".join(
+                f"{item['calls']} reserved by {item.get('command') or 'a command'}"
+                + (f" at {item['at']}" if item.get("at") else "") for item in items
+            )
+            text += (f" {loose} of the counted calls are NOT among the runs in this report"
+                     + (f" ({named})" if named else "")
+                     + (": the report was narrowed with --runs or --since, and they belong to runs it leaves out."
+                        if row.get("reportNarrowed") else
+                        ": no run directory read for this report names their reservation (see Integrity exceptions)."))
+        beyond = row.get("countedBeyondRuns")
+        if beyond:
+            text += (f" {beyond} more are counted for the runs in this report than those runs recorded as placed: "
+                     "the count keeps a reserved call whenever a command could not show that no INVITE left for it.")
         lines.append(text)
     totals = model.get("callLimitTotals")
     if totals is not None and (model.get("callLimits") or totals.get("placedByRuns")):
@@ -479,7 +513,7 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
                 md(_run_target(r)),
                 md(_sent(r["sent"])),
                 md(r.get("verdict") or r["readable"]),
-                md("; ".join(x for x in (r.get("reasons") or []) if x) or ("; ".join(p for p in r["problems"] if p) if r["problems"] else "—")),
+                md(_reasons(r.get("reasons")) or ("; ".join(p for p in r["problems"] if p) if r["problems"] else "—")),
             ]
             for r in model["runs"]
         ),
@@ -1050,7 +1084,7 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
                 [
                     h(r.get("label")), _c(r["id"]), h(r["kind"]), h(r["started"]), h(r["finished"]), h(_run_target(r)), h(_sent(r["sent"])),
                     h(r.get("verdict") or r["readable"]),
-                    h("; ".join(x for x in (r.get("reasons") or []) if x) or ("; ".join(p for p in r["problems"] if p) if r["problems"] else None)),
+                    h(_reasons(r.get("reasons")) or ("; ".join(p for p in r["problems"] if p) if r["problems"] else None)),
                 ]
                 for r in model["runs"]
             ),

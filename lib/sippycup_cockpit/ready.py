@@ -44,6 +44,10 @@ READY_VERSION = "sippycup.dev/ready/v1"
 READINESS_DIR = "readiness"
 LAUNCHER = "./bin/sippycup"
 DEFAULT_MARGIN_MINUTES = 60
+# With less than this left in the approval window `rehearse` warns that a
+# sending command may refuse to start (sippycup_workbench.cli._emit); `ready`
+# is NO-GO below it (wave 13, finding 6).
+SHORT_WINDOW_SECONDS = 300
 DEFAULT_MIN_FREE_MB = 2048
 CERT_WARN_DAYS = 7
 GO, WARN, NOGO, INFO = "go", "warn", "no-go", "info"
@@ -259,10 +263,19 @@ def check_calls(model: dict[str, Any], profile_path: Path, document: dict[str, A
                    f"written approval from the owner, recorded with {LAUNCHER} scope answer {eng} "
                    f"authorization.approval_id and {LAUNCHER} scope compile {eng}")
         else:
-            where = ", ".join(item.directory for item in status.elsewhere[:3])
-            fix = (f"restore the call ledger in {where} from your backup; or use {eng} only under a new written "
-                   f"approval from the owner, recorded with {LAUNCHER} scope answer {eng} "
-                   f"authorization.approval_id and {LAUNCHER} scope compile {eng}")
+            bad = [item for item in status.elsewhere if item.used is None] or list(status.elsewhere)
+            closed = [item for item in bad if getattr(item, "unreadable", False)]
+            where = ", ".join(item.directory for item in (closed or bad)[:3])
+            if closed:
+                # Wave 13, finding 3: a sibling ledger this user cannot open
+                # stops every reference here, so a new one is no way round it.
+                fix = (f"make the call ledger in {where} readable again (the line above has the command), or "
+                       f"restore that directory from your backup; then run {LAUNCHER} ready {eng} again. A new "
+                       "approval reference does not lift this")
+            else:
+                fix = (f"restore the call ledger in {where} from your backup; or use {eng} only under a new "
+                       f"written approval from the owner, recorded with {LAUNCHER} scope answer {eng} "
+                       f"authorization.approval_id and {LAUNCHER} scope compile {eng}")
         return Check("calls", title, NOGO,
                      [status.line(notes=False), *notes,
                       "every command that places a call from this directory will refuse; nothing is sent"],
@@ -398,11 +411,28 @@ def check_window(model: dict[str, Any], now: datetime, zone: Any, margin_minutes
                      f"get a renewed written approval, record the new window with {LAUNCHER} scope answer "
                      f"{eng} authorization.window, record the approval again with {LAUNCHER} scope answer "
                      f"{eng} 2, then {LAUNCHER} scope compile {eng}")
-    lines.append(f"remaining  {_duration(remaining)}")
+    lines.append(f"remaining  {_duration(remaining)}" + (f" ({int(remaining)} s)" if remaining < 600 else ""))
     need = f"margin {margin_minutes} min" + (f" + the frozen campaign plan's {planned} s" if planned else "")
+    # Wave 13, finding 6: GO stood beside "less than the required ... remains"
+    # with 101 s left, when a longer call, a matrix and a checks run already
+    # refused to start. Under SHORT_WINDOW_SECONDS (plus the frozen plan), the
+    # point where rehearse warns that a sender may refuse, this row is NO-GO;
+    # between that and the margin it is a warning that no longer says "required".
+    floor = min(required, SHORT_WINDOW_SECONDS + planned)
+    if remaining < floor:
+        return Check("window", "Approval window", NOGO,
+                     lines + [f"only {int(remaining)} s remain, less than the {floor} s"
+                              + (f" (5 minutes + the frozen campaign plan's {planned} s)"
+                                 if floor == SHORT_WINDOW_SECONDS + planned and planned else "")
+                              + " a run needs to start and end inside the window: a sending command refuses to "
+                              "start when it could still be running at the end of the window"],
+                     f"ask the owner for a longer written window, record it with {LAUNCHER} scope answer {eng} "
+                     f"authorization.window, record the approval again with {LAUNCHER} scope answer {eng} 2, "
+                     f"then {LAUNCHER} scope compile {eng}")
     if remaining < required:
         return Check("window", "Approval window", WARN,
-                     lines + [f"less than the required {_duration(required)} ({need}) remains"],
+                     lines + [f"less than the margin of {_duration(required)} ({need}) remains; a sending command "
+                              "refuses to start when it could still be running at the end of the window"],
                      f"finish before {_both(end, zone)}, or ask the owner to extend the window")
     # bn-3vxl: is the frozen campaign plan held to this window?
     if plan and not plan.get("error"):
@@ -1138,7 +1168,8 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
     source.add_argument("--secret-env", metavar="NAME", help="the environment variable you will use (checked by name)")
     parser.add_argument("--margin", type=int, default=DEFAULT_MARGIN_MINUTES, metavar="MINUTES",
                         help="warn when less than this (plus a frozen campaign plan's duration) remains in the "
-                             "approval window (default %(default)s)")
+                             "approval window (default %(default)s); NO-GO under 5 minutes, or under the "
+                             "margin when that is smaller")
     parser.add_argument("--min-free-mb", type=int, default=DEFAULT_MIN_FREE_MB, metavar="MIB",
                         help="free space required under work/ for evidence (default %(default)s)")
     parser.add_argument("--image", default=os.environ.get("SIPPYCUP_IMAGE", "localhost/sippycup:latest"),

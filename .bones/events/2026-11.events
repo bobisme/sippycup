@@ -234,3 +234,4 @@
 1795186362529411	sippycup-2u2m2v	itc:AQ		item.create	bn-3btx	{"description":"See scratchpad wave13-findings.md","kind":"bug","size":"m","title":"Wave 13: fix rehearsal 5 findings (report omits checks calls, copied-ledger report double count, unreadable sibling ledger skipped)"}	blake3:JsiYK-GDb4mzvnG3kdUwpkDjgJQX0BD0dnaF43nbfmg
 1795187804276815	sippycup-2u2m2v	itc:AQ		item.move	bn-3w2v	{"state":"done"}	blake3:vfycNrsW6HJcmLidO4hEaLJZQ8xo8RuJZiNFp2M8Y4M
 1795187804315172	sippycup-2u2m2v	itc:AQ		item.move	bn-38zv	{"state":"done"}	blake3:XNJbJiNASSzTG7Ijb0XS_n8zSLaNB76eKmweXFWwcfI
+1795189928555193	sippycup-2u2m2v	itc:AQ		item.move	bn-3btx	{"state":"done"}	blake3:fDkWeMQGrRBejU69VNIom068WGPXEayviWcWwuH2j9o
