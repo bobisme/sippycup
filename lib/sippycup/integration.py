@@ -958,8 +958,17 @@ def _unsent_calls(plan: Mapping[str, Any], run_dir: Path | None) -> int:
     return unsent
 
 
-def _scope_call_limit(directory: Path) -> int | None:
-    """``limits.calls`` of the scope file beside the manifest, when it states one."""
+def campaign_concurrent_limit(plan: Mapping[str, Any], directory: Path | None) -> int:
+    """The limit on calls at once a campaign is held to: the plan's hard maximum, or
+    ``limits.concurrent_calls`` of the scope file beside the manifest when that is lower."""
+    limit = plan["authorization"]["hardMaxima"].get("concurrentCalls")
+    limit = limit if type(limit) is int and limit >= 1 else 1
+    scope_limit = _scope_call_limit(directory, "concurrent_calls") if directory is not None else None
+    return limit if scope_limit is None else max(1, min(limit, scope_limit))
+
+
+def _scope_call_limit(directory: Path, key: str = "calls") -> int | None:
+    """``limits.calls`` (or ``limits.KEY``) of the scope file beside the manifest, when it states one."""
     path = directory / approval_rules.SCOPE_FILE
     if path.is_symlink() or not path.is_file():
         return None
@@ -970,7 +979,7 @@ def _scope_call_limit(directory: Path) -> int | None:
     except Exception:  # noqa: BLE001 - the window gate reports an unreadable scope
         return None
     limits = value.get("limits") if isinstance(value, dict) else None
-    calls = limits.get("calls") if isinstance(limits, dict) else None
+    calls = limits.get(key) if isinstance(limits, dict) else None
     return calls if type(calls) is int and calls >= 0 else None
 
 
@@ -1037,6 +1046,16 @@ def _execute_campaign(
         raise RuntimeError("active execution requires evidence.capture=true for watchdogs")
     name = plan["metadata"]["name"]
     calls = _planned_calls(plan)
+    if calls:
+        # Started beside another run (SIPPYCUP_ALLOW_OVERLAP): the owner's
+        # limit on calls at once still holds, whether or not the plan is
+        # bound to an approval (wave 13). Before anything exists.
+        beside = overlap_record.concurrency_refusal(
+            campaign_concurrent_limit(plan, Path(manifest_path).parent if manifest_path is not None else None),
+            "campaign run",
+        )
+        if beside is not None:
+            raise AuthorizationLapsed(beside)
     if manifest_path is not None and gate.window.approval_id and calls:
         # The owner's call limit holds for the engagement (bn-2sfn): reserve
         # every planned call in the ledger beside the manifest, under its

@@ -1496,6 +1496,24 @@ def verify_frozen_plan(plan: dict[str, Any], manifest_bytes: bytes) -> None:
         )
 
 
+DEFAULT_RUN_ROOT = Path("work/runs")
+
+
+def default_run_root(manifest: Path) -> Path:
+    """Where ``campaign run`` puts its run directory when ``--run-root`` is not given.
+
+    A campaign file in an engagement directory (a ``scope.yaml`` beside it)
+    runs into that directory's ``runs/``, where the owner report, the call
+    ledger's cross-check and the docs look for campaign runs. Any other
+    manifest keeps ``work/runs``.
+    """
+    directory = Path(manifest).parent
+    scope = directory / approval_rules.SCOPE_FILE
+    if scope.is_file() and not scope.is_symlink():
+        return directory / "runs"
+    return DEFAULT_RUN_ROOT
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sippycup campaign")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1551,8 +1569,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("plan", type=Path, help="the frozen plan from campaign plan --output")
     run.add_argument("--manifest", type=Path, required=True,
                         help="the exact manifest the plan was frozen from")
-    run.add_argument("--run-root", type=Path, default=Path("work/runs"),
-                        help="directory for the new run directory (default work/runs; use work/ENGAGEMENT/runs)")
+    run.add_argument("--run-root", type=Path, default=None,
+                        help="directory for the new run directory (default: runs/ beside the manifest when a "
+                             "scope.yaml lies beside it, that is, in an engagement directory; otherwise work/runs)")
     run.add_argument("--interface", default="any",
                         help="capture interface (default any; lo with --practice)")
     run.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME",
@@ -1566,8 +1585,9 @@ def _parser() -> argparse.ArgumentParser:
     execute.add_argument("plan", type=Path, help="the frozen plan from campaign plan --output")
     execute.add_argument("--manifest", type=Path, required=True,
                         help="the exact manifest the plan was frozen from")
-    execute.add_argument("--run-root", type=Path, default=Path("work/runs"),
-                        help="directory for the new run directory (default work/runs; use work/ENGAGEMENT/runs)")
+    execute.add_argument("--run-root", type=Path, default=None,
+                        help="directory for the new run directory (default: runs/ beside the manifest when a "
+                             "scope.yaml lies beside it, that is, in an engagement directory; otherwise work/runs)")
     execute.add_argument("--interface", default="any",
                         help="capture interface (default any; lo with --practice)")
     execute.add_argument("--secret-env", action="append", default=[], metavar="REF=NAME",
@@ -1580,7 +1600,27 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _with_real_directory(message: str, args: argparse.Namespace) -> str:
+    """Print the launcher and the engagement directory where a window refusal has the
+    ``DIR`` placeholder (``approval.NEW_WINDOW``), when a scope file lies beside the
+    manifest. Text only; what is refused is unchanged.
+    """
+    manifest = getattr(args, "manifest", None)
+    if manifest is None or "(scope answer DIR 2)" not in message:
+        return message
+    directory = Path(manifest).parent
+    scope = directory / approval_rules.SCOPE_FILE
+    if str(directory) in {"", "."} or scope.is_symlink() or not scope.is_file():
+        return message
+    engagement = operator_path(directory)
+    return message.replace(
+        "(scope answer DIR 2), run scope compile,",
+        f"(./bin/sippycup scope answer {engagement} 2), run ./bin/sippycup scope compile {engagement},",
+    ).replace("(scope answer DIR 2)", f"(./bin/sippycup scope answer {engagement} 2)")
+
+
 def _emit_error(args: argparse.Namespace, code: str, message: str, **fields: Any) -> None:
+    message = _with_real_directory(message, args)
     if getattr(args, "error_format", "human") == "json":
         print(
             json.dumps(
@@ -1726,6 +1766,7 @@ def _print_run_summary(args: argparse.Namespace, result: Any, run_directory: Pat
 
 def _warn(args: argparse.Namespace, code: str, message: str) -> None:
     """A warning on standard error; never changes the exit status."""
+    message = _with_real_directory(message, args)
     if getattr(args, "error_format", "human") == "json":
         print(
             json.dumps(
@@ -1884,7 +1925,7 @@ def _run_command(args: argparse.Namespace) -> int:
         result, run_directory = execute_campaign(
             plan,
             manifest_bytes=manifest_bytes,
-            run_root=args.run_root,
+            run_root=args.run_root if args.run_root is not None else default_run_root(args.manifest),
             interface=args.interface,
             secret_values=secrets,
             secret_env_names=list(env_names.values()),

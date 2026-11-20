@@ -418,6 +418,15 @@ def _reserve_grid(
 
     groups: dict[tuple[Path, str], dict[str, Any]] = {}
     group_of: dict[str, tuple[Path, str] | None] = {}
+    # Started beside another run (SIPPYCUP_ALLOW_OVERLAP): the owner's limit
+    # on calls at once still holds, for every profile of the grid (wave 13).
+    from sippycup.overlap_record import concurrency_refusal
+
+    beside = concurrency_refusal(
+        min(guided.concurrent_limit(load_profile(path)) for path in profile_paths.values()), "matrix run"
+    ) if profile_paths else None
+    if beside is not None:
+        return {}, group_of, beside
     for transport, path in profile_paths.items():
         approval, ceiling = guided.ledger_terms(load_profile(path))
         if not approval:

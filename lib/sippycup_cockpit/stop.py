@@ -13,6 +13,14 @@ What it stops, by exact rule:
                 commands (a host-side ``campaign``, ``sippycup-media``...), and
                 ``pjsua``/``sipp`` processes whose working directory is inside
                 this checkout.
+``launchers``   a ``./bin/sippycup`` sending command that has claimed its
+                start (``work/.sender-claims/``, see ``overlap.py``) and whose
+                container is not listed yet (about a second). The claim names
+                the launcher's process id and kernel start time; that process
+                is signalled only while it is still that process and still
+                this checkout's launcher or the container runtime it became.
+                When it is gone, the containers are listed again and one that
+                still came up is stopped like any other.
 
 How: first SIGTERM to every sender (``kill --signal TERM`` for a container,
 which its init forwards to the command). Each Sippycup command handles that
@@ -50,6 +58,11 @@ PRACTICE_LABEL = "dev.sippycup.profile"
 SIPPYCUP_TITLES = frozenset({"sippycup"})
 DEFAULT_GRACE_SECONDS = 30.0
 SETTLE_SECONDS = 10.0
+# After a claimed launcher is gone, before the containers are listed again
+# for one that its runtime had already begun to start.
+LAUNCHER_SETTLE_SECONDS = 1.5
+# How long stop waits for a launcher that is inside its overlap check.
+CLAIM_LOCK_WAIT_SECONDS = 15.0
 POLL_SECONDS = 0.5
 IDENTIFIER = re.compile(r"^[0-9a-f]{12,64}$")
 # bin/ commands that send traffic when run on the host instead of in the image.
@@ -62,7 +75,7 @@ SENDER_EXECUTABLES = frozenset({"pjsua", "sipp", "baresip"})
 
 @dataclass
 class Target:
-    kind: str  # "container" or "process"
+    kind: str  # "container", "process", or "launcher" (a claimed start with no container yet)
     ident: str
     name: str
     detail: str
@@ -70,6 +83,8 @@ class Target:
     processes: list[str] = field(default_factory=list)
     outcome: str = "running"  # running -> clean | forced | failed | already-gone
     error: str = ""
+    # A launcher's kernel start time, from its claim: the process id alone is not it.
+    start: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "id": self.ident, "name": self.name, "detail": self.detail,
@@ -194,6 +209,72 @@ class Host:
     def kill(self, pid: int, signum: int) -> None:
         os.kill(pid, signum)
 
+    def launcher_alive(self, pid: int, start: str) -> bool:
+        """True while process ``pid`` is still the one that started at ``start`` (not a zombie)."""
+        return bool(start) and _process_start(self.proc, pid) == start
+
+    def signal_launcher(self, pid: int, start: str, signum: int) -> str | None:
+        """Signal a claimed launcher, only if it is still that process and still this checkout's.
+
+        Where this Python has pidfds the process is held by one first, so the
+        checks and the signal are about one process even if the id were
+        reused meanwhile. Without them the start time is read immediately
+        before the signal (the id would have to end and come round again in
+        between). None when signalled or already gone; otherwise why it was
+        not signalled.
+        """
+        descriptor = None
+        if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+            try:
+                descriptor = os.pidfd_open(pid)
+            except ProcessLookupError:
+                return None
+            except OSError as error:
+                return f"cannot open process {pid}: {error}"
+        try:
+            if _process_start(self.proc, pid) != start:
+                return None  # that launcher is gone (the id may belong to another process now)
+            if not self.is_launcher(pid):
+                return (f"process {pid} is not this checkout's launcher or its container runtime; it was not "
+                        "signalled")
+            try:
+                if descriptor is not None:
+                    signal.pidfd_send_signal(descriptor, signum)
+                elif _process_start(self.proc, pid) == start:
+                    os.kill(pid, signum)
+            except ProcessLookupError:
+                return None
+            except OSError as error:
+                return str(error)
+            return None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    def is_launcher(self, pid: int) -> bool:
+        """``bin/sippycup`` of this checkout, or the container runtime it exec'd (it carries the checkout label)."""
+        entry = self.proc / str(pid)
+        try:
+            argv = [part.decode("utf-8", "replace") for part in (entry / "cmdline").read_bytes().split(b"\0") if part]
+            status = (entry / "status").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        uid = next((int(line.split()[1]) for line in status.splitlines() if line.startswith("Uid:")), -1)
+        if uid != os.getuid() or not argv:
+            return False
+        if f"--label={CHECKOUT_LABEL}={self.repo}" in argv:
+            return True
+        try:
+            cwd = os.readlink(entry / "cwd")
+        except OSError:
+            cwd = ""
+        launcher = os.path.join(str(self.repo), "bin", "sippycup")
+        for item in argv[:3]:
+            path = os.path.normpath(os.path.join(cwd, item))
+            if path == launcher or os.path.realpath(path) == os.path.realpath(launcher):
+                return True
+        return False
+
     def practice_down(self) -> tuple[int, str]:
         completed = subprocess.run([str(self.repo / "bin" / "sippycup"), "practice-target", "down"],
                                    capture_output=True, text=True, timeout=120, check=False,
@@ -208,6 +289,39 @@ class Host:
 
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
+
+
+def _process_start(proc: Path, pid: int) -> str | None:
+    """Field 22 of ``/proc/PID/stat``; None when the process is gone or a zombie (as overlap.process_start)."""
+    from . import overlap  # here, not at the top: overlap imports this module
+
+    return overlap.process_start(proc, pid)
+
+
+def launcher_targets(host: Host, containers: list[dict[str, Any]], listed: list[Target], *, checkout: str,
+                     own: set[int], locked: bool) -> tuple[list[Target], list[str]]:
+    """Launchers that claimed a start and have no container yet, and notes when the claims cannot be read.
+
+    ``locked`` waits for a launcher that is inside its check right now, so its
+    claim is seen (the lock file is opened; nothing else is written). Without
+    it nothing at all is written or locked: that is ``stop --dry-run``.
+    """
+    from . import overlap  # here, not at the top: overlap imports this module
+
+    directory = overlap.claims_directory(host.repo)
+    if not directory.is_dir():
+        return [], []
+    running = {str(_labels(item).get(overlap.CLAIM_LABEL)) for item in containers
+               if _labels(item).get(CHECKOUT_LABEL) == checkout and _labels(item).get(overlap.CLAIM_LABEL)}
+    try:
+        if locked:
+            with overlap._ClaimLock(directory, wait=CLAIM_LOCK_WAIT_SECONDS):
+                claims = overlap.peek_claims(directory, host.proc)
+        else:
+            claims = overlap.peek_claims(directory, host.proc)
+    except overlap.ClaimError as error:
+        return [], [f"could not read the start claims of this checkout: {error}"]
+    return overlap.claim_targets(claims, own=own, running_claims=running, listed=listed), []
 
 
 def _iso(value: datetime) -> str:
@@ -283,7 +397,7 @@ def host_senders(processes: list[dict[str, Any]], *, checkout: str, uid: int, ow
 
 
 def inventory(host: Host, *, checkout: str, image: str, practice_container: str,
-              include_practice: bool, own: set[int]) -> Report:
+              include_practice: bool, own: set[int], lock_claims: bool = False) -> Report:
     report = Report(dry_run=False, started=_iso(host.now()))
     if host.runtime is None:
         report.notes.append("no container runtime found; only host processes were inspected")
@@ -301,6 +415,11 @@ def inventory(host: Host, *, checkout: str, image: str, practice_container: str,
     report.targets.extend(ours)
     report.targets.extend(host_senders(host.processes(), checkout=checkout, uid=os.getuid(), own=own,
                                        container_ids={item.ident for item in ours}))
+    # A sending command that claimed its start and has no container yet.
+    launchers, problems = launcher_targets(host, containers, report.targets, checkout=checkout, own=own,
+                                           locked=lock_claims)
+    report.targets.extend(launchers)
+    report.notes.extend(problems)
     report.untouched = untouched
     if practice is not None:
         if include_practice:
@@ -328,7 +447,12 @@ def _wait(host: Host, report: Report, targets: list[Target], seconds: float) -> 
         for item in targets:
             if item.outcome != "running":
                 continue
-            gone = (item.ident not in (still or set())) if item.kind == "container" else not host.alive(int(item.ident))
+            if item.kind == "container":
+                gone = item.ident not in (still or set())
+            elif item.kind == "launcher":
+                gone = not host.launcher_alive(int(item.ident), item.start)
+            else:
+                gone = not host.alive(int(item.ident))
             if item.kind == "container" and still is None:
                 gone = False
             if gone:
@@ -345,6 +469,8 @@ def _signal(host: Host, item: Target, signum: int) -> str | None:
         if code != 0 and "no such container" not in message.lower() and "not running" not in message.lower():
             return message or f"exit {code}"
         return None
+    if item.kind == "launcher":
+        return host.signal_launcher(int(item.ident), item.start, signum)
     try:
         host.kill(int(item.ident), signum)
     except ProcessLookupError:
@@ -373,21 +499,24 @@ def prove_silence(host: Host, report: Report, *, checkout: str, image: str, prac
             practice_running = True
         if practice_running:
             remaining.append(f"practice target {practice_container}")
-    listed = not any(note.startswith("could not list containers") for note in again.notes)
+    listed = not any(note.startswith(("could not list containers", "could not read the start claims"))
+                     for note in again.notes)
     report.silence = {
         "proved": not remaining and listed,
         "remaining": remaining,
         "checked": "running containers of this checkout (label or image), sender processes on this host",
     }
     if not listed:
-        report.silence["remaining"].append("the container runtime could not be asked; silence is not proved")
+        report.silence["remaining"].append("the container runtime or the start claims could not be read; "
+                                           "silence is not proved")
 
 
 def stop(host: Host, *, checkout: str, image: str, practice_container: str, include_practice: bool,
          grace: float, dry_run: bool) -> Report:
     own = {os.getpid(), os.getppid()}
+    # A dry run reads the claims without the lock: it writes and locks nothing.
     report = inventory(host, checkout=checkout, image=image, practice_container=practice_container,
-                       include_practice=include_practice, own=own)
+                       include_practice=include_practice, own=own, lock_claims=not dry_run)
     report.dry_run = dry_run
     if dry_run:
         report.finished = _iso(host.now())
@@ -411,6 +540,34 @@ def stop(host: Host, *, checkout: str, image: str, practice_container: str, incl
         _wait(host, report, leftovers, SETTLE_SECONDS)
         for item in leftovers:
             item.outcome = "forced" if item.outcome == "ended" else "failed"
+    # 2b. A claimed launcher may have had its container on the way up when
+    # it was signalled: once the launchers are gone, look again and stop what
+    # appeared, the same two steps.
+    if any(item.kind == "launcher" for item in report.targets):
+        host.sleep(LAUNCHER_SETTLE_SECONDS)
+        known = {(item.kind, item.ident) for item in report.targets}
+        again = inventory(host, checkout=checkout, image=image, practice_container=practice_container,
+                          include_practice=False, own=own)
+        late = [item for item in again.targets if (item.kind, item.ident) not in known]
+        report.targets.extend(late)
+        for item in late:
+            problem = _signal(host, item, signal.SIGTERM)
+            if problem:
+                item.error = f"SIGTERM: {problem}"
+        if late:
+            _wait(host, report, late, grace)
+        for item in late:
+            if item.outcome == "ended":
+                item.outcome = "clean"
+        late_left = [item for item in late if item.outcome == "running"]
+        for item in late_left:
+            problem = _signal(host, item, signal.SIGKILL)
+            if problem:
+                item.error = (item.error + "; " if item.error else "") + f"SIGKILL: {problem}"
+        if late_left:
+            _wait(host, report, late_left, SETTLE_SECONDS)
+            for item in late_left:
+                item.outcome = "forced" if item.outcome == "ended" else "failed"
     # 3. The practice target, only when asked.
     if report.practice is not None:
         code, output = host.practice_down()
@@ -457,6 +614,11 @@ def render(report: Report, engagement: str | None) -> list[str]:
                  "failed": f"FAILED to stop: {item.error}",
                  "running": "would be stopped: SIGTERM, then SIGKILL after the grace period",
                  "already-gone": "already gone"}.get(item.outcome, item.outcome)
+        if item.kind == "launcher":
+            # It had no container yet, so there was no call to hang up.
+            state = {"clean": "stopped before its container was listed (the launcher ended after SIGTERM)",
+                     "forced": "FORCED before its container was listed (the launcher was killed)"}.get(
+                         item.outcome, state)
         lines.append(f"  {item.kind:9} {item.ident[:12]:12} {item.name}: {state}")
         lines.append(f"            {item.detail}  [matched by {item.matched_by}]")
         for process in item.processes[:8]:

@@ -704,6 +704,13 @@ manifest is mandatory:
   --run-root work/runs
 ```
 
+Without `--run-root`, a campaign file that lies in an engagement directory
+(a `scope.yaml` beside it) runs into that directory's `runs/`
+(`work/acme/campaign.yaml` gives `work/acme/runs/RUN`), where `summary`,
+`pack` and the call ledger's cross-check look for campaign runs. Any other
+manifest keeps the default `work/runs`. An explicit `--run-root` is always
+used as given.
+
 Before any secret provider, directory, process, resolver, or packet is created,
 the command hashes the supplied manifest bytes, recompiles them using only the
 plan's frozen DNS pins and reduced maxima, and compares the entire canonical

@@ -401,18 +401,33 @@ def execute(options: RunOptions, deps: Dependencies | None = None) -> tuple[int,
     reservation = None
     if plan["inviteAttempts"]:
         from sippycup import call_ledger
-        from sippycup_workbench.call import ledger_terms
+        from sippycup_workbench.call import concurrent_limit, ledger_terms
 
         approval, ceiling = ledger_terms(document)
         try:
             reservation = call_ledger.reserve(
                 profile_path.parent, approval_id=approval, ceiling=ceiling,
                 calls=plan["inviteAttempts"], command="checks run", source=profile_path.name,
+                concurrent_limit=concurrent_limit(document),
             )
         except (call_ledger.CeilingRefused, call_ledger.LedgerError) as error:
             return EXIT_REFUSED, {
                 "apiVersion": RESULT_VERSION, "state": "blocked", "exitCode": EXIT_REFUSED,
                 "blockingErrors": [str(error)], "runDirectory": None, "requestsSent": 0,
+                "networkActivity": "none",
+            }
+    else:
+        # No INVITE, so nothing to reserve; but a directory that the
+        # two-directory rule stops "sends nothing more under" the approval,
+        # and that includes these requests (wave 13).
+        from sippycup import call_ledger
+        from sippycup_workbench.call import ledger_terms
+
+        stopped = call_ledger.stopped_elsewhere(profile_path.parent, ledger_terms(document)[0], "checks run")
+        if stopped is not None:
+            return EXIT_REFUSED, {
+                "apiVersion": RESULT_VERSION, "state": "blocked", "exitCode": EXIT_REFUSED,
+                "blockingErrors": [stopped], "runDirectory": None, "requestsSent": 0,
                 "networkActivity": "none",
             }
     old_umask = os.umask(0o077)

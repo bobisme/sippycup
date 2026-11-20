@@ -297,7 +297,9 @@ summary counts them, and neither is counted as "completed as expected" or
 `SIPPYCUP_ALLOW_OVERLAP` (only the second one records the overlap itself) and
 two commands started in the same instant. When the calls in progress at once
 were more than the owner's `limits.concurrent_calls` in force, each run
-involved is also an integrity exception (`concurrent-calls-exceeded`). A
+involved is also an integrity exception (`concurrent-calls-exceeded`); the
+launcher's override no longer leads there, because a command that places
+calls refuses to start beside another one past that limit. A
 campaign counts as one call in progress for this check. `diagnose` on either
 run says the same, from the sibling run directories, and the cockpit shows it
 as the reason of an inconclusive call.

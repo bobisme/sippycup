@@ -267,7 +267,14 @@ proves the silence:
    `dev.sippycup.command`; an unlabelled container from exactly
    `$SIPPYCUP_IMAGE` also counts), lists the processes inside each
    (PJSUA, SIPp, the media sender, dumpcap), and any host process started
-   from this checkout's sender commands.
+   from this checkout's sender commands. A sending command that has claimed
+   its start (`work/.sender-claims/`) and has no container yet (about a
+   second) is listed as `launcher-PID` and is stopped too: its process is
+   signalled only while it is still that launcher (same process id and
+   kernel start time, this checkout's `bin/sippycup` or the container
+   runtime it became), and once it is gone the containers are listed again
+   so that one which still came up is stopped like any other. `stop
+   --dry-run` lists it and writes, locks and signals nothing.
 2. It sends SIGTERM to each. Every Sippycup command handles it: the guided
    call, the matrix, the checks, and the campaign's softphone runner hang
    up an answered call with BYE (CANCEL a ringing one), unregister, stop the

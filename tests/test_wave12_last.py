@@ -501,8 +501,9 @@ class WordingTests(Engagement):
         self.assertIn("Nothing was sent.", text)
         self.assertIn("not a way past this refusal", text)
         self.assertIn("SIPPYCUP_ALLOW_OVERLAP=clever_name", text)
-        self.assertIn("more calls on the target at once than the owner's concurrent_calls allows", text)
-        self.assertIn("concurrent-calls-exceeded", text)
+        # Wave 13: the override no longer goes past the owner's limit, and the text says so.
+        self.assertIn("It does not go past the owner's limit on calls at once", text)
+        self.assertIn("would exceed limits.concurrent_calls", text)
 
     def test_the_part_2_header_names_the_answers_that_reset_the_approval(self) -> None:
         # Finding 7: read from the rule itself (GRANTS); the rule is unchanged.
