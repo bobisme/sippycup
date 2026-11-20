@@ -1786,6 +1786,32 @@ def plan_window_check(
     return None, warnings
 
 
+def _ended_window_of_manifest(manifest_path: Path) -> str | None:
+    """Why `campaign plan` would refuse the current campaign file for its
+    approval window (the window in the file, or in the scope file beside it,
+    has ended); None when it would not, or when that cannot be told. Read-only: resolves no name, never raises, decides nothing
+    about sending (the caller is refusing already).
+    """
+    def no_lookup(host: str) -> list[str]:
+        raise ManifestError(f"{host!r} is not resolved here")
+
+    try:
+        manifest, digest = load_manifest(manifest_path)
+        fresh = compile_plan(manifest, digest, resolver=no_lookup)
+        window = approval_rules.plan_window(fresh)
+        if not window.bound:
+            return None
+        refusal = approval_rules.window_refusal(window, approval_rules.utc_now())
+        if refusal is not None and refusal.kind == "expired":
+            return refusal.message
+        gate = approval_rules.WindowGate(fresh, manifest_path=manifest_path).refusal()
+        if gate is not None and gate.kind == "expired":
+            return gate.message
+    except Exception:  # noqa: BLE001 - the stale-plan refusal stands on its own
+        return None
+    return None
+
+
 def _run_command(args: argparse.Namespace) -> int:
     from sippycup.integration import AuthorizationLapsed, execute_campaign, resolve_secrets
     from sippycup.runtime import RuntimeError as CampaignRuntimeError
@@ -1799,6 +1825,19 @@ def _run_command(args: argparse.Namespace) -> int:
         except ManifestError as error:
             from sippycup_workbench.replan import replan_command
 
+            # Rehearsal 4, finding 6: when the approval window of the current
+            # campaign file has ended, say that first. The line below would
+            # move the plan away for a `campaign plan` that then refuses.
+            ended = _ended_window_of_manifest(args.manifest)
+            if ended is not None:
+                raise AuthorizationLapsed(
+                    f"{ended}. Fix the window first and leave {operator_path(args.plan)} where it is for "
+                    f"now: it is also stale (frozen from an earlier {operator_path(args.manifest)}), and "
+                    "campaign plan refuses to freeze a new one while the window is ended. Once the new "
+                    "window and the approval are recorded and scope compile has run, freeze a new plan and "
+                    "keep the old one with: "
+                    + replan_command(operator_path(args.plan), operator_path(args.manifest))
+                ) from error
             raise ManifestError(
                 f"{error}. Nothing was sent. {operator_path(args.plan)} was frozen from a different "
                 f"{operator_path(args.manifest)} than the one given (scope compile wrote the campaign file "
@@ -1979,10 +2018,15 @@ def main(argv: list[str] | None = None) -> int:
     calls = campaign_calls_status(plan, args.manifest)
     if calls is not None:
         planned = _planned_calls(plan)
-        if not calls.trusted or planned > (calls.left or 0):
-            reason = calls.error or call_ledger.refusal_text(
-                args.manifest.parent, calls.approval_id, calls.limit or 0, calls.used or 0,
-                planned, "campaign run",
+        if not calls.trusted or planned > (calls.left or 0) or calls.elsewhere_blocks:
+            # Wave 12, finding 1: the refusal `campaign run` would make for an
+            # owner's approval that a sibling directory counts calls under.
+            reason = calls.error or (
+                calls.rule.refusal("campaign run") if calls.elsewhere_blocks and calls.rule is not None
+                else call_ledger.refusal_text(
+                    args.manifest.parent, calls.approval_id, calls.limit or 0, calls.used or 0,
+                    planned, "campaign run", elsewhere=calls.elsewhere_used,
+                )
             )
             _emit_error(
                 args, "call_limit",

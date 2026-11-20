@@ -847,7 +847,11 @@ def check_findings_schema(test: unittest.TestCase, document: dict[str, Any]) -> 
 class ExecuteTests(unittest.TestCase):
     def run_profile(self, stub: SipStub, section: dict[str, Any], *, password: bool, fail_on: str = "medium",
                     continue_after: bool = False, engagement: bool = False) -> tuple[int, dict[str, Any], Path]:
-        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        # Each run is its own engagement under its own parent: two directories
+        # under one parent that count calls under one approval are refused
+        # (wave 12, finding 1).
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())) / "work"
+        root.mkdir()
         if engagement:
             (root / "engagement.json").write_text("{}", encoding="utf-8")
         profile = write_profile(root, profile_document("127.0.0.1", stub.port, stub.transport, section))

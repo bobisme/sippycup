@@ -2488,6 +2488,20 @@ def summarize(path: Path, engagement: str, out: TextIO, now: datetime,
     return report
 
 
+def _number_ranges(numbers: list[str]) -> str:
+    """``P3 to P17 and A1 to A3`` from question numbers in walk order."""
+    runs: list[list[str]] = []
+    for number in numbers:
+        last = runs[-1][-1] if runs else None
+        if (last is not None and last[0] == number[0] and last[1:].isdigit() and number[1:].isdigit()
+                and int(number[1:]) == int(last[1:]) + 1):
+            runs[-1].append(number)
+        else:
+            runs.append([number])
+    parts = [run[0] if len(run) == 1 else f"{run[0]} to {run[-1]}" for run in runs]
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def _offer_platform(session: Session, selections: list[Selection]) -> bool:
     """Once per walk, before the first open platform question: walk them now, or skip them for this session.
 
@@ -2506,6 +2520,16 @@ def _offer_platform(session: Session, selections: list[Selection]) -> bool:
     session.say("  They record the owner's answers about the product around the SIP service. An open one is a WARN"
                 " line in scope check; it does not hold the approval (question 2) or the SIP tests unless scope"
                 " check says ERROR. Where each destination's calls go (P11 to P13) is shown in the approval summary.")
+    # Rehearsal 4, finding 7: an open answer does not hold the approval, but
+    # recording or changing one of these does set it back (GRANTS). Said
+    # here, from the same rule, before the operator answers one.
+    resets = [item.number for item in items_for(session.scope.report.document)
+              if item.part == 2 and _grants(item)]
+    if resets:
+        session.say("  If the approval (question 2) is already recorded: recording or changing "
+                    + _number_ranges(resets) + " sets it back to pending, because those answers are part of what"
+                    " the owner approves; question 2 is then asked again at the end of this session. The other"
+                    " platform questions never change the approval.")
     session.say("  y = ask each open one now.  Enter or n = the owner has not answered these yet: skip them for"
                 " this session and go straight on (they stay open; nothing is invented).")
     if session.confirm("Walk the platform questions now?"):

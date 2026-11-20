@@ -279,7 +279,15 @@ def finish(root: Path, report: Report, data: bytes | None, write: Callable[..., 
     record = yaml.safe_load(data.decode())
     summary = record["summary"]
     counts = ", ".join(f"{len(summary[state])} {state}" for state in summary)
-    notes.append(f"{FILENAME} records the platform and web surfaces ({counts}; "
+    # Rehearsal 4, papercut 13: the counts are of web surfaces (question A1),
+    # which are none when no web part is in scope. The platform parts the
+    # owner answered are counted beside them, so "0, 0, 0, 0" is not read as
+    # "nothing was recorded".
+    components = (record.get("platform") or {}).get("components") or {}
+    parts = (f"platform parts: {len(components.get('inScope') or [])} in scope, "
+             f"{len(components.get('outOfScope') or [])} out of scope, "
+             f"{len(components.get('open') or {})} not answered; web surfaces: ")
+    notes.append(f"{FILENAME} records the platform and web surfaces ({parts}{counts}; "
                  f"{len(record['openQuestions'])} question(s) open). It is a record only: no live "
                  "application runner exists, and nothing in Sippycup sends HTTP to these surfaces")
     return {"artifact": ARTIFACT, "path": str(path), "sha256": hashlib.sha256(data).hexdigest()}, notes

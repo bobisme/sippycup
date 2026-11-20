@@ -1451,11 +1451,22 @@ def place_call(
             # Nothing was started and nothing was sent.
             result.error = "media_guard_unavailable"
             return result
+        guard_preload = None
         if guard_library is not None:
             base = os.environ if environment is None else environment
-            preload = " ".join(item for item in (guard_library, base.get("LD_PRELOAD")) if item)
-            environment = {**base, "LD_PRELOAD": preload, MEDIA_GUARD_RULES_ENV: guard_rules or ""}
+            guard_preload = " ".join(item for item in (guard_library, base.get("LD_PRELOAD")) if item)
+            environment = {**base, MEDIA_GUARD_RULES_ENV: guard_rules or ""}
+            if call.tls_server_name is None:
+                environment["LD_PRELOAD"] = guard_preload
         argv = [pjsua, "--config-file", str(config_path)]
+        if guard_preload is not None and call.tls_server_name is not None:
+            # Rehearsal 4, finding 17: under the name pin PJSUA is started by
+            # helper programs (unshare, sh). The guard is preloaded into PJSUA
+            # only, by env as the last step before it, so the helpers do not
+            # print the guard's banner into the evidence. The check below is
+            # unchanged: no call is dialed until PJSUA itself shows the guard
+            # active with exactly these rules.
+            argv = [shutil.which("env") or "/usr/bin/env", f"LD_PRELOAD={guard_preload}", *argv]
         if call.tls_server_name is not None:
             # Pin the reviewed name to the literal before PJSUA exists; refuse
             # (nothing started, nothing sent) unless the mapping is proven.

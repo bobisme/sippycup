@@ -110,6 +110,11 @@ below) `scope answer` reaches part 2 after question 23. It asks once:
 Press Enter (or `n`) when the owner has not answered them yet: they stay open,
 nothing is invented, and it goes straight on to question 2. Open platform
 answers are `WARN` lines and do not hold the approval. Type `y` to walk them.
+If you record the approval first and the platform answers later: recording or
+changing P3 to P17 or A1 to A3 sets the approval back to pending (they are
+part of what the owner approves), and question 2 is asked again at the end of
+that session. P1, P2, P18 and A4 to A6 never change the approval. The header
+prints the same list.
 On the practice target, rehearse them once with these answers:
 
 | Question | Type |
@@ -654,7 +659,15 @@ Stop and send nothing more if one of these happens:
   approval back to pending), then `./bin/sippycup scope compile work/acme`.
   Do not delete or edit the
   ledger (the next command refuses, because the run directories still show
-  the calls), and do not copy the engagement directory to send from the copy.
+  the calls), and do not copy the engagement directory to send from the copy:
+  when a directory beside this one counts calls under the same approval
+  reference, `ready` is `NO-GO`, `rehearse` is `Ready: no` and every command
+  that places a call refuses (`call limit: this call is refused in ...
+  Nothing was sent.`). The text names the one directory to go on in (the one
+  with the earlier first call; its count adds the other's calls); the other
+  needs a new written approval from the owner. Security checks that place no
+  call are not counted by the call limit and still run within their own
+  request ceiling.
 - A refusal that says a profile or manifest was edited, is stale, or was not
   recorded by `scope compile`. Put the change in `work/acme/scope.yaml` and
   run `./bin/sippycup scope compile work/acme` again; never edit a compiled
@@ -721,9 +734,13 @@ A sending command (`call`, `matrix run`, `checks run`, `campaign run`,
 `preflight`, `media send`) refuses to start while another sender of this
 checkout is active: two runs against one target spoil each other's verdicts.
 It names the other run and sends nothing. Wait for it, or end it with
-`./bin/sippycup stop`. To run beside it on purpose, set
-`SIPPYCUP_ALLOW_OVERLAP=<the name it printed>`; both are then reported as
-"another run was active; this verdict is unreliable".
+`./bin/sippycup stop`. That is the way on. `SIPPYCUP_ALLOW_OVERLAP=<the name
+it printed>` exists only for running two senders at once on purpose: both
+verdicts are then reported as "another run was active; this verdict is
+unreliable", and two calls at once can be more than the owner's
+`concurrent_calls` allows, which the owner report raises as the integrity
+exception `concurrent-calls-exceeded`. Do not use it on an engagement unless
+the owner agreed to it.
 
 ## Troubleshooting
 

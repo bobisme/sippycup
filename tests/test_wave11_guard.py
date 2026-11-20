@@ -461,9 +461,16 @@ class ReferenceTests(unittest.TestCase):
         self.assertTrue(found.elsewhere_blocks)
         self.assertIn("Same approval reference TICKET-1 in another directory: work/eng counts 24 call(s)",
                       found.line())
-        self.assertIn("NOT in the count above", found.line())
-        # The other way round too, once the copy has placed a call.
-        self.reserve("TICKET-1", 1, directory=day_two)
+        # Wave 12: the text names the one directory to go on in (tests/test_wave12_last.py).
+        self.assertIn("Go on in work/eng (the directory that holds its calls)", found.line())
+        self.assertIn("work/eng-day2 sends nothing more under TICKET-1", found.line())
+        # The other way round too, once the copy holds a call (wave 12: a
+        # reservation there is refused now, so the entry is written by hand).
+        with self.assertRaises(call_ledger.CeilingRefused):
+            self.reserve("TICKET-1", 1, directory=day_two)
+        (day_two / call_ledger.LEDGER_FILE).write_text(json.dumps({
+            "v": call_ledger.VERSION, "event": "reserve", "id": "by-hand", "approval": "TICKET-1", "calls": 1,
+            "ceiling": 40, "at": "2026-11-20T00:00:00Z"}) + "\n")
         self.assertEqual([(item.directory, item.used) for item in
                           call_ledger.same_approval_elsewhere(self.engagement, "TICKET-1")],
                          [("work/eng-day2", 1)])
@@ -561,7 +568,8 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(copy.status, ready.GO)
         self.assertIn("work/eng counts 27 call(s)", "\n".join(copy.lines))
         switched = self.ready_check(self.engagement, "LOCAL-PRACTICE-ONLY-2", 10)
-        self.assertEqual(switched.status, ready.GO)
+        # Wave 12, finding 5: a WARN until the new reference has a call of its own.
+        self.assertEqual(switched.status, ready.WARN)
         self.assertIn("27 call(s) were placed here under reference LOCAL-PRACTICE-ONLY", "\n".join(switched.lines))
 
     def test_readys_fix_for_an_untrusted_ledger_does_not_offer_a_new_id_as_a_way_round(self):

@@ -446,8 +446,11 @@ def gate(
     if not errors and valid_until:
         end = now + timedelta(seconds=planned_seconds)
         if end >= datetime.fromisoformat(valid_until):
+            from .profile import window_too_short_step
+
             errors.append(
-                f"authorization expires before the call's latest possible end ({planned_seconds}s from now)"
+                f"authorization expires before the call's latest possible end ({planned_seconds}s from now); "
+                + window_too_short_step(profile_path, "shorten the call with --duration")
             )
     return errors
 
@@ -523,8 +526,14 @@ def ledger_blocking_in(directory: Path, approval: str, ceiling: int, calls: int,
     except call_ledger.LedgerError as error:
         return [str(error)]
     limit = call_ledger.effective_ceiling(found, ceiling)
-    if found.used + calls > limit:
-        return [call_ledger.refusal_text(directory, approval, limit, found.used, calls, command)]
+    # The same rule the reservation applies (wave 12, finding 1): an owner's
+    # approval counted in a sibling directory too.
+    rule = call_ledger.elsewhere_rule(directory, approval, found.used)
+    if rule is not None and rule.blocks:
+        return [rule.refusal(command)]
+    beside = rule.extra if rule is not None else 0
+    if found.used + beside + calls > limit:
+        return [call_ledger.refusal_text(directory, approval, limit, found.used, calls, command, elsewhere=beside)]
     return []
 
 
@@ -3022,6 +3031,17 @@ def render_human(value: dict[str, Any]) -> str:
                 )
             )
         )
+        if (dtmf.get("sentSource") == "capture" and dtmf.get("verified") is True
+                and not dtmf.get("echoed") and value.get("verdict") == "pass"):
+            # Rehearsal 4, papercut 9: the verdict judges what was sent. A
+            # pass with no digit returned is said, not left to be read off
+            # the empty quotes. Whether this destination should echo digits
+            # is not in the profile, so this is a warning, not a verdict.
+            lines.append(
+                "  WARN:         no DTMF digit came back from the far end. This PASS says only that the "
+                "requested digits were sent. If this destination echoes digits (the practice dtmf destination "
+                "does), the call ended before it could: repeat it without --duration or with a longer one."
+            )
     for warning in value.get("warnings") or []:
         lines.append(f"WARNING: {warning}: SDES-SRTP keys were sent in SDP over cleartext signaling.")
     scope_record = value.get("mediaScope")
@@ -3044,6 +3064,10 @@ def render_human(value: dict[str, Any]) -> str:
     if guard_line and (value.get("verdict") == "media-outside-scope"
                        or (value.get("mediaGuard") or {}).get("active") is True):
         lines.append(f"  Media guard:  {guard_line.removeprefix('The media guard ')}")
+    elif guard_line is None and (value.get("mediaGuard") or {}).get("active") is True:
+        # Rehearsal 4, finding 3: a call that the guard watched and dropped
+        # nothing from says so. No address is in this line.
+        lines.append("  Media guard:  active (nothing was dropped)")
     recording = value.get("recording")
     if recording and recording.get("present") and recording.get("readable"):
         silent = recording.get("silent")

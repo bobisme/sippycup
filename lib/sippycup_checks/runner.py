@@ -182,7 +182,10 @@ def build_plan(
         calls_line = calls_status(profile_path, document).line(invites, "checks run")
     valid_until = (rehearsal.facts.get("authorization") or {}).get("valid_until") if rehearsal.facts else None
     if not blocking and valid_until and now + timedelta(seconds=seconds) >= datetime.fromisoformat(valid_until):
-        blocking.append(f"authorization expires before the run's latest possible end ({int(seconds)}s from now)")
+        from sippycup_workbench.profile import window_too_short_step
+
+        blocking.append(f"authorization expires before the run's latest possible end ({int(seconds)}s from now); "
+                        + window_too_short_step(profile_path))
     target = document.get("target") if isinstance(document.get("target"), dict) else {}
     return {
         "apiVersion": PLAN_VERSION,

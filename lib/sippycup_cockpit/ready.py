@@ -243,20 +243,44 @@ def check_calls(model: dict[str, Any], profile_path: Path, document: dict[str, A
                      f"run directories show) record its id with {LAUNCHER} scope answer {eng} "
                      f"authorization.approval_id, then run {LAUNCHER} scope compile {eng}")
     if status.left == 0:
-        return Check("calls", title, NOGO, ["none left: every command that places a call will refuse",
+        return Check("calls", title, NOGO, ["none left: every command that places a call will refuse (security checks that "
+                                            "place no call can still run, within their own request ceiling)",
                                             status.line(notes=False), *notes],
                      f"only the owner can approve more calls: record the new number with {LAUNCHER} scope answer "
                      f"{eng} limits.calls, record the approval again with {LAUNCHER} scope answer {eng} 2, "
                      f"then run {LAUNCHER} scope compile {eng}")
     if status.elsewhere_blocks:
-        where = ", ".join(item.directory for item in status.elsewhere[:3])
+        # Wave 12, findings 1 and 4: the same rule, in the same words, that
+        # rehearse and every command that reserves a call apply. The text
+        # names one directory to go on in, identically from every side.
+        rule = status.rule
+        if rule is not None and rule.keeper:
+            fix = (f"go on in {rule.keeper} ({LAUNCHER} ready {rule.keeper}); use {eng} again only under a new "
+                   f"written approval from the owner, recorded with {LAUNCHER} scope answer {eng} "
+                   f"authorization.approval_id and {LAUNCHER} scope compile {eng}")
+        else:
+            where = ", ".join(item.directory for item in status.elsewhere[:3])
+            fix = (f"restore the call ledger in {where} from your backup; or use {eng} only under a new written "
+                   f"approval from the owner, recorded with {LAUNCHER} scope answer {eng} "
+                   f"authorization.approval_id and {LAUNCHER} scope compile {eng}")
         return Check("calls", title, NOGO,
                      [status.line(notes=False), *notes,
-                      "the count above starts again in this directory, so the owner's limit could be passed "
-                      "without any refusal"],
-                     f"go on in {where} (its ledger holds the count: {LAUNCHER} ready {status.elsewhere[0].directory}); "
-                     f"use {eng} only under a new written approval from the owner, recorded with {LAUNCHER} scope "
-                     f"answer {eng} authorization.approval_id and {LAUNCHER} scope compile {eng}")
+                      "every command that places a call from this directory will refuse; nothing is sent"],
+                     fix)
+    if status.rule is not None:
+        # This directory is where the count goes on; it adds the others' calls.
+        return Check("calls", title, WARN, [status.line(notes=False), *notes])
+    if not status.used and any(item.used or item.error for item in status.other_references):
+        # Wave 12, finding 5: a reference with no call of its own yet, in a
+        # directory that holds calls under another reference, is a new
+        # allowance only when the owner gave a new written approval. The rule
+        # is unchanged (each reference keeps its own count); the row is a WARN
+        # until the first call is counted under the reference in force.
+        return Check("calls", title, WARN,
+                     [status.line(notes=False), *notes,
+                      f"no call is counted under {status.approval_id} yet: go on only if it is a new written "
+                      "approval from the owner, not a corrected or retyped reference (this warning ends with the "
+                      "first call counted under it)"])
     return Check("calls", title, GO, [status.line(notes=False), *notes])
 
 

@@ -449,7 +449,7 @@ def render_markdown(model: dict[str, Any], report_sha256: str) -> str:
                 md(_source_cells(s)[1]),
                 md(_source_cells(s)[2]),
                 md(_source_cells(s)[3]),
-                md(", ".join(s["networks"] + s["mediaNetworks"])),
+                md(", ".join(dict.fromkeys(s["networks"] + s["mediaNetworks"]))),  # once each (papercut 14)
                 md(", ".join(str(p) for p in s["ports"])),
                 md(", ".join(s["transports"])),
                 md(", ".join(s["serverNames"])),
@@ -1015,7 +1015,7 @@ def render_html(model: dict[str, Any], report_sha256: str) -> str:
             (
                 [
                     _c(s["ref"]), h(_KIND_WORDS.get(s["kind"], s["kind"])), h(_source_cells(s)[0]), h(s["approvedBy"]), h(_source_cells(s)[1]),
-                    h(_source_cells(s)[2]), h(_source_cells(s)[3]), h(", ".join(s["networks"] + s["mediaNetworks"])),
+                    h(_source_cells(s)[2]), h(_source_cells(s)[3]), h(", ".join(dict.fromkeys(s["networks"] + s["mediaNetworks"]))),
                     h(", ".join(str(p) for p in s["ports"])), h(", ".join(s["transports"])), h(", ".join(s["serverNames"])),
                 ]
                 for s in auth["sources"]

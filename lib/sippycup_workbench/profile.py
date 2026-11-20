@@ -427,6 +427,54 @@ def approved_media(document: dict[str, Any], errors: list[str]) -> dict[str, Any
 PENDING_ERROR = "authorization is pending, not approved"
 
 
+def _engagement_beside(profile_path: str | Path | None) -> str | None:
+    """The engagement directory as the operator types it, when a scope file lies beside the profile."""
+    if profile_path is None:
+        return None
+    directory = Path(profile_path).parent
+    try:
+        scope_file = directory / "scope.yaml"
+        if scope_file.is_symlink() or not scope_file.is_file():
+            return None
+    except OSError:
+        return None
+    from sippycup.call_ledger import operator_path
+
+    return operator_path(directory)
+
+
+def with_real_commands(errors: list[str], profile_path: str | Path | None) -> list[str]:
+    """Print the launcher and the directory where a refusal has the ``DIR`` placeholder
+    (rehearsal 4, finding 6): ``scope answer DIR 2`` becomes
+    ``./bin/sippycup scope answer work/NAME 2`` when a scope file lies beside
+    the profile. Text only; an error stays an error.
+    """
+    engagement = _engagement_beside(profile_path)
+    if engagement is None:
+        return errors
+    filled = []
+    for item in errors:
+        if "(scope answer DIR " in item:
+            item = item.replace("(scope answer DIR ", f"(./bin/sippycup scope answer {engagement} ")
+            if item.endswith("and run scope compile"):
+                item = item[: -len("run scope compile")] + f"run ./bin/sippycup scope compile {engagement}"
+        filled.append(item)
+    return filled
+
+
+def window_too_short_step(profile_path: str | Path | None, shorten: str | None = None) -> str:
+    """What to do when the approval window ends before a run could (rehearsal 4, finding 6)."""
+    engagement = _engagement_beside(profile_path)
+    record = (
+        f"record it with ./bin/sippycup scope answer {engagement} authorization.window (it asks for the "
+        f"approval again), and run ./bin/sippycup scope compile {engagement}"
+        if engagement is not None
+        else "record it and the approval in scope.yaml, and run scope compile"
+    )
+    first = f"{shorten}, or " if shorten else ""
+    return f"nothing was sent; {first}ask the owner for a longer written window, {record}"
+
+
 def with_next_command(errors: list[str], profile_path: str | Path | None) -> list[str]:
     """Give the pending refusal of a compiled profile its next command (rehearsal 3, finding 14).
 
@@ -437,6 +485,7 @@ def with_next_command(errors: list[str], profile_path: str | Path | None) -> lis
     A profile with no scope file beside it is left as it is. Reads one local
     file; changes no decision: the error stays an error.
     """
+    errors = with_real_commands(errors, profile_path)
     if profile_path is None or PENDING_ERROR not in errors:
         return errors
     directory = Path(profile_path).parent
@@ -636,7 +685,7 @@ def rehearse(
         calls = limits.get("max_calls")
         concurrency = limits.get("max_concurrency")
         warnings.append(
-            f"limits allow up to {calls} call(s) at concurrency {concurrency}, not one; "
+            f"limits allow up to {calls} call(s) in all, {concurrency} at a time, not a single call; "
             "this is expected for a call matrix or a campaign (they stay within these limits "
             "and the approval window); `call` still places one call and `rehearse` sends nothing"
         )

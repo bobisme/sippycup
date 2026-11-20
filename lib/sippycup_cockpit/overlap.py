@@ -266,8 +266,12 @@ def refusal(others: list[stop.Target], command: str) -> str:
         *([f"A launcher-PID entry is a command that claimed its start and whose container is not listed yet: "
            f"{stop.LAUNCHER} stop --dry-run shows it once it runs."]
           if any(item.kind == "launcher" for item in others) else []),
-        f"To run beside it on purpose, set {ALLOW_ENV}={','.join(item.name for item in others)}; "
-        f"both runs' results then say \"{UNRELIABLE}\".",
+        # Rehearsal 4, finding 2: the override is not a routine way on.
+        f"Only for running two senders at once on purpose (not a way past this refusal): "
+        f"{ALLOW_ENV}={','.join(item.name for item in others)}. With it both runs' verdicts are unreliable "
+        f"(their results say \"{UNRELIABLE}\"), and it can put more calls on the target at once than the "
+        "owner's concurrent_calls allows; the owner report then raises concurrent-calls-exceeded as an "
+        "integrity exception.",
     ]
     return "\n".join(lines)
 
@@ -331,7 +335,9 @@ def _decide(args: argparse.Namespace, host: stop.Host, environ: dict[str, str], 
         print(f"claim {write_claim(directory, host.proc, args.claim_pid, args.command)}")
     if record is not None:
         print(f"{args.command}: running beside {', '.join(item.name for item in others)} ({ALLOW_ENV}); "
-              f"{UNRELIABLE}.", file=sys.stderr)
+              f"{UNRELIABLE}. Two senders at once can put more calls on the target than the owner's "
+              "concurrent_calls allows; the owner report then raises concurrent-calls-exceeded as an "
+              "integrity exception.", file=sys.stderr)
         print(json.dumps(record, sort_keys=True, separators=(",", ":")))
     return 0
 

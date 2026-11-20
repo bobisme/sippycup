@@ -246,8 +246,19 @@ engagement directory that holds the profile or manifest:
   approval with a new approval id. Calls stay counted under the reference
   they were placed under: `rehearse`, `ready`, dry runs and plans name every
   other reference this directory holds calls under, and every sibling
-  directory whose ledger counts calls under the same reference (`ready` is
-  `NO-GO` for that, except for the practice benches' own references).
+  directory whose ledger counts calls under the same reference. For an
+  owner's reference (not the practice benches' own references, which every
+  bench directory shares) that is one rule everywhere (wave 12): the
+  directory whose ledger has the earlier first call under the reference (the
+  first by name when the times are equal) is where the work goes on, and its
+  count adds the calls of the other directories that its own ledger does not
+  hold; in every other directory `ready` is `NO-GO`, `rehearse` is
+  `Ready: no`, and `call`, `matrix run`, `campaign plan`, `campaign run` and
+  a `checks run` that places a call refuse before anything is sent, all with
+  the same sentences, which name that one directory from every side. A
+  sibling ledger that names the reference and cannot be read stops every
+  directory beside it. The owner report names the other directory's count as
+  a limitation. Only directories under the same parent are seen.
   The message says what happens otherwise: an empty, shortened or new ledger
   is refused the same way. Runs placed with `--run-root` outside those four
   directories are not read: the ledger counted them when they were placed,
